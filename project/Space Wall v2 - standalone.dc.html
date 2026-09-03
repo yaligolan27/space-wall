@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="ext-resource-dependency" content="https://unpkg.com/three@0.160.0/build/three.module.js" data-resource-id="threeModule" />
+<meta name="ext-resource-dependency" content="https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg" data-resource-id="earthMap" />
+<meta name="ext-resource-dependency" content="https://unpkg.com/three-globe/example/img/earth-night.jpg" data-resource-id="earthNight" />
+<meta name="ext-resource-dependency" content="https://unpkg.com/three-globe/example/img/earth-topology.png" data-resource-id="earthBump" />
+<meta name="ext-resource-dependency" content="https://unpkg.com/three-globe/example/img/earth-water.png" data-resource-id="earthWater" />
+<meta name="ext-resource-dependency" content="https://images.unsplash.com/photo-1541185933-ef5d8ed016c2?w=900&amp;q=80" data-resource-id="weeklyImg1" />
+<meta name="ext-resource-dependency" content="https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=900&amp;q=80" data-resource-id="weeklyImg2" />
+<meta name="ext-resource-dependency" content="https://api.qrserver.com/v1/create-qr-code/?size=112x112&amp;margin=0&amp;color=dfe7f5&amp;bgcolor=0b1430&amp;data=https://spacenews.com/spacex-space-safety" data-resource-id="qr1" />
+<meta name="ext-resource-dependency" content="https://api.qrserver.com/v1/create-qr-code/?size=112x112&amp;margin=0&amp;color=dfe7f5&amp;bgcolor=0b1430&amp;data=https://payloadspace.com/leolabs-scout-s" data-resource-id="qr2" />
+<script src="./support.js"></script>
+<template id="__bundler_thumbnail" data-bg-color="#060b18">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <defs><radialGradient id="g" cx="38%" cy="34%" r="70%"><stop offset="0" stop-color="#3a6fb0"/><stop offset=".55" stop-color="#132a5e"/><stop offset="1" stop-color="#081027"/></radialGradient></defs>
+    <circle cx="600" cy="400" r="190" fill="url(#g)"/>
+    <ellipse cx="600" cy="380" rx="266" ry="72" fill="none" stroke="#9cc4e4" stroke-width="4" transform="rotate(-30 600 380)"/>
+    <ellipse cx="600" cy="380" rx="266" ry="72" fill="none" stroke="#9cc4e4" stroke-width="4" transform="rotate(30 600 380)"/>
+    <polygon points="600,170 547,470 600,600" fill="#1c2260"/>
+    <polygon points="600,170 653,470 600,600" fill="#9cc4e4"/>
+    <polygon points="547,470 440,590 600,600" fill="#9cc4e4"/>
+    <polygon points="653,470 760,590 600,600" fill="#1c2260"/>
+  </svg>
+</template>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="emblem-3d-standalone.js"></script>
+<script src="./image-slot.js"></script>
+<style>
+html,body{margin:0;padding:0;background:#060b18;overflow:hidden}
+a{color:#9cc4e4;text-decoration:none}a:hover{color:#dfe7f5}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes breathe{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes twinkle{0%,100%{opacity:.25}50%{opacity:.7}}
+@keyframes scrollY{to{transform:translateY(-50%)}}
+@keyframes scrollX{from{transform:translateX(50%)}to{transform:translateX(0)}}
+@keyframes floatY{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-8px) scale(1.025)}}
+@keyframes glow{0%,100%{filter:drop-shadow(0 26px 30px rgba(0,0,0,.6)) drop-shadow(0 0 18px rgba(156,196,228,.25))}50%{filter:drop-shadow(0 30px 34px rgba(0,0,0,.6)) drop-shadow(0 0 34px rgba(156,196,228,.55))}}
+</style>
+</helmet>
+<div style="width:100vw;height:100vh;background:#060b18;display:flex;align-items:center;justify-content:center;overflow:hidden;font-family:Heebo,system-ui,sans-serif;color:#dfe7f5">
+<div dir="rtl" data-screen-label="Space Wall v2" style="width:1920px;height:1080px;flex:none;position:relative;overflow:hidden;background:radial-gradient(ellipse 1200px 800px at 50% 48%, #0d1a3a 0%, #081027 45%, #060b18 100%);transform:scale({{ scale }});transform-origin:center center;display:grid;grid-template-rows:84px 1fr 52px 92px">
+  {{ stars }}
+  <header style="display:flex;align-items:center;justify-content:space-between;padding:0 40px;border-bottom:1px solid rgba(143,189,230,.14);position:relative;z-index:2">
+    <div style="display:flex;flex-direction:column;gap:2px">
+      <div style="font-size:26px;font-weight:700;letter-spacing:-0.01em">צג חלל · מנהלת החלל</div>
+      <div style="font-size:15px;color:#8ea0c2;font-weight:300">חדשות גלויות (OSINT) · חלל ביטחוני וגאופוליטיקה · נוצר אוטומטית</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:36px;font-family:'IBM Plex Mono',monospace">
+      <div style="display:flex;align-items:center;gap:10px;font-size:15px;color:#8ea0c2">{{ liveDot }}<span>עודכן {{ updatedAgo }}</span></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px"><span style="font-size:30px;font-weight:500;letter-spacing:.02em">{{ clockIL }}</span><span style="font-size:13px;color:#8ea0c2;letter-spacing:.08em">ישראל · {{ dateHe }}</span></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px"><span style="font-size:30px;font-weight:300;letter-spacing:.02em;color:#9cc4e4">{{ clockUTC }}</span><span style="font-size:13px;color:#8ea0c2;letter-spacing:.08em">UTC</span></div>
+    </div>
+  </header>
+
+  <main style="display:grid;grid-template-columns:480px 1fr 480px;gap:32px;padding:22px 40px 16px;min-height:0;position:relative;z-index:2">
+
+    <section style="display:flex;flex-direction:column;gap:14px;min-height:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(143,189,230,.18)">
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:8px;height:8px;border-radius:50%;background:#e9b872;box-shadow:0 0 12px #e9b872"></span><span style="font-size:18px;font-weight:700;letter-spacing:.04em">24 שעות אחרונות</span></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8ea0c2">{{ pushCount }} כותרות · לופ</span>
+      </div>
+      {{ pushLoop }}
+      <sc-if value="{{ showDirectorate }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column;gap:10px;padding:16px 18px;border-radius:14px;background:linear-gradient(180deg,rgba(156,196,228,.12),rgba(156,196,228,.04));border:1px solid rgba(156,196,228,.22)">
+        <div style="font-size:16px;font-weight:700;letter-spacing:.03em">במנהלת השבוע</div>
+        <sc-for list="{{ directorate }}" as="d" hint-placeholder-count="4">
+          <div style="display:flex;gap:12px;align-items:baseline;font-size:15px;line-height:1.3"><span style="font-family:'IBM Plex Mono',monospace;color:#9cc4e4;flex:none;font-size:13px;min-width:54px">{{ d.date }}</span><span>{{ d.name }}</span></div>
+        </sc-for>
+      </div>
+      </sc-if>
+    </section>
+
+    <section style="display:flex;flex-direction:column;min-height:0;position:relative">
+      <div style="flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0">
+        {{ emblem }}
+        <div style="position:absolute;top:0;right:0;display:flex;flex-direction:column;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8ea0c2;letter-spacing:.06em">
+          <span>ORBITAL PICTURE · LEO / GEO</span>
+          <span style="color:#5f7399">54,120 עצמים &gt;10 ס״מ במעקב</span>
+        </div>
+        <div style="position:absolute;bottom:10px;left:0;display:flex;flex-direction:column;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8ea0c2;letter-spacing:.06em;text-align:left" dir="ltr">
+          <span>Kp 3 · QUIET</span>
+          <span style="color:#5f7399">SPACE WEATHER · NOAA SWPC</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding-top:16px;border-top:1px solid rgba(143,189,230,.18)">
+        <sc-for list="{{ numbers }}" as="n" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;gap:4px;padding:12px 16px;border-radius:12px;background:rgba(143,189,230,.05);border:1px solid rgba(143,189,230,.12)">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:32px;font-weight:500;color:#dfe7f5;line-height:1">{{ n.value }}</span>
+            <span style="font-size:14px;color:#8ea0c2;line-height:1.3">{{ n.label }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:14px;min-height:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid rgba(143,189,230,.18)">
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:8px;height:8px;border-radius:50%;background:#9cc4e4;box-shadow:0 0 12px #9cc4e4"></span><span style="font-size:18px;font-weight:700;letter-spacing:.04em">השבוע בחלל</span></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8ea0c2">{{ weekRange }}</span>
+      </div>
+      <sc-for list="{{ weekly }}" as="w" hint-placeholder-count="2">
+        <article style="display:flex;flex-direction:column;flex:1;min-height:0;border-radius:14px;overflow:hidden;background:rgba(143,189,230,.05);border:1px solid rgba(143,189,230,.12)">
+          <div style="flex:1;min-height:110px;position:relative"><image-slot id="{{ w.slotId }}" shape="rect" src="{{ w.image }}" credit="{{ w.credit }}" credit-href="{{ w.creditHref }}" placeholder="{{ w.imageNote }}"></image-slot><div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(8,16,39,0) 60%,rgba(8,16,39,.55) 100%);pointer-events:none"></div><a href="{{ w.creditHref }}" dir="ltr" style="position:absolute;right:10px;bottom:6px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:rgba(223,231,245,.75);background:rgba(4,8,20,.55);padding:2px 6px;border-radius:4px">{{ w.credit }}</a></div>
+          <div style="display:flex;flex-direction:column;gap:7px;padding:14px 18px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:13px;font-family:'IBM Plex Mono',monospace;color:#8ea0c2">
+              <div style="display:flex;align-items:center;gap:8px"><span style="padding:3px 9px;border-radius:999px;font-family:Heebo,sans-serif;font-weight:500;color:{{ w.tagColor }};border:1px solid {{ w.tagColor }}">{{ w.tag }}</span><span>{{ w.source }}</span></div>
+              <sc-if value="{{ w.qr }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:#5f7399;font-family:Heebo,sans-serif">לכתבה המלאה</span>{{ w.qrImg }}</div></sc-if>
+            </div>
+            <h3 style="margin:0;font-size:23px;font-weight:700;line-height:1.25;text-wrap:pretty">{{ w.title }}</h3>
+            <div dir="ltr" style="text-align:left;font-size:14px;color:#8ea0c2;font-weight:300">{{ w.titleEn }}</div>
+            <div style="display:flex;gap:10px;font-size:15px;line-height:1.35;color:#b9c7e0;padding-top:7px;border-top:1px dashed rgba(143,189,230,.18)"><span style="flex:none;color:#9cc4e4;font-weight:500">למה חשוב למנהלת</span><span style="font-weight:300">{{ w.why }}</span></div>
+          </div>
+        </article>
+      </sc-for>
+    </section>
+  </main>
+
+  <div style="display:flex;align-items:center;gap:0;border-top:1px solid rgba(143,189,230,.14);position:relative;z-index:2;min-width:0">
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:0 40px;height:100%;background:rgba(4,8,20,.7);border-left:1px solid rgba(143,189,230,.14);font-size:15px;font-weight:700;letter-spacing:.04em"><span style="width:7px;height:7px;border-radius:50%;background:#9cc4e4"></span>אירועים קרובים</div>
+    {{ eventsLoop }}
+  </div>
+
+  <footer style="display:grid;grid-template-columns:150px repeat(4,1fr);align-items:center;gap:22px;padding:0 40px;border-top:1px solid rgba(143,189,230,.14);background:rgba(4,8,20,.6);position:relative;z-index:2">
+    <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:16px;font-weight:700;letter-spacing:.04em">שיגורים קרובים</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8ea0c2">NEXT LAUNCHES</span></div>
+    <sc-for list="{{ launches }}" as="l" hint-placeholder-count="4">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 16px;border-radius:10px;background:rgba(143,189,230,.05);border:1px solid rgba(143,189,230,.1)">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:16px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" dir="ltr">{{ l.name }}</span><span style="font-size:13px;color:#8ea0c2">{{ l.site }}</span></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:20px;color:{{ l.color }};letter-spacing:.03em;white-space:nowrap" dir="ltr">{{ l.tminus }}</span>
+      </div>
+    </sc-for>
+  </footer>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showQr&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;תוכן&quot;},&quot;showDirectorate&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;תוכן&quot;},&quot;globeSpeed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:60,&quot;min&quot;:15,&quot;max&quot;:180,&quot;step&quot;:5,&quot;unit&quot;:&quot;s&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;תנועה&quot;},&quot;loopSeconds&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:7,&quot;min&quot;:3,&quot;max&quot;:15,&quot;step&quot;:1,&quot;unit&quot;:&quot;s/כותרת&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;תנועה&quot;}}">
+class Component extends DCLogic {
+  state = { scale: 1, now: Date.now() };
+  componentDidMount() {
+    const base = Date.now();
+    this.launchTargets = [base + 14*3600e3 + 22*60e3, base + 2*86400e3 + 5*3600e3, base + 3*86400e3 + 19*3600e3 + 40*60e3, base + 6*86400e3 + 4*3600e3 + 12*60e3];
+    this.fit = () => this.setState({ scale: Math.min(window.innerWidth / 1920, window.innerHeight / 1080) });
+    this.fit();
+    window.addEventListener('resize', this.fit);
+    this.tick = setInterval(() => this.setState({ now: Date.now() }), 1000);
+    this.stars = this.makeStars();
+  }
+  componentWillUnmount() { clearInterval(this.tick); window.removeEventListener('resize', this.fit); }
+  makeStars() {
+    const s = [];
+    for (let i = 0; i < 90; i++) {
+      const size = i % 7 === 0 ? 2.5 : 1.5;
+      s.push(React.createElement('span', { key: i, style: { position: 'absolute', left: ((i * 137.5) % 100) + '%', top: ((i * 71.3) % 100) + '%', width: size, height: size, borderRadius: '50%', background: '#dfe7f5', opacity: .3, animation: `twinkle ${4 + (i % 5)}s ease-in-out ${(i % 9) * .7}s infinite` } }));
+    }
+    return React.createElement('div', { style: { position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none' } }, s);
+  }
+  fmtT(target) {
+    const d = Math.max(0, target - this.state.now);
+    const days = Math.floor(d / 86400e3), h = Math.floor(d / 3600e3) % 24, m = Math.floor(d / 60e3) % 60, s = Math.floor(d / 1e3) % 60;
+    const p = n => String(n).padStart(2, '0');
+    return `T-${days}d ${p(h)}:${p(m)}:${p(s)}`;
+  }
+  // Living emblem: three.js Earth inside the directorate's rocket + crossing orbit rings
+  emblem() {
+    if (this._emblem && this._emblemSpeed === (this.props.globeSpeed ?? 60)) return this._emblem;
+    const speed = this.props.globeSpeed ?? 60;
+    const h = React.createElement;
+    const NAVY = 'linear-gradient(200deg,#3a4790 0%,#1f2866 45%,#121846 100%)', LIGHT = 'linear-gradient(160deg,#c4dcf0 0%,#9cc4e4 50%,#79a6cf 100%)';
+    const poly = (pts, bg) => h('div', { style: { position: 'absolute', inset: 0, clipPath: `polygon(${pts})`, background: bg } });
+    const rocket = h('div', { style: { position: 'absolute', width: 300, height: 410, left: '50%', top: '50%', marginLeft: -150, marginTop: -212, transform: 'translateZ(60px)', animation: 'floatY 7s ease-in-out infinite, glow 7s ease-in-out infinite' } },
+      poly('48% 0%, 31% 76%, 48% 100%', NAVY),
+      poly('48% 0%, 64.5% 76%, 48% 100%', LIGHT),
+      poly('31% 76%, 0% 98.8%, 48% 100%', 'linear-gradient(200deg,#b3d1ea 0%,#8fb8dc 60%,#6f9cc7 100%)'),
+      poly('64.5% 76%, 100% 98.8%, 48% 100%', 'linear-gradient(160deg,#2b3578 0%,#1a2158 60%,#10153f 100%)'),
+      poly('47.6% 0%, 48.4% 0%, 48.4% 100%, 47.6% 100%', 'rgba(255,255,255,.55)'));
+    const ring = (rot, dur, delay, phases) => h('div', { style: { position: 'absolute', width: 720, height: 720, left: '50%', top: '50%', marginLeft: -360, marginTop: -360, transform: `rotateZ(${rot}deg) rotateX(76deg)`, transformStyle: 'preserve-3d' } },
+      h('div', { style: { position: 'relative', width: '100%', height: '100%', borderRadius: '50%', border: '1.5px solid rgba(190,210,240,.55)', animation: `spin ${dur}s linear ${delay}s infinite`, transformStyle: 'preserve-3d' } },
+        phases.map((p, i) => h('span', { key: i, style: { position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, transform: `rotate(${p}deg) translateY(-360px)` } },
+          h('span', { style: { position: 'absolute', left: -7, top: -7, width: 14, height: 14, borderRadius: '50%', background: i === 0 ? '#dfe7f5' : '#9cc4e4', boxShadow: '0 0 14px #9cc4e4', transform: 'rotateX(-76deg)' } })))));
+    this._emblemSpeed = speed;
+    this._emblem = h('div', { style: { position: 'relative', width: 640, height: 640, display: 'flex', alignItems: 'center', justifyContent: 'center', perspective: 1600, transformStyle: 'preserve-3d' } },
+      h('div', { style: { position: 'absolute', width: 760, height: 760, borderRadius: '50%', background: 'radial-gradient(circle, rgba(156,196,228,.10) 0%, rgba(156,196,228,0) 62%)' } }),
+      h('earth-globe', { speed, style: { width: 400, height: 400, position: 'absolute', left: '50%', top: '50%', marginLeft: -200, marginTop: -200, transform: 'translateZ(0px)' } }),
+      ring(-30, 46, 0, [0, 130, 250]),
+      ring(30, 62, -20, [40, 200]),
+      rocket);
+    return this._emblem;
+  }
+  // v3 emblem: lit from upper-left. 3D scene (halo, earth, rings) is flattened under the rocket + wordmark.
+  emblem2() {
+    const speed = this.props.globeSpeed ?? 60;
+    if (this._emblem2 && this._emblem2Speed === speed) return this._emblem2;
+    const h = React.createElement;
+    const facet = (pts, bg, extra) => h('div', { style: Object.assign({ position: 'absolute', inset: 0, clipPath: `polygon(${pts})`, background: bg }, extra) });
+    const brushed = 'repeating-linear-gradient(100deg, rgba(255,255,255,.05) 0 2px, rgba(0,0,0,0) 2px 5px)';
+    const rocket = h('div', { style: { position: 'absolute', width: 300, height: 410, left: '50%', top: '50%', marginLeft: -150, marginTop: -252, zIndex: 3, animation: 'floatY 7s ease-in-out infinite, glow 7s ease-in-out infinite' } },
+      // contact shadow on the earth
+      h('div', { style: { position: 'absolute', left: '50%', top: '24%', width: 150, height: 300, marginLeft: -60, background: 'radial-gradient(ellipse, rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 70%)', filter: 'blur(14px)', transform: 'rotate(-12deg)' } }),
+      facet('48% 0%, 31% 76%, 48% 100%', 'linear-gradient(115deg,#4a58a8 0%,#2a3480 35%,#1a2160 70%,#141a4c 100%)'),
+      facet('48% 0%, 31% 76%, 48% 100%', brushed),
+      facet('48% 0%, 64.5% 76%, 48% 100%', 'linear-gradient(115deg,#e2eef9 0%,#b8d6ee 30%,#8fbbe0 65%,#6f9fcc 100%)'),
+      facet('48% 0%, 64.5% 76%, 48% 100%', brushed),
+      facet('31% 76%, 0% 98.8%, 48% 100%', 'linear-gradient(140deg,#cfe2f3 0%,#a5c9e6 40%,#7fabd3 100%)'),
+      facet('31% 76%, 0% 98.8%, 48% 100%', brushed),
+      facet('64.5% 76%, 100% 98.8%, 48% 100%', 'linear-gradient(140deg,#2e3a86 0%,#1e2766 45%,#0f143f 100%)'),
+      facet('64.5% 76%, 100% 98.8%, 48% 100%', brushed),
+      // ambient occlusion where fins meet the body
+      facet('31% 76%, 0% 98.8%, 48% 100%', 'linear-gradient(90deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.45) 100%)'),
+      facet('64.5% 76%, 100% 98.8%, 48% 100%', 'linear-gradient(270deg, rgba(0,0,0,0) 40%, rgba(0,0,0,.35) 100%)'),
+      // specular ridge + lit left edge
+      facet('47.4% 0%, 48.6% 0%, 48.5% 100%, 47.5% 100%', 'linear-gradient(180deg, rgba(255,255,255,.95) 0%, rgba(255,255,255,.55) 50%, rgba(255,255,255,.15) 100%)'),
+      facet('48% 0%, 31% 76%, 32.2% 76.5%, 48.5% 1.5%', 'rgba(210,225,250,.7)'));
+    const ring = (rot, dur, delay, phases, dim) => h('div', { style: { position: 'absolute', width: 760, height: 760, left: '50%', top: '50%', marginLeft: -380, marginTop: -420, transform: `rotateZ(${rot}deg) rotateX(76deg)`, transformStyle: 'preserve-3d' } },
+      h('div', { style: { position: 'relative', width: '100%', height: '100%', borderRadius: '50%', animation: `spin ${dur}s linear ${delay}s infinite`, transformStyle: 'preserve-3d', background: `conic-gradient(from ${200 - rot}deg, rgba(235,243,255,${.95 * dim}) 0deg, rgba(150,180,225,${.35 * dim}) 120deg, rgba(120,150,200,${.25 * dim}) 200deg, rgba(200,220,245,${.7 * dim}) 320deg, rgba(235,243,255,${.95 * dim}) 360deg)`, WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 3px))', mask: 'radial-gradient(farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 3px))' } }),
+      h('div', { style: { position: 'absolute', inset: 0, animation: `spin ${dur}s linear ${delay}s infinite`, transformStyle: 'preserve-3d' } },
+        phases.map((p, i) => h('span', { key: i, style: { position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, transform: `rotate(${p}deg) translateY(-380px)`, transformStyle: 'preserve-3d' } },
+          h('span', { style: { position: 'absolute', left: -11, top: -11, width: 22, height: 22, borderRadius: '50%', background: 'radial-gradient(circle at 35% 35%, #ffffff 0%, #cfe3f7 35%, #7fb0e0 100%)', boxShadow: '0 0 18px 4px rgba(156,196,228,.9), 0 0 42px 10px rgba(120,170,230,.45)', transform: 'rotateX(-76deg)' } })))));
+    const wordmark = h('div', { style: { position: 'absolute', left: 0, right: 0, bottom: 4, textAlign: 'center', zIndex: 3, fontSize: 60, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1 } },
+      h('span', { style: { position: 'absolute', left: 0, right: 0, color: '#0d1240', textShadow: '1px 1px 0 #1a2160, 2px 2px 0 #171c58, 3px 3px 0 #141850, 4px 4px 0 #111546, 5px 5px 0 #0e123c, 7px 8px 18px rgba(0,0,0,.7)' } }, 'מנהלת החלל'),
+      h('span', { style: { position: 'relative', background: 'linear-gradient(170deg,#c8dcf3 0%,#8fb8dc 30%,#4a5ea8 62%,#242c74 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', WebkitTextFillColor: 'transparent' } }, 'מנהלת החלל'),
+      h('span', { style: { position: 'absolute', left: 0, right: 0, top: 0, background: 'linear-gradient(180deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 45%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', WebkitTextFillColor: 'transparent' } }, 'מנהלת החלל'));
+    const scene = h('div', { style: { position: 'absolute', inset: 0, perspective: 1600, transformStyle: 'preserve-3d', zIndex: 1 } },
+      // key light bloom (upper-left)
+      h('div', { style: { position: 'absolute', width: 900, height: 900, left: '50%', top: '50%', marginLeft: -600, marginTop: -620, borderRadius: '50%', background: 'radial-gradient(circle, rgba(200,225,255,.16) 0%, rgba(156,196,228,.05) 35%, rgba(156,196,228,0) 62%)' } }),
+      h('earth-globe', { speed, style: { width: 470, height: 470, position: 'absolute', left: '50%', top: '50%', marginLeft: -235, marginTop: -275 } }),
+      ring(-30, 46, 0, [0, 130, 250], 1),
+      ring(30, 62, -20, [40, 200], .8));
+    this._emblem2Speed = speed;
+    this._emblem2 = h('div', { style: { position: 'relative', width: 760, height: 660, marginTop: -10 } }, scene, rocket, wordmark);
+    return this._emblem2;
+  }
+  // emblem4: everything except the wordmark is rendered in real 3D by <space-emblem> (see emblem-3d.js). Globe radius on screen ≈186px; wordmark sits 1.28R below centre like the logo.
+  emblem4() {
+    const speed = this.props.globeSpeed ?? 60;
+    if (this._emblem4 && this._emblem4Speed === speed) return this._emblem4;
+    const h = React.createElement;
+    const GX = 380, GY = 330, S = 620;
+    const word = 'מנהלת החלל';
+    const ws = { position: 'absolute', left: 0, right: 0, textAlign: 'center' };
+    const wordmark = h('div', { style: { position: 'absolute', left: 0, right: 0, top: GY + 238, height: 70, zIndex: 3, fontSize: 60, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1, filter: 'drop-shadow(0 14px 18px rgba(0,0,0,.6))' } },
+      h('span', { style: Object.assign({ color: '#080b2c', textShadow: '1px 1px 0 #151b50, 2px 2px 0 #131848, 3px 3px 0 #10143f, 4px 4px 0 #0d1036, 5px 5px 0 #0a0d2d' }, ws) }, word),
+      h('span', { style: Object.assign({ background: 'linear-gradient(180deg,#6673c0 0%,#2d3884 42%,#161c56 50%,#1d2568 70%,#0d1140 100%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', WebkitTextFillColor: 'transparent' }, ws) }, word),
+      h('span', { style: Object.assign({ background: 'linear-gradient(180deg, rgba(255,255,255,.6) 0%, rgba(255,255,255,.14) 40%, rgba(255,255,255,0) 48%)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent', WebkitTextFillColor: 'transparent' }, ws) }, word));
+    this._emblem4Speed = speed;
+    this._emblem4 = h('div', { style: { position: 'relative', width: 760, height: 660, marginTop: -10 } },
+      h('div', { style: { position: 'absolute', width: 900, height: 900, left: GX - 600, top: GY - 640, borderRadius: '50%', background: 'radial-gradient(circle, rgba(200,225,255,.16) 0%, rgba(156,196,228,.05) 35%, rgba(156,196,228,0) 62%)' } }),
+      h('div', { style: { position: 'absolute', width: 560, height: 560, left: GX - 280, top: GY - 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(156,196,228,.12) 0%, rgba(156,196,228,0) 70%)' } }),
+      h('space-emblem', { speed, style: { width: S, height: S, position: 'absolute', left: GX - S / 2, top: GY - S / 2, zIndex: 2 } }),
+      wordmark);
+    return this._emblem4;
+  }
+  pushLoop(items, C) {
+    const h = React.createElement;
+    if (this._pushLoop) return this._pushLoop;
+    const row = (it, i) => h('div', { key: i, style: { display: 'flex', flexDirection: 'column', gap: 6, padding: '15px 4px', borderBottom: '1px solid rgba(143,189,230,.12)' } },
+      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: '#8ea0c2' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, h('span', { style: { padding: '2px 8px', borderRadius: 999, fontFamily: 'Heebo,sans-serif', fontSize: 12, fontWeight: 500, color: it.tagColor, border: `1px solid ${it.tagColor}` } }, it.tag), h('span', null, it.source)),
+        h('span', null, it.time)),
+      h('div', { style: { fontSize: 20, fontWeight: 500, lineHeight: 1.3, textWrap: 'pretty' } }, it.title),
+      h('div', { dir: 'ltr', style: { textAlign: 'left', fontSize: 13, color: '#8ea0c2', fontWeight: 300 } }, it.titleEn));
+    const dur = items.length * (this.props.loopSeconds ?? 7);
+    this._pushLoop = h('div', { style: { flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', WebkitMaskImage: 'linear-gradient(180deg,transparent 0,#000 7%,#000 90%,transparent 100%)', maskImage: 'linear-gradient(180deg,transparent 0,#000 7%,#000 90%,transparent 100%)' } },
+      h('div', { style: { animation: `scrollY ${dur}s linear infinite` } }, [...items, ...items].map((it, i) => row(it, i))));
+    return this._pushLoop;
+  }
+  eventsLoop(events) {
+    const h = React.createElement;
+    if (this._eventsLoop) return this._eventsLoop;
+    const item = (e, i) => h('div', { key: i, style: { display: 'flex', alignItems: 'baseline', gap: 12, padding: '0 34px', whiteSpace: 'nowrap', fontSize: 16 } },
+      h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", color: '#9cc4e4', fontSize: 14 } }, e.date),
+      h('span', null, e.name),
+      h('span', { style: { color: '#5f7399', fontSize: 13 } }, e.place),
+      h('span', { style: { color: 'rgba(143,189,230,.35)', marginRight: 22 } }, '◆'));
+    this._eventsLoop = h('div', { style: { flex: 1, minWidth: 0, overflow: 'hidden', position: 'relative', height: '100%', display: 'flex', alignItems: 'center' } },
+      h('div', { style: { display: 'flex', width: 'max-content', animation: `scrollX ${events.length * 9}s linear infinite` } }, [...events, ...events].map((e, i) => item(e, i))));
+    return this._eventsLoop;
+  }
+  renderVals() {
+    const now = new Date(this.state.now);
+    const il = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
+    const utc = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+    const dateHe = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long' }).format(now);
+    const C = { def: '#9cc4e4', geo: '#c9b3e6', ssa: '#e9b872', ind: '#8fd3c4', pol: '#b9c7e0', il: '#f0c7a0' };
+    const t = this.launchTargets || [0, 0, 0, 0];
+    const push = [
+      { tag: 'ביטחון', tagColor: C.def, source: 'SpaceNews', time: '03:40', title: 'חיל החלל האמריקאי: לוויין סיני ביצע התקרבות מכוונת לנכס GSSAP במסלול הגיאוסטציונרי', titleEn: 'US Space Force confirms Chinese satellite close approach to GSSAP asset' },
+      { tag: 'גאופוליטיקה', tagColor: C.geo, source: 'Reuters', time: '08:15', title: 'איראן הכריזה על שיגור לוויין ״נאהיד-3״; גורמי מעקב זרים טרם אישרו מסלול', titleEn: 'Iran claims Nahid-3 launch; orbit unconfirmed by trackers' },
+      { tag: 'SSA', tagColor: C.ssa, source: 'LeoLabs', time: '11:02', title: 'שברי לונג מארץ׳ 6C חלפו 380 מטר מלוויין התצפית האירופי Sentinel-2C', titleEn: 'CZ-6C debris passes 380 m from ESA Sentinel-2C' },
+      { tag: 'ישראל', tagColor: C.il, source: 'כלכליסט', time: '12:30', title: 'התעשייה האווירית חשפה פלטפורמת לוויין תצפית זעיר לצי מהיר-פריסה', titleEn: 'IAI unveils micro-satellite bus for rapid-deployment imaging constellation' },
+      { tag: 'מדיניות', tagColor: C.pol, source: 'Breaking Defense', time: '14:05', title: 'הפנטגון פרסם דוקטרינת ״הגנה במסלול״ מעודכנת; לראשונה מוזכר יירוט פעיל', titleEn: 'Pentagon releases updated orbital-defense doctrine, first mention of active intercept' },
+      { tag: 'שיגורים', tagColor: C.ind, source: 'NASASpaceflight', time: '16:48', title: 'סטארשיפ טיסה 14: SpaceX הגישה בקשה לחלון שיגור ב-15.9', titleEn: 'Starship Flight 14: SpaceX files for Sept 15 launch window' },
+      { tag: 'גאופוליטיקה', tagColor: C.geo, source: 'Militarnyi', time: '19:20', title: 'רוסיה שיגרה מטען צבאי לא מוצהר מפלסצק; קטלוגים זרים מזהים לוויין תצפית מכ״ם', titleEn: 'Russia launches undisclosed military payload from Plesetsk; trackers identify SAR bird' }
+    ];
+    const events = [
+      { date: '14.9', name: 'World Space Business Week', place: 'פריז' },
+      { date: '16.9', name: 'ESA Industry Days', place: 'נורדווייק, הולנד' },
+      { date: '5.10', name: 'IAC 2026', place: 'אנטליה, טורקיה' },
+      { date: '27.10', name: 'Silicon Valley Space Week', place: 'מאונטיין ויו' },
+      { date: '28.10', name: 'MilSat Symposium', place: 'קליפורניה' },
+      { date: '17.11', name: 'Space Tech Expo Europe · משלחת ישראלית', place: 'ברמן' },
+      { date: '24.1', name: 'שבוע החלל הישראלי 2027', place: 'ישראל' }
+    ];
+    return {
+      scale: this.state.scale,
+      stars: this.stars || null,
+      emblem: this.emblem4(),
+      pushLoop: this.pushLoop(push, C),
+      pushCount: push.length,
+      eventsLoop: this.eventsLoop(events),
+      liveDot: React.createElement('span', { style: { width: 9, height: 9, borderRadius: '50%', background: '#8fd3c4', boxShadow: '0 0 10px #8fd3c4', animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } }),
+      clockIL: il, clockUTC: utc, dateHe, updatedAgo: 'לפני 4 דק׳',
+      weekRange: '28.8 – 3.9',
+      showQr: this.props.showQr ?? true,
+      showDirectorate: this.props.showDirectorate ?? true,
+      weekly: (w => w.map(x => Object.assign({}, x, (this.props.showQr ?? true) ? { qrImg: React.createElement('img', { src: x.qr, alt: 'QR', style: { width: 56, height: 56, borderRadius: 6, background: '#0b1430', padding: 3, border: '1px solid rgba(223,231,245,.25)' } }) } : { qr: '' })))([
+        { tag: 'ביטחון', tagColor: C.def, source: 'SpaceNews · 25.08', title: 'SpaceX פתחה לכולם מערכת חינמית שמזהירה מהתנגשויות בחלל', titleEn: 'SpaceX opens Starlink-powered collision warning to all operators', why: 'רוב העולם נשען על קטלוג ה-USSF. מודעות מצב עצמאית היא יכולת אסטרטגית בפני עצמה.', imageNote: 'תמונת כתבה — Starlink', slotId: 'weekly-1', image: window.__resources.weeklyImg1, credit: 'Photo by NASA on Unsplash', creditHref: 'https://unsplash.com/@nasa', qr: window.__resources.qr1 },
+        { tag: 'תעשייה', tagColor: C.ind, source: 'Payload · 27.08', title: 'מכ״ם נייד בגודל מכולה הכניס ל-LeoLabs חוזה של 20 מיליון דולר מחיל החלל', titleEn: 'Space Force awards LeoLabs $20.7M for container-sized Scout-S radar', why: 'SSA פריס ומהיר, שעקב אחרי לוויינים סיניים תוך שעות. מודל רלוונטי למערך מעקב לאומי.', imageNote: 'תמונת כתבה — מכ״ם Scout-S', slotId: 'weekly-2', image: window.__resources.weeklyImg2, credit: 'Photo by NASA on Unsplash', creditHref: 'https://unsplash.com/@nasa', qr: window.__resources.qr2 }
+      ]),
+      numbers: [
+        { value: '5', label: 'שיגורים מסלוליים השבוע' },
+        { value: '3', label: 'מטענים צבאיים לא מוצהרים' },
+        { value: '$2.3B', label: 'עסקאות וחוזים' },
+        { value: '2', label: 'התפרקויות במסלול' }
+      ],
+      directorate: [
+        { date: 'היום', name: 'יום הולדת · [שם] · אגף תכנון' },
+        { date: 'ג׳ 15.9', name: 'הרמת כוסית לראש השנה · 12:00 · לובי' },
+        { date: 'ה׳ 17.9', name: 'טקס שחרור · [שם]' },
+        { date: '22.9', name: 'מפגש עם אנשי מפא״ת · אולם א׳' }
+      ],
+      launches: [
+        { name: 'Falcon 9 · Starlink 17-9', site: 'ונדנברג, קליפורניה', tminus: this.fmtT(t[0]), color: '#dfe7f5' },
+        { name: 'Soyuz 2.1b · GLONASS-K', site: 'פלסצק, רוסיה', tminus: this.fmtT(t[1]), color: '#c9b3e6' },
+        { name: 'Long March 7A · undisclosed', site: 'וונצ׳אנג, סין', tminus: this.fmtT(t[2]), color: '#e9b872' },
+        { name: 'Starship Flight 14', site: 'סטארבייס, טקסס', tminus: this.fmtT(t[3]), color: '#9cc4e4' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
