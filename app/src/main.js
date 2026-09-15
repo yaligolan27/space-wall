@@ -8,7 +8,8 @@ const q = new URLSearchParams(location.search);
 const num = (k, d) => { const v = Number(q.get(k)); return Number.isFinite(v) && q.has(k) ? v : d; };
 const bool = (k, d) => q.has(k) ? !/^(0|false|no|off)$/i.test(q.get(k)) : d;
 const cfg = {
-  feed: q.get('feed') || './data/feed.json',
+  feed: q.get('feed') || './api/feed',            // live feed from the backend; falls back to the bundled sample if unavailable
+  key: q.get('key') || '',                        // DISPLAY_KEY, if the backend requires one
   refresh: Math.max(10, num('refresh', 60)),      // seconds between feed polls
   loopSeconds: Math.min(15, Math.max(3, num('loop', 7))), // seconds per headline in the 24h loop
   globeSpeed: Math.min(180, Math.max(15, num('globe', 60))), // seconds per Earth rotation
@@ -234,11 +235,21 @@ function render(feed) {
 
 // ---- feed polling ------------------------------------------------------------------------------
 let lastBody = null;
+async function fetchFeed(url) {
+  const sep = url.includes('?') ? '&' : '?';
+  const res = await fetch(url + sep + 't=' + Date.now() + (cfg.key ? '&key=' + encodeURIComponent(cfg.key) : ''), { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
 async function loadFeed() {
   try {
-    const res = await fetch(cfg.feed + (cfg.feed.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const body = await res.text();
+    let body;
+    try { body = await fetchFeed(cfg.feed); }
+    catch (e) {
+      if (lastBody !== null) throw e;                  // keep the last good feed on transient failures
+      console.warn('live feed unavailable, using bundled sample', e);
+      body = await fetchFeed('./data/feed.json');
+    }
     if (body === lastBody) return;
     const feed = JSON.parse(body);
     lastBody = body;

@@ -1,0 +1,30 @@
+{
+  "name": "space-wall",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Space Wall: lobby display (app/), feed + Telegram API (api/), OSINT agent (agent/)",
+  "scripts": {
+    "agent": "tsx agent/src/index.ts",
+    "agent:osint": "tsx agent/src/index.ts osint",
+    "agent:launches": "tsx agent/src/index.ts launches",
+    "agent:weather": "tsx agent/src/index.ts weather",
+    "agent:numbers": "tsx agent/src/index.ts numbers",
+    "feed:preview": "tsx agent/src/index.ts feed",
+    "typecheck": "tsc --noEmit",
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
+    "@supabase/supabase-js": "^2.116.0",
+    "rss-parser": "^3.13.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@vercel/node": "^4.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.0"
+  },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": "app",
+  "functions": {
+    "api/telegram.ts": { "maxDuration": 60 },
+    "api/feed.ts": { "maxDuration": 15 }
+  },
+  "headers": [
+    { "source": "/api/feed", "headers": [{ "key": "Cache-Control", "value": "s-maxage=60, stale-while-revalidate=300" }] }
+  ]
+}

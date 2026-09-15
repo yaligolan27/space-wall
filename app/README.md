@@ -4,8 +4,8 @@ A 1920×1080 lobby display (one canvas across the 9-screen wall, bezels ignored)
 Implemented from the Claude Design handoff in `../project/Space Wall v2.dc.html` and the transcript in `../chats/chat1.md`.
 
 Static HTML/CSS/JS, no build step, works fully offline: three.js, the QR encoder, the NASA Blue Marble textures and the
-Heebo / IBM Plex Mono fonts are all vendored. Content comes from `data/feed.json`, which the backend (Claude, 24/7) regenerates;
-the page polls it and re-renders when it changes.
+Heebo / IBM Plex Mono fonts are all vendored. Content comes from `/api/feed` (built live from Supabase by `../api/feed.ts`); the page polls it every minute and
+re-renders when it changes. If the API is unreachable on first load it falls back to the bundled sample `data/feed.json`.
 
 ## Run
 
@@ -35,7 +35,8 @@ The 1920×1080 stage scales to fit any window (letterboxed), so a 4K or 5760×32
 
 | Param | Default | Meaning |
 | --- | --- | --- |
-| `feed` | `./data/feed.json` | Feed URL |
+| `feed` | `./api/feed` | Feed URL |
+| `key` | | `DISPLAY_KEY` if the backend requires one |
 | `refresh` | `60` | Seconds between feed polls (min 10) |
 | `loop` | `7` | Seconds per headline in the 24h loop (3–15) |
 | `globe` | `60` | Seconds per Earth rotation (15–180) |

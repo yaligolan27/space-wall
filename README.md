@@ -1,25 +1,61 @@
-# CODING AGENTS: READ THIS FIRST
+# צג חלל · מנהלת החלל — Space Wall
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+Lobby display + fully automatic backend.
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+```
+app/          the 1920×1080 display (static; deployed by Vercel, reads /api/feed)
+api/feed.ts   Vercel function: builds the feed JSON from Supabase (cached 60 s)
+api/telegram.ts  Telegram webhook: free text → Claude → confirm → database
+lib/          shared: db client, feed builder, intake parser, dates
+agent/        cron runner (GitHub Actions): OSINT, launches, space weather, numbers of the week
+supabase/     schema migration (already applied to project rrbivwhratkmzcfxqjih)
+project/, chats/   the original Claude Design handoff bundle
+```
 
-## What you should do — IMPORTANT
+## How it flows
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+1. **GitHub Actions** runs `agent/` hourly (07–23 Israel time) and nightly.
+   RSS from the approved sources (+ optional Claude web search) → dedupe → **Claude Opus 5** classifies, scores relevance,
+   writes the Hebrew headline, the English headline and "למה חשוב למנהלת" (structured output) → `news_items`.
+   Launch Library 2 → `launches` (site names translated once, cached). NOAA SWPC → `settings.space_weather`.
+   Nightly: four grounded "numbers of the week".
+2. **Vercel** serves `app/` and `/api/feed`, which assembles the display JSON from the database:
+   24h loop, two feature cards with QR to the article, numbers, directorate block (life events + birthdays + internal events),
+   events ticker, next launches. The display polls it every minute.
+3. **Telegram bot**: anyone on the allow-list writes "יום הולדת לדנה כהן מאגף תכנון ב-3.10" or "הרמת כוסית ביום ג׳ 12:00 בלובי";
+   Claude turns it into structured actions, the bot shows a summary with ✅/❌, and on confirm writes `people` /
+   `life_events` / `directorate_events` / `industry_events`. Every message is logged in `intake_messages`.
 
-**Read `project/Space Wall v2.dc.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+Failures of any agent run are written to `agent_runs` and pushed to `TELEGRAM_ALERT_CHAT_ID`. The display keeps the last
+good feed and turns the live dot amber when the feed is older than 3 hours.
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+## Setup checklist
 
-## About the design files
+**Secrets** (Vercel → Project → Settings → Environment Variables, and GitHub → Settings → Secrets → Actions):
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+| Name | Where | Value |
+| --- | --- | --- |
+| `SUPABASE_URL` | Vercel + GitHub | `https://rrbivwhratkmzcfxqjih.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Vercel + GitHub | Supabase → Project Settings → API → service_role (secret) |
+| `ANTHROPIC_API_KEY` | Vercel + GitHub | console.anthropic.com |
+| `TELEGRAM_BOT_TOKEN` | Vercel + GitHub | from @BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | Vercel | any random string |
+| `TELEGRAM_ADMIN_IDS` | Vercel | comma-separated chat ids allowed to edit (send `/whoami` to the bot to get yours) |
+| `TELEGRAM_ALERT_CHAT_ID` | GitHub (optional) | chat id that receives failure alerts |
+| `DISPLAY_KEY` | Vercel (optional) | if set, the wall must open `/?key=<DISPLAY_KEY>` |
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+**Telegram webhook** (once, in a browser):
+`https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<your-vercel-domain>/api/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
 
-## Bundle contents
+**First run**: GitHub → Actions → `agent` → Run workflow with tasks `launches weather osint numbers`.
+Until the first run the feed is empty apart from the seeded events; the display then fills within a minute.
 
-- `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `# מסך חדשות חלל בטחוני` project files (HTML prototypes, assets, components)
+**Local**: copy `.env.example` to `.env`, `npm install`, then `npm run agent:launches`, `npm run feed:preview`, or `npx vercel dev`.
+Sources live in the `sources` table (enable/disable, weights); tag colours and feed sizes in `settings.feed`.
+
+## Tuning
+
+- `OSINT_WEB_SEARCH=1` (GitHub repository variable) adds a Claude web-search discovery pass per run, restricted to the source domains. Costs more; off by default.
+- `OSINT_MAX_ITEMS` caps enrichment per run (default 40).
+- `sources.weight` and the prompt in `lib/claude.ts` (`DIRECTORATE_PROFILE`) steer relevance.
+- Anything can be edited by hand in the Supabase table editor; the feed reflects it within a minute.
