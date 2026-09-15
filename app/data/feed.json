@@ -1,0 +1,62 @@
+{
+  "generatedAt": "2026-09-15T06:40:00Z",
+  "weekRange": "8.9 – 15.9",
+  "orbital": { "line1": "ORBITAL PICTURE · LEO / GEO", "line2": "54,120 עצמים >10 ס״מ במעקב" },
+  "spaceWeather": { "line1": "Kp 3 · QUIET", "line2": "SPACE WEATHER · NOAA SWPC" },
+  "push": [
+    { "category": "defense", "source": "SpaceNews", "time": "03:40", "title": "חיל החלל האמריקאי: לוויין סיני ביצע התקרבות מכוונת לנכס GSSAP במסלול הגיאוסטציונרי", "titleEn": "US Space Force confirms Chinese satellite close approach to GSSAP asset", "url": "https://spacenews.com/" },
+    { "category": "geopolitics", "source": "Reuters", "time": "08:15", "title": "איראן הכריזה על שיגור לוויין ״נאהיד-3״; גורמי מעקב זרים טרם אישרו מסלול", "titleEn": "Iran claims Nahid-3 launch; orbit unconfirmed by trackers", "url": "https://www.reuters.com/" },
+    { "category": "ssa", "source": "LeoLabs", "time": "11:02", "title": "שברי לונג מארץ׳ 6C חלפו 380 מטר מלוויין התצפית האירופי Sentinel-2C", "titleEn": "CZ-6C debris passes 380 m from ESA Sentinel-2C", "url": "https://leolabs.space/" },
+    { "category": "israel", "source": "כלכליסט", "time": "12:30", "title": "התעשייה האווירית חשפה פלטפורמת לוויין תצפית זעיר לצי מהיר-פריסה", "titleEn": "IAI unveils micro-satellite bus for rapid-deployment imaging constellation", "url": "https://www.calcalist.co.il/" },
+    { "category": "policy", "source": "Breaking Defense", "time": "14:05", "title": "הפנטגון פרסם דוקטרינת ״הגנה במסלול״ מעודכנת; לראשונה מוזכר יירוט פעיל", "titleEn": "Pentagon releases updated orbital-defense doctrine, first mention of active intercept", "url": "https://breakingdefense.com/" },
+    { "category": "launches", "source": "NASASpaceflight", "time": "16:48", "title": "סטארשיפ טיסה 14: SpaceX הגישה בקשה לחלון שיגור ב-15.9", "titleEn": "Starship Flight 14: SpaceX files for Sept 15 launch window", "url": "https://www.nasaspaceflight.com/" },
+    { "category": "geopolitics", "source": "Militarnyi", "time": "19:20", "title": "רוסיה שיגרה מטען צבאי לא מוצהר מפלסצק; קטלוגים זרים מזהים לוויין תצפית מכ״ם", "titleEn": "Russia launches undisclosed military payload from Plesetsk; trackers identify SAR bird", "url": "https://mil.in.ua/en/" }
+  ],
+  "weekly": [
+    {
+      "category": "defense", "source": "SpaceNews · 25.08",
+      "title": "SpaceX פתחה לכולם מערכת חינמית שמזהירה מהתנגשויות בחלל",
+      "titleEn": "SpaceX opens Starlink-powered collision warning to all operators",
+      "why": "רוב העולם נשען על קטלוג ה-USSF. מודעות מצב עצמאית היא יכולת אסטרטגית בפני עצמה.",
+      "url": "https://spacenews.com/spacex-space-safety",
+      "image": "./data/images/weekly-1.jpg", "imageNote": "תמונת כתבה — Starlink",
+      "credit": "Photo by NASA on Unsplash", "creditHref": "https://unsplash.com/@nasa"
+    },
+    {
+      "category": "industry", "source": "Payload · 27.08",
+      "title": "מכ״ם נייד בגודל מכולה הכניס ל-LeoLabs חוזה של 20 מיליון דולר מחיל החלל",
+      "titleEn": "Space Force awards LeoLabs $20.7M for container-sized Scout-S radar",
+      "why": "SSA פריס ומהיר, שעקב אחרי לוויינים סיניים תוך שעות. מודל רלוונטי למערך מעקב לאומי.",
+      "url": "https://payloadspace.com/leolabs-scout-s",
+      "image": "./data/images/weekly-2.jpg", "imageNote": "תמונת כתבה — מכ״ם Scout-S",
+      "credit": "Photo by NASA on Unsplash", "creditHref": "https://unsplash.com/@nasa"
+    }
+  ],
+  "numbers": [
+    { "value": "5", "label": "שיגורים מסלוליים השבוע" },
+    { "value": "3", "label": "מטענים צבאיים לא מוצהרים" },
+    { "value": "$2.3B", "label": "עסקאות וחוזים" },
+    { "value": "2", "label": "התפרקויות במסלול" }
+  ],
+  "directorate": [
+    { "date": "היום", "name": "יום הולדת · [שם] · אגף תכנון" },
+    { "date": "ג׳ 15.9", "name": "הרמת כוסית לראש השנה · 12:00 · לובי" },
+    { "date": "ה׳ 17.9", "name": "טקס שחרור · [שם]" },
+    { "date": "22.9", "name": "מפגש עם אנשי מפא״ת · אולם א׳" }
+  ],
+  "events": [
+    { "date": "16.9", "name": "ESA Industry Days", "place": "נורדווייק, הולנד" },
+    { "date": "5.10", "name": "IAC 2026", "place": "אנטליה, טורקיה" },
+    { "date": "27.10", "name": "Silicon Valley Space Week", "place": "מאונטיין ויו" },
+    { "date": "28.10", "name": "MilSat Symposium", "place": "קליפורניה" },
+    { "date": "17.11", "name": "Space Tech Expo Europe · משלחת ישראלית", "place": "ברמן" },
+    { "date": "8.12", "name": "Space Resilience Summit", "place": "לונדון" },
+    { "date": "24.1", "name": "שבוע החלל הישראלי 2027", "place": "ישראל" }
+  ],
+  "launches": [
+    { "name": "Falcon 9 · Starlink 17-9", "site": "ונדנברג, קליפורניה", "net": "2026-09-15T21:02:00Z", "actor": "us" },
+    { "name": "Soyuz 2.1b · GLONASS-K", "site": "פלסצק, רוסיה", "net": "2026-09-17T11:40:00Z", "actor": "ru" },
+    { "name": "Long March 7A · undisclosed", "site": "וונצ׳אנג, סין", "net": "2026-09-19T02:20:00Z", "actor": "cn" },
+    { "name": "Starship Flight 14", "site": "סטארבייס, טקסס", "net": "2026-09-21T10:52:00Z", "actor": "other" }
+  ]
+}
