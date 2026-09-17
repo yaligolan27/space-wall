@@ -3,19 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Space Wall: lobby display (app/), feed + Telegram API (api/), OSINT agent (agent/)",
+  "description": "Space Wall: lobby display (app/), feed + Telegram API (api/), local runner on Claude Code (agent/)",
   "scripts": {
+    "runner": "tsx agent/src/runner.ts",
+    "doctor": "tsx agent/src/index.ts doctor",
     "agent": "tsx agent/src/index.ts",
-    "agent:osint": "tsx agent/src/index.ts osint",
-    "agent:launches": "tsx agent/src/index.ts launches",
-    "agent:weather": "tsx agent/src/index.ts weather",
-    "agent:numbers": "tsx agent/src/index.ts numbers",
     "feed:preview": "tsx agent/src/index.ts feed",
     "typecheck": "tsc --noEmit",
-    "dev": "vercel dev"
+    "dev": "vercel dev",
+    "test": "tsx agent/test/bridge.test.mts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.125.0",
     "@supabase/supabase-js": "^2.116.0",
     "rss-parser": "^3.13.0",
     "zod": "^4.6.5"
@@ -26,5 +24,7 @@
     "tsx": "^4.23.13",
     "typescript": "^5.9.0"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

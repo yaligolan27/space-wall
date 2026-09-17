@@ -1,20 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { env } from './env';
-
-let client: Anthropic | null = null;
-export function claude(): Anthropic {
-  if (!client) client = new Anthropic({ apiKey: env('ANTHROPIC_API_KEY') });
-  return client;
-}
-export const MODEL = process.env.CLAUDE_MODEL || 'claude-opus-5';
-
-export type Usage = { input: number; output: number };
-export function addUsage(u: Usage, m: { usage?: { input_tokens?: number; output_tokens?: number } }) {
-  u.input += m.usage?.input_tokens ?? 0;
-  u.output += m.usage?.output_tokens ?? 0;
-}
-
-/** Directorate context shared by every prompt. Keep stable so it caches. */
+/** Shared editorial context for every model task. Kept in one place so all prompts agree. */
 export const DIRECTORATE_PROFILE = `אתה עורך התוכן של "צג חלל", מסך בלובי של מנהלת החלל במשרד הביטחון בישראל.
 הקהל: אנשי המנהלת (מהנדסים, קציני פרויקטים, מנהלים) שעסוקים ואין להם זמן לעקוב אחרי חדשות החלל.
 תחומי העניין, לפי סדר חשיבות:

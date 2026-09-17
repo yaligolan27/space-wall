@@ -1,33 +1,63 @@
-// "Numbers of the week": grounded counts from the DB + Claude picks four headline figures from the week's items.
-import { z } from 'zod';
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+// "Numbers of the week": grounded counts from the database plus Launch Library, handed to
+// Claude Code to pick and phrase four headline figures.
 import { db, must } from '../../lib/db';
-import { claude, MODEL, DIRECTORATE_PROFILE, addUsage } from '../../lib/claude';
+import { DIRECTORATE_PROFILE } from '../../lib/profile';
+import { WeeklyNumbers } from '../../lib/schemas';
 import { isoDateIL } from '../../lib/dates';
-import { withRun, fetchJson } from './run';
+import { runClaudeTask } from './cc';
+import { withRun, fetchJson, type RunCtx } from './run';
 
-const Numbers = z.object({ numbers: z.array(z.object({ value: z.string().describe('מספר קצר, למשל "5", "$2.3B", "380 מ׳"'), label: z.string().describe('עד 5 מילים בעברית') })).length(4) });
+const INSTRUCTIONS = `${DIRECTORATE_PROFILE}
+
+משימה: בחר ארבעה "מספרי השבוע" לצג. ב-task.json יש ספירות מחושבות וכן ידיעות השבוע.
+לכל מספר: value (מספר קצר, למשל "5" או "$2.3B" או "380 מ׳") ו-label (תווית בעברית, עד חמש מילים).
+
+כללים:
+- עובדות בלבד, מתוך הנתונים שב-task.json. אסור להמציא מספר שלא מופיע שם.
+- אם orbital_launches_this_week אינו null, המספר הראשון הוא הוא, עם התווית "שיגורים מסלוליים השבוע".
+- אם אין מספיק נתונים מספריים, השתמש בספירות מתוך items_by_category (למשל "ידיעות ביטחוניות השבוע").
+
+מבנה result.json:
+{"numbers":[{"value":"5","label":"שיגורים מסלוליים השבוע"},{"value":"$2.3B","label":"עסקאות וחוזים"},{"value":"3","label":"מטענים צבאיים לא מוצהרים"},{"value":"2","label":"התפרקויות במסלול"}]}
+
+חובה בדיוק ארבעה פריטים.`;
 
 export async function runNumbers() {
-  return withRun('numbers', async ctx => {
+  return withRun('numbers', async (ctx: RunCtx) => {
     const s = db();
     const weekAgo = new Date(Date.now() - 7 * 86400e3).toISOString();
-    const items = must(await s.from('news_items').select('title_en,summary_he,category,relevance').gte('published_at', weekAgo).neq('priority', 'skip').order('relevance', { ascending: false }).limit(60), 'items') as any[];
-    let launchesCount: number | null = null;
+    const items = must(await s.from('news_items')
+      .select('title_en,summary_he,category,relevance')
+      .eq('status', 'published').neq('priority', 'skip')
+      .gte('published_at', weekAgo)
+      .order('relevance', { ascending: false }).limit(60), 'items') as any[];
+
+    let orbital: number | null = null;
     try {
       const prev = await fetchJson(`https://ll.thespacedevs.com/2.3.0/launches/previous/?limit=40&net__gte=${weekAgo.slice(0, 10)}`);
-      launchesCount = (prev.results || []).filter((l: any) => l.status?.abbrev === 'Success' || l.status?.abbrev === 'Failure' || l.status?.abbrev === 'Partial Failure').length;
+      orbital = (prev.results || []).filter((l: any) => ['Success', 'Failure', 'Partial Failure'].includes(l.status?.abbrev)).length;
     } catch (e) { ctx.log.ll2_error = String(e); }
-    const res = await claude().messages.parse({
-      model: MODEL, max_tokens: 2000,
-      system: `${DIRECTORATE_PROFILE}\n\nבחר ארבעה "מספרי השבוע" לצג: מספר + תווית קצרה. עובדות בלבד, מתוך הנתונים שניתנו. אם ניתן מספר שיגורים מסלוליים מהשבוע, הוא תמיד הראשון ("שיגורים מסלוליים השבוע"). אין להמציא מספרים; אם אין מספיק נתונים לארבעה, השתמש בספירות (למשל מספר ידיעות ביטחוניות השבוע).`,
-      messages: [{ role: 'user', content: `שיגורים מסלוליים בשבוע האחרון (נתון מחושב): ${launchesCount ?? 'לא ידוע'}\nמספר ידיעות השבוע לפי קטגוריה: ${JSON.stringify(items.reduce((m: any, i) => (m[i.category] = (m[i.category] || 0) + 1, m), {}))}\n\nידיעות השבוע:\n${items.map(i => `- [${i.category}] ${i.title_en} — ${i.summary_he}`).join('\n')}` }],
-      output_config: { format: zodOutputFormat(Numbers), effort: 'medium' },
+
+    const byCategory = items.reduce((m: Record<string, number>, i) => (m[i.category] = (m[i.category] || 0) + 1, m), {});
+    const result = await runClaudeTask({
+      name: 'numbers',
+      input: {
+        week_start: weekAgo.slice(0, 10),
+        orbital_launches_this_week: orbital,
+        items_by_category: byCategory,
+        items: items.map(i => ({ category: i.category, title_en: i.title_en, summary_he: i.summary_he })),
+      },
+      instructions: INSTRUCTIONS,
+      schema: WeeklyNumbers,
     });
-    addUsage(ctx.usage, res);
-    const nums = res.parsed_output?.numbers; if (!nums) throw new Error('numbers failed: ' + res.stop_reason);
+
     const week_start = isoDateIL();
-    must(await s.from('weekly_numbers').upsert(nums.map((n, i) => ({ week_start, position: i + 1, value: n.value, label: n.label, run_id: ctx.id })), { onConflict: 'week_start,position' }), 'weekly_numbers');
-    ctx.found = items.length; ctx.published = 4;
+    must(await s.from('weekly_numbers').upsert(
+      result.numbers.map((n, i) => ({ week_start, position: i + 1, value: n.value, label: n.label, run_id: ctx.id })),
+      { onConflict: 'week_start,position' },
+    ), 'weekly_numbers');
+    ctx.found = items.length;
+    ctx.published = 4;
+    return 4;
   });
 }

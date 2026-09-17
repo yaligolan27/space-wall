@@ -1,61 +1,79 @@
 # צג חלל · מנהלת החלל — Space Wall
 
-Lobby display + fully automatic backend.
+A 1920×1080 lobby display of OSINT space news for the directorate, with a fully automatic backend
+that updates it live. **There is no Anthropic API key anywhere in this project**: every model task
+runs through the Claude Code CLI on one always-on machine, on that machine's subscription.
 
 ```
-app/          the 1920×1080 display (static; deployed by Vercel, reads /api/feed)
-api/feed.ts   Vercel function: builds the feed JSON from Supabase (cached 60 s)
-api/telegram.ts  Telegram webhook: free text → Claude → confirm → database
-lib/          shared: db client, feed builder, intake parser, dates
-agent/        cron runner (GitHub Actions): OSINT, launches, space weather, numbers of the week
-supabase/     schema migration (already applied to project rrbivwhratkmzcfxqjih)
-project/, chats/   the original Claude Design handoff bundle
+app/              the display (static; served by Vercel, polls /api/feed every minute)
+api/feed.ts       Vercel function: builds the feed JSON from Supabase (cached 60 s)
+api/telegram.ts   Vercel function: queues Telegram messages, applies confirmed actions — no model
+lib/              shared: db client, feed builder, zod contracts, action applier, dates
+agent/src/        the local runner: collection, enrichment, launches, weather, numbers, intake
+agent/src/cc.ts   the bridge to the Claude Code CLI (task.json in, validated result.json out)
+agent/test/       bridge tests against stub CLI binaries (npm test)
+supabase/         schema migrations (already applied to project rrbivwhratkmzcfxqjih)
+docs/             local-runner.md (setup, autostart, limits) · telegram-setup.md
+project/, chats/  the original Claude Design handoff bundle
 ```
 
 ## How it flows
 
-1. **GitHub Actions** runs `agent/` hourly (07–23 Israel time) and nightly.
-   RSS from the approved sources (+ optional Claude web search) → dedupe → **Claude Opus 5** classifies, scores relevance,
-   writes the Hebrew headline, the English headline and "למה חשוב למנהלת" (structured output) → `news_items`.
-   Launch Library 2 → `launches` (site names translated once, cached). NOAA SWPC → `settings.space_weather`.
-   Nightly: four grounded "numbers of the week".
+1. **The runner** (`npm run runner`, on the always-on machine) schedules itself. Every 10 minutes it
+   pulls the approved RSS sources, dedupes, and stores new items unenriched. Every 10 minutes, *only
+   if something is waiting*, it hands a batch to Claude Code, which classifies each item, scores its
+   relevance and writes the Hebrew headline, the English headline and the "למה חשוב למנהלת" line.
+   The result is validated against a zod schema before it is stored, so a malformed answer is
+   retried rather than displayed. Launches come from Launch Library 2 and space weather from NOAA,
+   both without a model.
 2. **Vercel** serves `app/` and `/api/feed`, which assembles the display JSON from the database:
-   24h loop, two feature cards with QR to the article, numbers, directorate block (life events + birthdays + internal events),
-   events ticker, next launches. The display polls it every minute.
-3. **Telegram bot**: anyone on the allow-list writes "יום הולדת לדנה כהן מאגף תכנון ב-3.10" or "הרמת כוסית ביום ג׳ 12:00 בלובי";
-   Claude turns it into structured actions, the bot shows a summary with ✅/❌, and on confirm writes `people` /
-   `life_events` / `directorate_events` / `industry_events`. Every message is logged in `intake_messages`.
+   the 24-hour loop, two feature cards with a QR to the article, the numbers of the week, the
+   directorate block (life events, birthdays computed from the people table, internal events), the
+   events ticker and the next launches.
+3. **The Telegram bot** takes free Hebrew text from anyone on the allow-list. The webhook only
+   queues it; the runner parses it within a minute and replies with a summary and ✅/❌; on confirm
+   the webhook writes to `people`, `life_events`, `directorate_events` or `industry_events`.
 
-Failures of any agent run are written to `agent_runs` and pushed to `TELEGRAM_ALERT_CHAT_ID`. The display keeps the last
-good feed and turns the live dot amber when the feed is older than 3 hours.
+Every run is recorded in `agent_runs`, every message in `intake_messages`. Failures and usage-limit
+pauses are pushed to `TELEGRAM_ALERT_CHAT_ID`. Send `/status` to the bot for a health summary.
 
-## Setup checklist
+**When the machine is off**, the display keeps serving the last good feed and turns its live dot
+amber once the feed is more than three hours old. Nothing is lost; the queue waits.
 
-**Secrets** (Vercel → Project → Settings → Environment Variables, and GitHub → Settings → Secrets → Actions):
+## Setup
 
-| Name | Where | Value |
-| --- | --- | --- |
-| `SUPABASE_URL` | Vercel + GitHub | `https://rrbivwhratkmzcfxqjih.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Vercel + GitHub | Supabase → Project Settings → API → service_role (secret) |
-| `ANTHROPIC_API_KEY` | Vercel + GitHub | console.anthropic.com |
-| `TELEGRAM_BOT_TOKEN` | Vercel + GitHub | from @BotFather |
-| `TELEGRAM_WEBHOOK_SECRET` | Vercel | any random string |
-| `TELEGRAM_ADMIN_IDS` | Vercel | comma-separated chat ids allowed to edit (send `/whoami` to the bot to get yours) |
-| `TELEGRAM_ALERT_CHAT_ID` | GitHub (optional) | chat id that receives failure alerts |
-| `DISPLAY_KEY` | Vercel (optional) | if set, the wall must open `/?key=<DISPLAY_KEY>` |
+1. **The runner** is the only part with prerequisites. Follow `docs/local-runner.md`: install Claude
+   Code, log in once with the subscription account, fill `.env` with the two Supabase values, then
+   `npm run doctor` and `npm run runner`. It also covers autostart on macOS, Linux and Windows.
+2. **The bot**: `docs/telegram-setup.md`, from @BotFather to the webhook URL.
+3. **Vercel** needs only these environment variables, and no Anthropic key:
 
-**Telegram webhook** (once, in a browser):
-`https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<your-vercel-domain>/api/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>`
+| Name | Value |
+| --- | --- |
+| `SUPABASE_URL` | `https://rrbivwhratkmzcfxqjih.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API Keys → `service_role` |
+| `TELEGRAM_BOT_TOKEN` | from @BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | any random string, matching the one in the webhook URL |
+| `TELEGRAM_ADMIN_IDS` | comma-separated chat ids allowed to edit (send `/whoami` to get yours) |
+| `DISPLAY_KEY` | optional; when set, the wall must open `/?key=<DISPLAY_KEY>` |
 
-**First run**: GitHub → Actions → `agent` → Run workflow with tasks `launches weather osint numbers`.
-Until the first run the feed is empty apart from the seeded events; the display then fills within a minute.
+## Commands
 
-**Local**: copy `.env.example` to `.env`, `npm install`, then `npm run agent:launches`, `npm run feed:preview`, or `npx vercel dev`.
-Sources live in the `sources` table (enable/disable, weights); tag colours and feed sizes in `settings.feed`.
+| Command | What it does |
+| --- | --- |
+| `npm run runner` | the always-on loop (this is the one you leave running) |
+| `npm run doctor` | checks the CLI, the model, the keys and the queue depths |
+| `npm run agent -- collect enrich launches weather numbers intake` | run tasks once, by name |
+| `npm run feed:preview` | prints the JSON the display will receive |
+| `npm test` | bridge tests against stub CLI binaries; no network or subscription needed |
+| `npm run typecheck` | TypeScript, no emit |
 
 ## Tuning
 
-- `OSINT_WEB_SEARCH=1` (GitHub repository variable) adds a Claude web-search discovery pass per run, restricted to the source domains. Costs more; off by default.
-- `OSINT_MAX_ITEMS` caps enrichment per run (default 40).
-- `sources.weight` and the prompt in `lib/claude.ts` (`DIRECTORATE_PROFILE`) steer relevance.
-- Anything can be edited by hand in the Supabase table editor; the feed reflects it within a minute.
+- **Cadence and cost** live in `.env` (`COLLECT_EVERY_SEC`, `ENRICH_EVERY_SEC`, `ENRICH_BATCH`,
+  `CLAUDE_MODEL`). The model is called only when there is pending work, one call at a time.
+- **Editorial judgement** comes from `DIRECTORATE_PROFILE` in `lib/profile.ts`, shared by every
+  prompt, plus `sources.weight` in the database.
+- **Sources** are rows in `sources`: enable, disable or add an RSS feed with no code change.
+- **Everything is editable by hand** in the Supabase table editor; the feed reflects it within a
+  minute.
