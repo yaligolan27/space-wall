@@ -8,3 +8,5 @@ dist/
 
 # local runner scratch
 .work/
+agent/test/stubs/prompt.txt
+agent/test/stubs/args.log
