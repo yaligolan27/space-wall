@@ -52,8 +52,11 @@ function describe(a: IntakeAction): string {
 /** Parses every queued message. Returns how many it handled. */
 export async function processIntake(): Promise<number> {
   const s = db();
+  // Rows claimed more than 10 minutes ago and still unparsed belong to a runner that died; take them back.
+  const staleClaim = new Date(Date.now() - 10 * 60_000).toISOString();
   const queued = must(await s.from('intake_messages').select('*')
     .eq('status', 'pending').is('parsed', null)
+    .or(`claimed_at.is.null,claimed_at.lt.${staleClaim}`)
     .order('received_at').limit(5), 'queued') as any[];
   if (!queued.length) return 0;
 
@@ -67,6 +70,10 @@ export async function processIntake(): Promise<number> {
   let handled = 0;
   for (const msg of queued) {
     const chatId = Number(msg.sender);
+    // Claim the row first so a local runner and a cloud Routine never both parse it.
+    const claim = must(await s.from('intake_messages').update({ claimed_at: new Date().toISOString() })
+      .eq('id', msg.id).is('parsed', null).or(`claimed_at.is.null,claimed_at.lt.${staleClaim}`).select('id'), 'claim') as any[];
+    if (!claim.length) continue;
     try {
       const result = await runClaudeTask({
         name: 'intake',
