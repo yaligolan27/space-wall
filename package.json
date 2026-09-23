@@ -11,7 +11,8 @@
     "feed:preview": "tsx agent/src/index.ts feed",
     "typecheck": "tsc --noEmit",
     "dev": "vercel dev",
-    "test": "tsx agent/test/bridge.test.mts"
+    "test": "tsx agent/test/bridge.test.mts",
+    "agent:cloud": "bash scripts/cloud-run.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
