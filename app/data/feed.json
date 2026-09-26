@@ -1,62 +1,423 @@
 {
-  "generatedAt": "2026-09-15T06:40:00Z",
-  "weekRange": "8.9 – 15.9",
-  "orbital": { "line1": "ORBITAL PICTURE · LEO / GEO", "line2": "54,120 עצמים >10 ס״מ במעקב" },
-  "spaceWeather": { "line1": "Kp 3 · QUIET", "line2": "SPACE WEATHER · NOAA SWPC" },
-  "push": [
-    { "category": "defense", "source": "SpaceNews", "time": "03:40", "title": "חיל החלל האמריקאי: לוויין סיני ביצע התקרבות מכוונת לנכס GSSAP במסלול הגיאוסטציונרי", "titleEn": "US Space Force confirms Chinese satellite close approach to GSSAP asset", "url": "https://spacenews.com/" },
-    { "category": "geopolitics", "source": "Reuters", "time": "08:15", "title": "איראן הכריזה על שיגור לוויין ״נאהיד-3״; גורמי מעקב זרים טרם אישרו מסלול", "titleEn": "Iran claims Nahid-3 launch; orbit unconfirmed by trackers", "url": "https://www.reuters.com/" },
-    { "category": "ssa", "source": "LeoLabs", "time": "11:02", "title": "שברי לונג מארץ׳ 6C חלפו 380 מטר מלוויין התצפית האירופי Sentinel-2C", "titleEn": "CZ-6C debris passes 380 m from ESA Sentinel-2C", "url": "https://leolabs.space/" },
-    { "category": "israel", "source": "כלכליסט", "time": "12:30", "title": "התעשייה האווירית חשפה פלטפורמת לוויין תצפית זעיר לצי מהיר-פריסה", "titleEn": "IAI unveils micro-satellite bus for rapid-deployment imaging constellation", "url": "https://www.calcalist.co.il/" },
-    { "category": "policy", "source": "Breaking Defense", "time": "14:05", "title": "הפנטגון פרסם דוקטרינת ״הגנה במסלול״ מעודכנת; לראשונה מוזכר יירוט פעיל", "titleEn": "Pentagon releases updated orbital-defense doctrine, first mention of active intercept", "url": "https://breakingdefense.com/" },
-    { "category": "launches", "source": "NASASpaceflight", "time": "16:48", "title": "סטארשיפ טיסה 14: SpaceX הגישה בקשה לחלון שיגור ב-15.9", "titleEn": "Starship Flight 14: SpaceX files for Sept 15 launch window", "url": "https://www.nasaspaceflight.com/" },
-    { "category": "geopolitics", "source": "Militarnyi", "time": "19:20", "title": "רוסיה שיגרה מטען צבאי לא מוצהר מפלסצק; קטלוגים זרים מזהים לוויין תצפית מכ״ם", "titleEn": "Russia launches undisclosed military payload from Plesetsk; trackers identify SAR bird", "url": "https://mil.in.ua/en/" }
+  "issue": {
+    "range": "13–19.9",
+    "url": "https://rakia-weekly.vercel.app/"
+  },
+  "summary": [
+    "סוכנות החלל חשפה את טיוטת חוק החלל הישראלי ופתחה אותה להערות התעשייה עד 13.12",
+    "ארה״ב הודתה לראשונה שיש לה נשק שליטה בחלל במסלול — סין ורוסיה הגיבו כבר למחרת",
+    "לקוחות מדווחים ש-SpaceX כבר לא מקבלת הזמנות מסחריות חדשות לפאלקון 9",
+    "סטארשיפ טיסה 14, הראשונה למסלול, נדחתה ל-28.9 ועדיין ממתינה לאישור רגולטורי",
+    "הפנטגון בחר את נורת׳רופ גראמן ו-True Anomaly לבנות לוויינים שמצלמים לוויינים ב-GEO"
   ],
-  "weekly": [
+  "featured": [
+    0,
+    1,
+    16,
+    2,
+    3,
+    18
+  ],
+  "news": [
     {
-      "category": "defense", "source": "SpaceNews · 25.08",
-      "title": "SpaceX פתחה לכולם מערכת חינמית שמזהירה מהתנגשויות בחלל",
-      "titleEn": "SpaceX opens Starlink-powered collision warning to all operators",
-      "why": "רוב העולם נשען על קטלוג ה-USSF. מודעות מצב עצמאית היא יכולת אסטרטגית בפני עצמה.",
-      "url": "https://spacenews.com/spacex-space-safety",
-      "image": "./data/images/weekly-1.jpg", "imageNote": "תמונת כתבה — Starlink",
-      "credit": "Photo by NASA on Unsplash", "creditHref": "https://unsplash.com/@nasa"
+      "cat": "מדיניות",
+      "il": true,
+      "date": "15.09",
+      "src": "סוכנות החלל הישראלית",
+      "title": "חוק החלל הישראלי יצא מהמגירה, והתעשייה מוזמנת לתקן אותו",
+      "dek": "טיוטת החוק תחייב כל חברה ישראלית בהיתר לפני שיגור, ופתוחה להערות עד 13 בדצמבר.",
+      "url": "https://www.space.gov.il/kolkore/135038"
     },
     {
-      "category": "industry", "source": "Payload · 27.08",
-      "title": "מכ״ם נייד בגודל מכולה הכניס ל-LeoLabs חוזה של 20 מיליון דולר מחיל החלל",
-      "titleEn": "Space Force awards LeoLabs $20.7M for container-sized Scout-S radar",
-      "why": "SSA פריס ומהיר, שעקב אחרי לוויינים סיניים תוך שעות. מודל רלוונטי למערך מעקב לאומי.",
-      "url": "https://payloadspace.com/leolabs-scout-s",
-      "image": "./data/images/weekly-2.jpg", "imageNote": "תמונת כתבה — מכ״ם Scout-S",
-      "credit": "Photo by NASA on Unsplash", "creditHref": "https://unsplash.com/@nasa"
+      "cat": "ביטחון",
+      "date": "14–15.09",
+      "src": "Air & Space Forces",
+      "title": "ארצות הברית הודתה לראשונה שיש לה נשק במסלול",
+      "dek": "מזכיר חיל האוויר אמר זאת בגלוי בכנס AFA, סירב לפרט, וסין ורוסיה הגיבו למחרת.",
+      "url": "https://www.airandspaceforces.com/meink-space-force-on-orbit-space-control-weapons/"
+    },
+    {
+      "cat": "שיגורים",
+      "date": "16–17.09",
+      "src": "European Spaceflight",
+      "title": "לקוחות מספרים ש-SpaceX הפסיקה לקבל הזמנות חדשות לפאלקון 9",
+      "dek": "עידן השיגור הזול לכל חברה קטנה מתקרב לסופו; מתחרות אירופיות מדווחות על תור לקוחות.",
+      "url": "https://europeanspaceflight.com/avio-ceo-reports-influx-of-customers-turned-away-by-spacex/"
+    },
+    {
+      "cat": "שיגורים",
+      "date": "17–21.09",
+      "src": "Spaceflight Now",
+      "title": "סטארשיפ עוד לא טסה, והתאריך זז שוב",
+      "dek": "היעד עבר מ-18 ל-28 בספטמבר, ועדיין חסר אישור רגולטורי לטיסה המסלולית הראשונה.",
+      "url": "https://spaceflightnow.com/2026/09/21/spacexs-super-heavy-booster-arrives-at-pad-ahead-of-first-orbital-starship-launch/"
+    },
+    {
+      "cat": "חקר החלל",
+      "date": "18.09",
+      "src": "נאס״א",
+      "title": "נאס״א קנתה מ-SpaceX עוד שלוש טיסות לתחנת החלל ב-946 מיליון דולר",
+      "dek": "עם ההזמנה SpaceX תטיס לתחנה 17 צוותים, בחוזה של כמעט 6 מיליארד דולר.",
+      "url": "https://www.nasa.gov/missions/station/commercial-crew/nasa-awards-spacex-three-crew-flights-to-space-station/"
+    },
+    {
+      "cat": "כלכלה ותעשייה",
+      "date": "14.09",
+      "src": "Payload",
+      "title": "חברת לוויינים בריטית גייסה 300 מיליון יורו, ורוב הכסף אירופי בכוונה",
+      "dek": "אופן קוסמוס רוצה לבנות לוויין ביום.",
+      "url": "https://payloadspace.com/open-cosmos-raises-e300m-funding-round/"
+    },
+    {
+      "cat": "כלכלה ותעשייה",
+      "date": "16.09",
+      "src": "Payload",
+      "title": "החברה של מהנדס המנועים הראשון של SpaceX גייסה עוד 308 מיליון דולר",
+      "dek": "אימפלס ספייס בונה גוררים שמזיזים לוויינים במסלול.",
+      "url": "https://payloadspace.com/impulse-space-raises-308m-series-d-extension/"
+    },
+    {
+      "cat": "כלכלה ותעשייה",
+      "date": "16–17.09",
+      "src": "Via Satellite",
+      "title": "יצרנית לוויינים מבולגריה גייסה 205 מיליון דולר וזכתה בצי של מקסאר לשעבר",
+      "dek": "24 לוויינים שיחזרו לכל נקודה כל רבע שעה.",
+      "url": "https://www.satellitetoday.com/imagery-and-sensing/2026/09/17/endurosat-and-caci-to-build-vantors-pulse-smallsat-fleet/"
+    },
+    {
+      "cat": "תקשורת לוויינית",
+      "date": "14–16.09",
+      "src": "Payload",
+      "title": "ויאסאט וחברת החלל של האמירויות מתחייבות עד מיליארד דולר לרשת לוויינים לטלפונים",
+      "dek": "ההשקה המסחרית זזה לסוף 2029.",
+      "url": "https://payloadspace.com/viasat-and-space42-commit-up-to-1b-to-equatys-joint-venture/"
+    },
+    {
+      "cat": "שיגורים",
+      "date": "17–18.09",
+      "src": "La Tribune",
+      "title": "תקלה בטורבו משאבה מקצצת את שיגורי אריאן 6 השנה",
+      "dek": "אירופה צפויה להסתפק בשיגור אחד או שניים עד סוף השנה.",
+      "url": "https://europeanspaceflight.com/esa-acknowledges-ariane-6-delays-following-reports-of-turbopump-issue/"
+    },
+    {
+      "cat": "חקר החלל",
+      "date": "18.09",
+      "src": "Payload",
+      "title": "הלקוח הראשון של קפסולת ההחזרה בסטארשיפ כבר מכר שליש ממנה",
+      "dek": "ניסויים ביולוגיים ב-Starfall של SpaceX.",
+      "url": ""
+    },
+    {
+      "cat": "שיגורים",
+      "date": "15–16.09",
+      "src": "Payload",
+      "title": "חברה אמריקאית קנתה חמישה שיגורים מהטיל הגרמני של Isar",
+      "dek": "הקונה לא סומכת על כך שמשימות השיתוף של SpaceX יימשכו לנצח.",
+      "url": ""
+    },
+    {
+      "cat": "חישה מרחוק",
+      "date": "15.09",
+      "src": "Payload",
+      "title": "לוויינים מפינלנד איתרו כמעט 9,000 שדות פרג באפגניסטן",
+      "dek": "צילום היפר-ספקטרלי מבחין בין פרג לחיטה.",
+      "url": ""
+    },
+    {
+      "cat": "חישה מרחוק",
+      "date": "15.09",
+      "src": "Spaceflight Now",
+      "title": "לוויין שרואה צמחים זוהרים שוגר מגיאנה הצרפתית",
+      "dek": "וגה-C שיגרה את FLEX ו-Sentinel-3C.",
+      "url": ""
+    },
+    {
+      "cat": "שיגורים",
+      "date": "16.09",
+      "src": "China Daily",
+      "title": "סין שיגרה טיל מספינה בים והעלתה יותר משלושה טון ללוויינים",
+      "dek": "שני שיאים סיניים לשיגור מהים.",
+      "url": ""
+    },
+    {
+      "cat": "מדיניות",
+      "date": "15.09",
+      "src": "Breaking Defense",
+      "title": "בלי תקציב, עשירית מהתוכניות של חיל החלל האמריקאי תקועות",
+      "dek": "חיל החלל עובד לפי המספרים של השנה שעברה.",
+      "url": ""
+    },
+    {
+      "cat": "ביטחון",
+      "date": "18.09",
+      "src": "Air & Space Forces",
+      "title": "הפנטגון בחר שתי חברות לבנות לוויינים שמצלמים לוויינים אחרים",
+      "dek": "נורת׳רופ גראמן ו-True Anomaly יבנו אבות טיפוס שיסיירו בגובה 36 אלף ק״מ.",
+      "url": ""
+    },
+    {
+      "cat": "ביטחון",
+      "date": "16.09",
+      "src": "Breaking Defense",
+      "title": "רשת הלייזר הצבאית של ארצות הברית באיחור של שנה בגלל ספק אחד",
+      "dek": "״אנחנו מאחרים, היינו צריכים כבר להיות שם״.",
+      "url": ""
+    },
+    {
+      "cat": "חקר החלל",
+      "date": "15.09",
+      "src": "Air & Space Forces",
+      "title": "מנהל נאס״א מזהיר שהמרוץ לירח מול סין צמוד מכפי שנדמה",
+      "dek": "ארה״ב מכוונת ל-2028 וסין ל-2030 — וההפרש יכול להיעלם.",
+      "url": ""
+    },
+    {
+      "cat": "חישה מרחוק",
+      "date": "18.09",
+      "src": "Via Satellite",
+      "title": "אירופה בודקת איך לבנות מערכת מודיעין מהחלל משלה",
+      "dek": "קונסורציום של 13 חברות בהובלת ICEYE יתכנן אותה.",
+      "url": ""
     }
   ],
-  "numbers": [
-    { "value": "5", "label": "שיגורים מסלוליים השבוע" },
-    { "value": "3", "label": "מטענים צבאיים לא מוצהרים" },
-    { "value": "$2.3B", "label": "עסקאות וחוזים" },
-    { "value": "2", "label": "התפרקויות במסלול" }
-  ],
-  "directorate": [
-    { "date": "היום", "name": "יום הולדת · [שם] · אגף תכנון" },
-    { "date": "ג׳ 15.9", "name": "הרמת כוסית לראש השנה · 12:00 · לובי" },
-    { "date": "ה׳ 17.9", "name": "טקס שחרור · [שם]" },
-    { "date": "22.9", "name": "מפגש עם אנשי מפא״ת · אולם א׳" }
-  ],
-  "events": [
-    { "date": "16.9", "name": "ESA Industry Days", "place": "נורדווייק, הולנד" },
-    { "date": "5.10", "name": "IAC 2026", "place": "אנטליה, טורקיה" },
-    { "date": "27.10", "name": "Silicon Valley Space Week", "place": "מאונטיין ויו" },
-    { "date": "28.10", "name": "MilSat Symposium", "place": "קליפורניה" },
-    { "date": "17.11", "name": "Space Tech Expo Europe · משלחת ישראלית", "place": "ברמן" },
-    { "date": "8.12", "name": "Space Resilience Summit", "place": "לונדון" },
-    { "date": "24.1", "name": "שבוע החלל הישראלי 2027", "place": "ישראל" }
+  "catColor": {
+    "ביטחון": "#f2a37a",
+    "שיגורים": "#6fd6ea",
+    "חקר החלל": "#b9a6f5",
+    "כלכלה ותעשייה": "#8fe0b8",
+    "תקשורת לוויינית": "#7fb0ff",
+    "חישה מרחוק": "#e3cf72",
+    "מדיניות": "#c7d3ea"
+  },
+  "catImage": {
+    "ביטחון": "/assets/img/1446776811953_b23d57bd21aa.jpg",
+    "שיגורים": "/assets/img/1541185933_ef5d8ed016c2.jpg",
+    "חקר החלל": "/assets/img/1522030299830_16b8d3d049fe.jpg",
+    "כלכלה ותעשייה": "/assets/img/1457364887197_9150188c107b.jpg",
+    "תקשורת לוויינית": "/assets/img/1446776811953_b23d57bd21aa.jpg",
+    "חישה מרחוק": "/assets/img/1614728894747_a83421e2b9c9.jpg",
+    "מדיניות": "/assets/img/1457364887197_9150188c107b.jpg"
+  },
+  "ticker": [
+    {
+      "kind": "הזדמנות",
+      "date": "5.10",
+      "name": "NASA Space Apps בטכניון — הרשמת צוותים"
+    },
+    {
+      "kind": "אירוע",
+      "date": "5–9.10",
+      "name": "IAC 2026 · אנטליה"
+    },
+    {
+      "kind": "הזדמנות",
+      "date": "11.10",
+      "name": "קול קורא: פעילויות לשבוע החלל הישראלי 2027"
+    },
+    {
+      "kind": "אירוע",
+      "date": "13.10",
+      "name": "פורום עסקי צ׳כיה–ישראל · תל אביב"
+    },
+    {
+      "kind": "הזדמנות",
+      "date": "13.10",
+      "name": "רשות החדשנות מסלול 37 — החזר הוצאות להורייזן"
+    },
+    {
+      "kind": "אירוע",
+      "date": "21–22.10",
+      "name": "משלחת חברות חלל לאיחוד האמירויות"
+    },
+    {
+      "kind": "אירוע",
+      "date": "27–29.10",
+      "name": "Silicon Valley Space Week · MilSat Symposium"
+    },
+    {
+      "kind": "אירוע",
+      "date": "2–5.11",
+      "name": "Global MilSatCom · לונדון"
+    },
+    {
+      "kind": "הזדמנות",
+      "date": "4.11",
+      "name": "EIC Accelerator — עד 2.5 מיליון יורו"
+    },
+    {
+      "kind": "אירוע",
+      "date": "17–19.11",
+      "name": "Space Tech Expo Europe · ברמן · ביתן ישראלי"
+    },
+    {
+      "kind": "הזדמנות",
+      "date": "23.11",
+      "name": "קרן BIRD — תקציר למו״פ משותף"
+    },
+    {
+      "kind": "הזדמנות",
+      "date": "13.12",
+      "name": "הערות לטיוטת חוק החלל הישראלי"
+    },
+    {
+      "kind": "אירוע",
+      "date": "24–28.1",
+      "name": "שבוע החלל הישראלי 2027"
+    }
   ],
   "launches": [
-    { "name": "Falcon 9 · Starlink 17-9", "site": "ונדנברג, קליפורניה", "net": "2026-09-15T21:02:00Z", "actor": "us" },
-    { "name": "Soyuz 2.1b · GLONASS-K", "site": "פלסצק, רוסיה", "net": "2026-09-17T11:40:00Z", "actor": "ru" },
-    { "name": "Long March 7A · undisclosed", "site": "וונצ׳אנג, סין", "net": "2026-09-19T02:20:00Z", "actor": "cn" },
-    { "name": "Starship Flight 14", "site": "סטארבייס, טקסס", "net": "2026-09-21T10:52:00Z", "actor": "other" }
-  ]
+    {
+      "vehicle": "Electron · Rocket Lab",
+      "mission": "StriX · Synspective",
+      "site": "מאהיה, ניו זילנד",
+      "at": "2026-09-26T03:15:00+03:00",
+      "status": "אושר"
+    },
+    {
+      "vehicle": "Falcon 9 · SpaceX",
+      "mission": "USSF-385 · מטען מסווג",
+      "site": "ונדנברג, קליפורניה",
+      "at": "2026-09-26T14:56:00+03:00",
+      "status": "אושר"
+    },
+    {
+      "vehicle": "Starship · SpaceX",
+      "mission": "טיסה 14 · ראשונה למסלול",
+      "site": "סטארבייס, טקסס",
+      "at": "2026-09-28T15:15:00+03:00",
+      "status": "ממתין"
+    },
+    {
+      "vehicle": "Falcon 9 · SpaceX",
+      "mission": "Crew-13 · תחנת החלל",
+      "site": "קייפ קנוורל, פלורידה",
+      "at": "2026-10-01T18:10:00+03:00",
+      "status": "אושר"
+    }
+  ],
+  "tracked": [
+    {
+      "code": "ISS · 25544",
+      "name": "תחנת החלל",
+      "alt": 418,
+      "vel": 7.66,
+      "per": 92.9,
+      "orbit": "LEO",
+      "purpose": "מעבדה מאוישת"
+    },
+    {
+      "code": "EROS-C3",
+      "name": "ארוס C3",
+      "alt": 505,
+      "vel": 7.61,
+      "per": 94.6,
+      "orbit": "SSO",
+      "purpose": "תצפית אופטית"
+    },
+    {
+      "code": "AMOS-17",
+      "name": "עמוס 17",
+      "alt": 35786,
+      "vel": 3.07,
+      "per": 1436,
+      "orbit": "GEO",
+      "purpose": "תקשורת"
+    },
+    {
+      "code": "S2C · 60989",
+      "name": "Sentinel-2C",
+      "alt": 786,
+      "vel": 7.45,
+      "per": 100.6,
+      "orbit": "SSO",
+      "purpose": "חישה מרחוק"
+    }
+  ],
+  "directorate": [
+    {
+      "day": "27",
+      "dow": "א׳",
+      "mon": "ספט׳",
+      "time": "09:00",
+      "name": "תדריך שבועי — תמונת מצב מסלולית",
+      "place": "אולם מבצעים"
+    },
+    {
+      "day": "28",
+      "dow": "ב׳",
+      "mon": "ספט׳",
+      "time": "15:15",
+      "name": "צפייה משותפת: סטארשיפ טיסה 14",
+      "place": "לובי · מסך מרכזי"
+    },
+    {
+      "day": "29",
+      "dow": "ג׳",
+      "mon": "ספט׳",
+      "time": "12:30",
+      "name": "ארוחת צהריים בסוכת המנהלת",
+      "place": "חצר קומת הכניסה"
+    },
+    {
+      "day": "01",
+      "dow": "ה׳",
+      "mon": "אוק׳",
+      "time": "10:00",
+      "name": "מפגש עם אנשי מפא״ת",
+      "place": "אולם ההרצאות"
+    }
+  ],
+  "people": [
+    {
+      "type": "יום הולדת",
+      "color": "#e9b872",
+      "name": "נועה ברק",
+      "line": "חוגגת ביום א׳ · ענף מודעות מצב",
+      "date": "27.9",
+      "photo": null
+    },
+    {
+      "type": "שחרור",
+      "color": "#6fd6ea",
+      "name": "רס״ן יואב כץ",
+      "line": "משתחרר אחרי 8 שנים במנהלת · טקס ה׳ 15:30",
+      "date": "1.10",
+      "photo": null
+    },
+    {
+      "type": "ברוכים הבאים",
+      "color": "#d4f25c",
+      "name": "סרן מיכל אדר",
+      "line": "הצטרפה לענף מודעות מצב (SSA)",
+      "date": "27.9",
+      "photo": null
+    },
+    {
+      "type": "יום הולדת",
+      "color": "#e9b872",
+      "name": "עומר לוי",
+      "line": "חוגג ביום ג׳ · אגף הנדסה",
+      "date": "29.9",
+      "photo": null
+    },
+    {
+      "type": "מזל טוב",
+      "color": "#b9a6f5",
+      "name": "איתי ורונית",
+      "line": "להולדת הבן · אגף הנדסה",
+      "date": "24.9",
+      "photo": null
+    },
+    {
+      "type": "יום הולדת",
+      "color": "#e9b872",
+      "name": "דנה שמש",
+      "line": "חוגגת ביום ה׳ · מטה",
+      "date": "1.10",
+      "photo": null
+    }
+  ],
+  "generatedAt": "2026-09-20T06:00:00Z",
+  "promoVideo": "/assets/promo.mp4"
 }

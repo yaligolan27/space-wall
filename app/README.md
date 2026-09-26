@@ -1,108 +1,79 @@
-# צג חלל · מנהלת החלל — Space Wall
+# צג חלל · מנהלת החלל — the display (v4)
 
-A 1920×1080 lobby display (one canvas across the 9-screen wall, bezels ignored) that shows OSINT space news for the directorate.
-Implemented from the Claude Design handoff in `../project/Space Wall v2.dc.html` and the transcript in `../chats/chat1.md`.
+The 1920×1080 lobby wall, ported from the Claude Design file "Space Wall v4". Static files, no build step:
+React 18 (vendored UMD), three.js for the emblem, all fonts, textures, images and the 12:00 promo video
+are local, so the page works offline once loaded. The stage scales to any screen.
 
-Static HTML/CSS/JS, no build step, works fully offline: three.js, the QR encoder, the NASA Blue Marble textures and the
-Heebo / IBM Plex Mono fonts are all vendored. Content comes from `/api/feed` (built live from Supabase by `../api/feed.ts`); the page polls it every minute and
-re-renders when it changes. If the API is unreachable on first load it falls back to the bundled sample `data/feed.json`.
+Content comes from `/api/feed` and is polled every minute. If the API is unreachable on the first load, the
+bundled sample `data/feed.json` (the design's own week, 13–19.9) is shown instead.
 
-## Run
+## Screen
 
-Serve the `app/` folder with any static server (ES modules and `fetch` need `http://`, not `file://`):
-
-```
-cd app
-python3 -m http.server 8080
-# open http://localhost:8080/ in Chrome, full-screen / kiosk mode
-```
-
-For the wall itself: `chrome --kiosk --autoplay-policy=no-user-gesture-required http://<host>:8080/`.
-The 1920×1080 stage scales to fit any window (letterboxed), so a 4K or 5760×3240 wall just renders larger.
-
-## Screen structure
-
-| Area | What it shows | Motion |
+| Area | Content | Source |
 | --- | --- | --- |
-| Header | Title, live dot + "updated X ago", Israel clock + Hebrew date, UTC clock | breathing dot, ticking clocks |
-| Right column | **24 שעות אחרונות** — small headlines in a continuous vertical loop, then **במנהלת השבוע** | vertical loop, `loop` seconds per headline |
-| Centre | The living emblem (real-3D Earth inside the directorate's spire, two orbit rings, four satellites) + four numbers of the week | Earth rotation, satellites orbiting, spire breathing |
-| Left column | **השבוע בחלל** — two feature cards with image, tag, source, Hebrew + English title, QR to the article, "למה חשוב למנהלת" | none |
-| Events bar | Upcoming conferences, right-to-left ticker | horizontal loop |
-| Footer | Four upcoming launches with live T-minus countdowns | ticking |
+| Header | logo, "updated X ago" with a live dot (amber when stale), Israel clock + date, UTC | feed `generatedAt` |
+| Right column, top | אירועים במנהלת: the week's internal events, the next one highlighted | Telegram → `directorate_events` |
+| Right column, bottom | אנשים במנהלת: rotating spotlight + six tiles (birthdays, births, weddings, promotions, discharges, new people) | Telegram → `people`, `life_events` |
+| Centre | the 3D emblem (holographic globe, orbits, satellites, wordmark) | — |
+| Left column | ניוזלטר החלל השבועי: rotating feature card with QR to the article, then a scrolling list | weekly newsletter import |
+| Ticker | אירועים והזדמנויות, colour-coded by kind | newsletter + Telegram → `industry_events` |
+| Footer | four next launches with live countdowns, the next one highlighted | Launch Library via the runner |
 
-## Configuration (URL query)
+**Moments** take over the whole screen: launch mode for the last ten minutes before any listed launch, a
+personal celebration with fireworks every hour at :30 (cycling through the people panel), and the 12:00 show
+(a 10-second countdown around the logo, then `assets/promo.mp4` with sound).
+
+## URL options
 
 | Param | Default | Meaning |
 | --- | --- | --- |
-| `feed` | `./api/feed` | Feed URL |
-| `key` | | `DISPLAY_KEY` if the backend requires one |
-| `refresh` | `60` | Seconds between feed polls (min 10) |
-| `loop` | `7` | Seconds per headline in the 24h loop (3–15) |
-| `globe` | `60` | Seconds per Earth rotation (15–180) |
-| `qr` | `1` | Show QR codes on the weekly cards (`0` to hide) |
-| `directorate` | `1` | Show the "במנהלת השבוע" block (`0` to hide) |
-| `stale` | `180` | Minutes after which the live dot turns amber if the feed has not been regenerated |
+| `key` | | `DISPLAY_KEY`, if the backend requires one |
+| `demo` | `off` | `launch`, `greeting` or `noon`: trigger a moment on load (keys L, G, N do the same; Esc closes) |
+| `noon` | `1` | `0` disables the 12:00 show |
+| `qr` | `1` | `0` hides the QR codes |
+| `feature` | `12` | seconds per featured article (6–30) |
+| `list` | `4` | seconds per headline in the scrolling list (2–10) |
+| `fx` | `1` | `0` turns off ambient effects (grain, flare, scan line, parallax) for weak hardware |
+| `globe` | `90` | seconds per globe rotation |
+| `globeStyle` | `holo` | `real` for the photographic Earth |
+| `sway` | `1` | `0` stops the slow camera sway |
+| `refresh` | `60` | feed poll interval, seconds |
 
-Example: `index.html?loop=9&globe=90&qr=0`.
+Example for the lobby: `https://space-wall.vercel.app/?fx=1&noon=1`.
 
-## Feed contract — `data/feed.json`
-
-The backend writes this file atomically (write to a temp file, then rename). Every field is plain text the page shows as-is;
-Hebrew text should already be final copy. `generatedAt` drives the "updated X ago" indicator.
+## Feed shape (`/api/feed`)
 
 ```jsonc
 {
-  "generatedAt": "2026-09-15T06:40:00Z",     // ISO-8601, required
-  "weekRange": "8.9 – 15.9",                  // shown next to "השבוע בחלל"
-  "orbital":      { "line1": "ORBITAL PICTURE · LEO / GEO", "line2": "54,120 עצמים >10 ס״מ במעקב" },
-  "spaceWeather": { "line1": "Kp 3 · QUIET",  "line2": "SPACE WEATHER · NOAA SWPC" },
-
-  "push": [                                   // 24h headlines, ~5–9 items, oldest → newest
-    { "category": "defense", "source": "SpaceNews", "time": "03:40",
-      "title": "כותרת בעברית", "titleEn": "Original English headline", "url": "https://…" }
-  ],
-  "weekly": [                                 // exactly 2 feature stories
-    { "category": "industry", "source": "Payload · 27.08",
-      "title": "…", "titleEn": "…", "why": "למה זה חשוב למנהלת — משפט אחד.",
-      "url": "https://…",                     // QR target
-      "image": "https://… or ./data/images/x.jpg", "imageNote": "placeholder text if no image",
-      "credit": "Photo: Payload", "creditHref": "https://…" }   // credit is optional
-  ],
-  "numbers": [ { "value": "5", "label": "שיגורים מסלוליים השבוע" } ],   // 4 items
-  "directorate": [ { "date": "ג׳ 15.9", "name": "הרמת כוסית · 12:00 · לובי" } ],  // up to 5; [] hides the block
-  "events": [ { "date": "5.10", "name": "IAC 2026", "place": "אנטליה, טורקיה" } ],
-  "launches": [                               // 4 items, soonest first
-    { "name": "Falcon 9 · Starlink 17-9", "site": "ונדנברג, קליפורניה",
-      "net": "2026-09-15T21:02:00Z",          // ISO-8601 NET; countdown is computed client-side
-      "actor": "us" }                         // us | ru | cn | il | eu | other → countdown colour; or "color": "#hex"
-  ]
+  "generatedAt": "2026-09-20T06:00:00Z",
+  "issue":   { "range": "13–19.9", "url": "https://rakia-weekly.vercel.app/" },
+  "summary": ["one-line takeaways", "..."],
+  "featured": [0, 1, 16],                      // indexes into news, shown as the rotating card
+  "news": [{ "cat": "ביטחון", "il": false, "date": "14–15.09", "src": "Air & Space Forces",
+             "title": "…", "dek": "…", "url": "https://…", "image": null }],
+  "catColor": { "ביטחון": "#f2a37a" },         // category → colour
+  "catImage": { "ביטחון": "/assets/img/….jpg" }, // category → fallback image when an item has none
+  "ticker":   [{ "kind": "אירוע" | "הזדמנות", "date": "5–9.10", "name": "IAC 2026 · אנטליה" }],
+  "launches": [{ "vehicle": "Falcon 9 · SpaceX", "mission": "Crew-13", "site": "קייפ קנוורל", "at": "2026-10-01T18:10:00+03:00", "status": "אושר" | "ממתין" }],
+  "directorate": [{ "day": "27", "dow": "א׳", "mon": "ספט׳", "time": "09:00", "name": "…", "place": "…" }],
+  "people": [{ "type": "יום הולדת", "color": "#e9b872", "name": "…", "line": "…", "date": "27.9", "photo": null, "celebrate": true }],
+  "tracked":  [ … ],                           // SSA objects, reserved for a future panel
+  "promoVideo": "/assets/promo.mp4"
 }
 ```
 
-`category` → tag label and colour: `defense` ביטחון, `geopolitics` גאופוליטיקה, `launches` שיגורים, `industry` תעשייה,
-`israel` ישראל, `policy` מדיניות, `tech` טכנולוגיה, `ssa` SSA, `exploration` חקר החלל, `weather` מזג אוויר חללי.
-A `tag` / `tagColor` on an item overrides the mapping.
+`photo` is a URL when the person has one (`people.photo_url`); otherwise the wall draws an initials badge.
+It never shows a stock portrait next to a real name.
 
 ## Files
 
 ```
-index.html          markup (1920×1080 stage, RTL)
-styles.css          all styling, ported 1:1 from the design's inline styles
-src/main.js         feed polling, rendering, loops, clocks, countdowns, QR
-src/emblem.js       <space-emblem> — the 3D emblem (three.js)
-data/feed.json      sample feed (the design's mock content)
-data/images/        sample article images
-assets/earth/       Blue Marble day / night / topology / water textures
-assets/fonts/       Heebo + IBM Plex Mono (woff2) + fonts.css
-vendor/             three.module.js (0.160.0), qrcode.js (qrcode-generator 1.4.4)
+index.html            page shell
+styles.css            keyframes and globals, verbatim from the design
+src/wall.js           the wall (React, no JSX)
+src/overlays.js       full-screen moments: launch mode, celebration, 12:00 show, toast
+src/emblem-v2.js      <space-emblem-v2>, the 3D emblem (three.js)
+data/feed.json        sample feed = the design's own week
+assets/               logo, promo video, category images, Earth textures, fonts (Heebo, Lexend, IBM Plex Mono, Open Sans)
+vendor/               react, react-dom, three.module.js, qrcode.js
 ```
-
-## The emblem
-
-`src/emblem.js` builds the logo in real 3D, with every dimension expressed in globe radii (R ≈ 186px on screen):
-orbit rings 1.4R at ±30° tilted 76° with a 3px stroke; spire 2.4R tall and 1.74R wide with the fin tips level with its base;
-four satellites (two per ring, opposite sides) that shrink as they pass behind the planet and carry a soft blue glow;
-the wordmark 1.28R below the globe centre. A single key light from the upper-left lights the Earth, spire, rings and satellites,
-and casts the spire's shadow on the planet; a matching studio environment gives the satin, clear-coated finish.
-The wordmark is CSS text (glossy steel-blue gradient, extruded shadow) so it stays crisp at any scale.

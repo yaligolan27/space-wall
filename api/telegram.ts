@@ -57,8 +57,11 @@ async function onMessage(msg: any) {
   if (text.startsWith('/list') || text.startsWith('/events')) {
     const feed = await buildFeed();
     const lines = text.startsWith('/list')
-      ? feed.directorate.map(d => `• <b>${esc(d.date)}</b> ${esc(d.name)}`)
-      : feed.events.map(e => `• <b>${esc(e.date)}</b> ${esc(e.name)}${e.place ? ' · ' + esc(e.place) : ''}`);
+      ? [
+          ...feed.directorate.map(d => `📅 <b>${esc(d.dow)} ${esc(d.day)}.${esc(d.mon)}</b> ${esc(d.name)}${d.time ? ' · ' + esc(d.time) : ''}${d.place ? ' · ' + esc(d.place) : ''}`),
+          ...feed.people.map(p => `🎉 <b>${esc(p.date)}</b> ${esc(p.type)} · ${esc(p.name)}`),
+        ]
+      : feed.ticker.map((e: any) => `• <b>${esc(e.date)}</b> ${esc(e.kind)} · ${esc(e.name)}`);
     return sendMessage(chatId, lines.length ? lines.join('\n') : 'אין פריטים כרגע.');
   }
   if (text.startsWith('/people')) {

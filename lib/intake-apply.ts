@@ -55,7 +55,7 @@ export async function applyActions(actions: IntakeAction[], createdBy: string): 
         done.push(`אירוע מנהלת: ${a.title} · ${a.starts_at}`); break;
       }
       case 'add_industry_event': {
-        must(await s.from('industry_events').insert({ name: a.title || a.match || 'אירוע', place_he: a.place, starts_on: a.starts_on || a.event_date || isoDateIL(), ends_on: a.ends_on, url: a.url, source: 'telegram' }), 'add_industry_event');
+        must(await s.from('industry_events').insert({ name: a.title || a.match || 'אירוע', place_he: a.place, starts_on: a.starts_on || a.event_date || isoDateIL(), ends_on: a.ends_on, url: a.url, kind: a.event_kind || 'אירוע', source: 'telegram' }), 'add_industry_event');
         done.push(`אירוע תעשייה: ${a.title} · ${a.starts_on}`); break;
       }
       case 'remove_event': {

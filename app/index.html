@@ -4,91 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>צג חלל · מנהלת החלל</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="./assets/fonts/fonts.css">
-<link rel="stylesheet" href="./styles.css">
+<link rel="icon" href="/assets/logo-mark.png">
+<link rel="stylesheet" href="/assets/fonts/v4/fonts.css">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<div class="viewport">
-  <div class="stage" id="stage">
-    <div class="stars" id="stars" aria-hidden="true"></div>
-
-    <header class="hdr">
-      <div class="hdr-brand">
-        <div class="hdr-title">צג חלל · מנהלת החלל</div>
-        <div class="hdr-sub">חדשות גלויות (OSINT) · חלל ביטחוני וגאופוליטיקה · נוצר אוטומטית</div>
-      </div>
-      <div class="hdr-meta">
-        <div class="hdr-live"><span class="live-dot" id="liveDot"></span><span>עודכן <span id="updatedAgo">—</span></span></div>
-        <div class="clock"><span class="clock-time" id="clockIL">--:--:--</span><span class="clock-label">ישראל · <span id="dateHe"></span></span></div>
-        <div class="clock clock-utc"><span class="clock-time" id="clockUTC">--:--</span><span class="clock-label">UTC</span></div>
-      </div>
-    </header>
-
-    <main class="main">
-      <!-- 24 hours: vertical headline loop -->
-      <section class="col">
-        <div class="col-head">
-          <div class="col-head-title"><span class="dot dot-amber"></span><span>24 שעות אחרונות</span></div>
-          <span class="col-head-meta"><span id="pushCount">0</span> כותרות · לופ</span>
-        </div>
-        <div class="push-loop" id="pushLoop"><div class="push-track" id="pushTrack"></div></div>
-        <div class="directorate" id="directorate">
-          <div class="directorate-title">במנהלת השבוע</div>
-          <div class="directorate-list" id="directorateList"></div>
-        </div>
-      </section>
-
-      <!-- Living emblem + numbers of the week -->
-      <section class="center">
-        <div class="center-stage">
-          <div class="emblem" id="emblem">
-            <div class="emblem-bloom"></div>
-            <div class="emblem-halo"></div>
-            <space-emblem id="spaceEmblem" class="emblem-3d" speed="60"></space-emblem>
-            <div class="wordmark" aria-label="מנהלת החלל">
-              <span class="wordmark-extrude">מנהלת החלל</span>
-              <span class="wordmark-face">מנהלת החלל</span>
-              <span class="wordmark-gloss">מנהלת החלל</span>
-            </div>
-          </div>
-          <div class="overlay overlay-tr">
-            <span id="ssaLine1">ORBITAL PICTURE · LEO / GEO</span>
-            <span class="dim" id="ssaLine2"></span>
-          </div>
-          <div class="overlay overlay-bl" dir="ltr">
-            <span id="wxLine1"></span>
-            <span class="dim" id="wxLine2">SPACE WEATHER · NOAA SWPC</span>
-          </div>
-        </div>
-        <div class="numbers" id="numbers"></div>
-      </section>
-
-      <!-- This week in space: two feature cards -->
-      <section class="col">
-        <div class="col-head">
-          <div class="col-head-title"><span class="dot dot-blue"></span><span>השבוע בחלל</span></div>
-          <span class="col-head-meta" id="weekRange"></span>
-        </div>
-        <div class="weekly" id="weekly"></div>
-      </section>
-    </main>
-
-    <!-- Upcoming events ticker -->
-    <div class="events">
-      <div class="events-label"><span class="dot dot-small"></span>אירועים קרובים</div>
-      <div class="events-loop"><div class="events-track" id="eventsTrack"></div></div>
-    </div>
-
-    <!-- Next launches with live countdowns -->
-    <footer class="launches">
-      <div class="launches-label"><span>שיגורים קרובים</span><span class="mono">NEXT LAUNCHES</span></div>
-      <div class="launches-list" id="launches"></div>
-    </footer>
-  </div>
-</div>
-<script src="./vendor/qrcode.js"></script>
-<script type="module" src="./src/emblem.js"></script>
-<script type="module" src="./src/main.js"></script>
+<div id="root"></div>
+<script src="/vendor/react.production.min.js"></script>
+<script src="/vendor/react-dom.production.min.js"></script>
+<script src="/vendor/qrcode.js"></script>
+<script src="/src/overlays.js"></script>
+<script src="/src/emblem-v2.js"></script>
+<script src="/src/wall.js"></script>
 </body>
 </html>

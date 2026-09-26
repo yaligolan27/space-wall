@@ -24,7 +24,7 @@ function instructions(today: string, people: string, events: string): string {
 - אירוע אישי (יום הולדת, חתונה, לידה, אבל, עלייה בדרגה, שחרור, קליטה) הוא add_life_event עם person_name ועם life_event_type ו-event_date בפורמט YYYY-MM-DD. אם האדם אינו קיים, הוסף add_person לפניו עם מה שידוע.
 - "יום הולדת ל-X ב-3.4" ללא שנה: זה תאריך האירוע השנה (או בשנה הבאה אם התאריך עבר), ולא תאריך לידה. שנת לידה מפורשת נכנסת ל-birthday ב-add_person.
 - אירוע של המנהלת (הרמת כוסית, טקס, כנס פנימי, תערוכה, יום כיף, ביקור משלחת, מפגש) הוא add_directorate_event עם starts_at מלא בפורמט ISO עם אזור זמן ישראל, למשל 2026-09-15T12:00:00+03:00. בלי שעה, השתמש ב-09:00.
-- כנס או תערוכה חיצוניים בתעשייה הם add_industry_event עם starts_on ו-ends_on בפורמט YYYY-MM-DD.
+- כנס או תערוכה חיצוניים בתעשייה הם add_industry_event עם starts_on ו-ends_on בפורמט YYYY-MM-DD ו-event_kind "אירוע". קול קורא, מענק, מלגה או מועד הגשה הם add_industry_event עם event_kind "הזדמנות" ו-starts_on כתאריך היעד.
 - בקשה למחוק או לבטל היא remove_event עם match, ואם ידוע גם remove_kind.
 - עדכון שורת הנתונים בצג (מספר עצמים במעקב, מזג אוויר חללי) הוא set_setting עם setting_key ו-line1 או line2.
 - text_he הוא טקסט תצוגה קצר בסגנון "יום הולדת · שם · אגף". השאר null אם המשתמש לא ניסח משהו מיוחד; המערכת תרכיב אותו.
@@ -42,7 +42,7 @@ function describe(a: IntakeAction): string {
     case 'update_person': return `✏️ עדכון פרטים: ${a.person_name || a.match}`;
     case 'add_life_event': return `🎉 ${a.life_event_type} · ${a.person_name} · ${a.event_date || 'היום'}`;
     case 'add_directorate_event': return `📅 ${a.title} · ${a.starts_at}${a.place ? ' · ' + a.place : ''}`;
-    case 'add_industry_event': return `🏛 ${a.title} · ${a.starts_on}${a.place ? ' · ' + a.place : ''}`;
+    case 'add_industry_event': return `${a.event_kind === 'הזדמנות' ? '💡' : '🏛'} ${a.title} · ${a.starts_on}${a.place ? ' · ' + a.place : ''}`;
     case 'remove_event': return `🗑 הסרה: ${a.match || a.title || a.person_name}`;
     case 'set_setting': return `⚙️ ${a.setting_key}: ${[a.line1, a.line2].filter(Boolean).join(' / ')}`;
     default: return '';

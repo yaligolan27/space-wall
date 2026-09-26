@@ -31,6 +31,7 @@ export const IntakeAction = z.object({
   title: nstr,
   directorate_event_type: z.enum(['toast', 'ceremony', 'conference', 'exhibition', 'fun_day', 'visit', 'meeting', 'other']).nullable().optional().transform(v => v ?? null),
   starts_at: nstr, ends_at: nstr, place: nstr, audience: nstr, url: nstr, starts_on: nstr, ends_on: nstr,
+  event_kind: z.enum(['אירוע', 'הזדמנות']).nullable().optional().transform(v => v ?? null),
   show_from: nstr, show_until: nstr,
   remove_kind: z.enum(['life', 'directorate', 'industry']).nullable().optional().transform(v => v ?? null),
   match: nstr,
