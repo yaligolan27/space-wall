@@ -1,4 +1,4 @@
-import { TZ } from './env';
+import { TZ } from './env.js';
 
 const HEB_DAYS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
 

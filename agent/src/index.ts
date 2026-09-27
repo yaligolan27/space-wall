@@ -1,14 +1,14 @@
 // One-off task runner, for testing and manual fills.
 //   npm run agent -- collect enrich launches weather numbers intake feed doctor
 // For continuous operation use `npm run runner` instead.
-import { runCollect } from './collect';
-import { runEnrich, expireStaleReview, pendingCount } from './enrich';
-import { runLaunches } from './launches';
-import { runWeather } from './weather';
-import { runNumbers } from './numbers';
-import { processIntake, queuedCount } from './intake';
-import { claudeAvailable } from './cc';
-import { buildFeed } from '../../lib/feed';
+import { runCollect } from './collect.js';
+import { runEnrich, expireStaleReview, pendingCount } from './enrich.js';
+import { runLaunches } from './launches.js';
+import { runWeather } from './weather.js';
+import { runNumbers } from './numbers.js';
+import { processIntake, queuedCount } from './intake.js';
+import { claudeAvailable } from './cc.js';
+import { buildFeed } from '../../lib/feed.js';
 
 const tasks = process.argv.slice(2).filter(Boolean);
 const list = tasks.length ? tasks : ['launches', 'weather', 'collect', 'enrich'];

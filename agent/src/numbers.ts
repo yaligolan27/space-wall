@@ -1,11 +1,11 @@
 // "Numbers of the week": grounded counts from the database plus Launch Library, handed to
 // Claude Code to pick and phrase four headline figures.
-import { db, must } from '../../lib/db';
-import { DIRECTORATE_PROFILE } from '../../lib/profile';
-import { WeeklyNumbers } from '../../lib/schemas';
-import { isoDateIL } from '../../lib/dates';
-import { runClaudeTask } from './cc';
-import { withRun, fetchJson, type RunCtx } from './run';
+import { db, must } from '../../lib/db.js';
+import { DIRECTORATE_PROFILE } from '../../lib/profile.js';
+import { WeeklyNumbers } from '../../lib/schemas.js';
+import { isoDateIL } from '../../lib/dates.js';
+import { runClaudeTask } from './cc.js';
+import { withRun, fetchJson, type RunCtx } from './run.js';
 
 const INSTRUCTIONS = `${DIRECTORATE_PROFILE}
 

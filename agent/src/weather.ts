@@ -1,6 +1,6 @@
 // Planetary Kp from NOAA SWPC → settings.space_weather
-import { db, must } from '../../lib/db';
-import { withRun, fetchJson } from './run';
+import { db, must } from '../../lib/db.js';
+import { withRun, fetchJson } from './run.js';
 
 const label = (kp: number) => kp < 4 ? 'QUIET' : kp < 5 ? 'UNSETTLED' : kp < 6 ? 'G1 MINOR STORM' : kp < 7 ? 'G2 MODERATE STORM' : 'G3+ STRONG STORM';
 

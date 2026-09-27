@@ -5,10 +5,10 @@
 // Register the webhook once:
 //   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<host>/api/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, must } from '../lib/db';
-import { buildFeed } from '../lib/feed';
-import { applyActions } from '../lib/intake-apply';
-import { esc, sendMessage, tg } from '../lib/telegram';
+import { db, must } from '../lib/db.js';
+import { buildFeed } from '../lib/feed.js';
+import { applyActions } from '../lib/intake-apply.js';
+import { esc, sendMessage, tg } from '../lib/telegram.js';
 
 const HELP = `<b>צג חלל · עדכון</b>
 שלחו הודעה חופשית ואני אהפוך אותה לעדכון בצג, למשל:

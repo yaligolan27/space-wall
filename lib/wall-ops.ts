@@ -1,9 +1,9 @@
 // Every operation the wall's operators may perform, as plain functions over the database.
 // The MCP server (api/mcp.ts) exposes these as tools; nothing here calls a model.
 import { z } from 'zod';
-import { db, must } from './db';
-import { addDays, isoDateIL } from './dates';
-import { buildFeed } from './feed';
+import { db, must } from './db.js';
+import { addDays, isoDateIL } from './dates.js';
+import { buildFeed } from './feed.js';
 
 // ---- validation primitives -----------------------------------------------------------------------
 export const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'תאריך בפורמט YYYY-MM-DD');

@@ -6,9 +6,9 @@
 //   people           ← life_events + birthdays computed from people, next 10 days (and 3 back)
 //   ticker           ← newsletter ticker + industry_events, merged by date
 //   launches         ← launches table; the sample until the runner has filled it
-import { db, must } from './db';
-import { addDays, dayDiff, isoDateIL, nextYearly, shortDate, timeIL } from './dates';
-import sample from '../app/data/feed.json';
+import { db, must } from './db.js';
+import { addDays, dayDiff, isoDateIL, nextYearly, shortDate, timeIL } from './dates.js';
+import sample from '../app/data/feed.json' with { type: 'json' };
 
 type Settings = { peopleHorizonDays: number; peopleBackDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
 const DEFAULTS: Settings = { peopleHorizonDays: 10, peopleBackDays: 3, directorateDays: 7, eventsHorizonDays: 120, launchCount: 4 };

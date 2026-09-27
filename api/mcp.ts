@@ -9,8 +9,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import * as ops from '../lib/wall-ops';
-import { isoDateIL } from '../lib/dates';
+import * as ops from '../lib/wall-ops.js';
+import { isoDateIL } from '../lib/dates.js';
 
 const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המסך בלובי של מנהלת החלל. דרך הכלים האלה מעדכנים את מה שמוצג: אנשים, אירועים אישיים, אירועי מנהלת, ורצועת האירועים וההזדמנויות.
 

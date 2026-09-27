@@ -1,7 +1,7 @@
 // Contracts for the file-based handoff between the runner and Claude Code.
 // The runner writes task.json, Claude Code writes result.json, the runner validates it here.
 import { z } from 'zod';
-import { CATEGORIES } from './categories';
+import { CATEGORIES } from './categories.js';
 
 export const EnrichedItem = z.object({
   index: z.number().int(),

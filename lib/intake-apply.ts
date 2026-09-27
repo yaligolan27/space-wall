@@ -1,8 +1,8 @@
 // Applies already-parsed intake actions to the database. Contains NO model call, so the
 // Vercel webhook can run it when the user taps "confirm".
-import { db, must } from './db';
-import { isoDateIL } from './dates';
-import type { IntakeAction } from './schemas';
+import { db, must } from './db.js';
+import { isoDateIL } from './dates.js';
+import type { IntakeAction } from './schemas.js';
 
 async function findPerson(name: string | null) {
   if (!name) return null;

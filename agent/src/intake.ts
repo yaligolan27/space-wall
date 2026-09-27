@@ -1,12 +1,12 @@
 // Intake processing. The Vercel webhook only queues the raw Telegram message; this step (local,
 // on the subscription) turns it into structured actions and sends the confirmation card.
 // Applying the confirmed actions needs no model and happens back in the webhook.
-import { db, must } from '../../lib/db';
-import { DIRECTORATE_PROFILE } from '../../lib/profile';
-import { IntakeResult, type IntakeAction } from '../../lib/schemas';
-import { isoDateIL } from '../../lib/dates';
-import { esc, sendMessage } from '../../lib/telegram';
-import { runClaudeTask } from './cc';
+import { db, must } from '../../lib/db.js';
+import { DIRECTORATE_PROFILE } from '../../lib/profile.js';
+import { IntakeResult, type IntakeAction } from '../../lib/schemas.js';
+import { isoDateIL } from '../../lib/dates.js';
+import { esc, sendMessage } from '../../lib/telegram.js';
+import { runClaudeTask } from './cc.js';
 
 function instructions(today: string, people: string, events: string): string {
   return `${DIRECTORATE_PROFILE}

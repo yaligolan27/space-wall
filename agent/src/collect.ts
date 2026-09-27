@@ -1,8 +1,8 @@
 // Collection: RSS in, rows out. No model, no cost. Items land unenriched (status 'review')
 // and the enrichment step picks them up.
 import Parser from 'rss-parser';
-import { db, must } from '../../lib/db';
-import { withRun, type RunCtx } from './run';
+import { db, must } from '../../lib/db.js';
+import { withRun, type RunCtx } from './run.js';
 
 const parser = new Parser({
   timeout: 20000,

@@ -2,8 +2,8 @@
 // Scheduled in vercel.json; Vercel calls it with `Authorization: Bearer $CRON_SECRET`.
 // On the Hobby plan cron runs once a day, which is enough: countdowns are computed in the browser.
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { runLaunches } from '../agent/src/launches';
-import { runWeather } from '../agent/src/weather';
+import { runLaunches } from '../agent/src/launches.js';
+import { runWeather } from '../agent/src/weather.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.CRON_SECRET;

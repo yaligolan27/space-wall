@@ -1,8 +1,8 @@
 // Upcoming launches from Launch Library 2 (The Space Devs). No model: site names come from a
 // keyword dictionary, and anything unmatched keeps its English name and can be fixed by hand
 // in the `translations` table.
-import { db, must } from '../../lib/db';
-import { withRun, fetchJson, type RunCtx } from './run';
+import { db, must } from '../../lib/db.js';
+import { withRun, fetchJson, type RunCtx } from './run.js';
 
 const LL2 = 'https://ll.thespacedevs.com/2.3.0/launches/upcoming/?limit=20&mode=normal';
 

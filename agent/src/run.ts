@@ -1,6 +1,6 @@
-import { db, must } from '../../lib/db';
-import { alert } from '../../lib/telegram';
-import { UsageLimitError } from './cc';
+import { db, must } from '../../lib/db.js';
+import { alert } from '../../lib/telegram.js';
+import { UsageLimitError } from './cc.js';
 
 export type RunCtx = { id: string; log: Record<string, unknown>; found: number; published: number };
 

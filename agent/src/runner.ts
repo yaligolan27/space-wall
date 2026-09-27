@@ -10,16 +10,16 @@
 //
 // The display keeps serving the last good feed whenever this process is down, and turns its
 // live dot amber once the feed goes stale.
-import { db, must } from '../../lib/db';
-import { isoDateIL, timeIL } from '../../lib/dates';
-import { alert } from '../../lib/telegram';
-import { claudeAvailable, UsageLimitError } from './cc';
-import { runCollect } from './collect';
-import { expireStaleReview, pendingCount, runEnrich } from './enrich';
-import { processIntake, queuedCount } from './intake';
-import { runLaunches } from './launches';
-import { runNumbers } from './numbers';
-import { runWeather } from './weather';
+import { db, must } from '../../lib/db.js';
+import { isoDateIL, timeIL } from '../../lib/dates.js';
+import { alert } from '../../lib/telegram.js';
+import { claudeAvailable, UsageLimitError } from './cc.js';
+import { runCollect } from './collect.js';
+import { expireStaleReview, pendingCount, runEnrich } from './enrich.js';
+import { processIntake, queuedCount } from './intake.js';
+import { runLaunches } from './launches.js';
+import { runNumbers } from './numbers.js';
+import { runWeather } from './weather.js';
 
 const sec = (name: string, dflt: number) => Math.max(15, Number(process.env[name] || dflt));
 const CFG = {

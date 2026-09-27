@@ -1,11 +1,11 @@
 // Enrichment: takes the rows collect() left as 'review' and asks Claude Code to classify,
 // score and write the Hebrew copy. Runs on the local subscription; no API key.
-import { db, must } from '../../lib/db';
-import { DIRECTORATE_PROFILE } from '../../lib/profile';
-import { EnrichResult } from '../../lib/schemas';
-import { runClaudeTask } from './cc';
-import { ogImage } from './collect';
-import { withRun, type RunCtx } from './run';
+import { db, must } from '../../lib/db.js';
+import { DIRECTORATE_PROFILE } from '../../lib/profile.js';
+import { EnrichResult } from '../../lib/schemas.js';
+import { runClaudeTask } from './cc.js';
+import { ogImage } from './collect.js';
+import { withRun, type RunCtx } from './run.js';
 
 const BATCH = Number(process.env.ENRICH_BATCH || 12);
 
