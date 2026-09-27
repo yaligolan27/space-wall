@@ -2,10 +2,40 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "outputDirectory": "app",
   "functions": {
-    "api/telegram.ts": { "maxDuration": 60 },
-    "api/feed.ts": { "maxDuration": 15 }
+    "api/telegram.ts": {
+      "maxDuration": 60
+    },
+    "api/feed.ts": {
+      "maxDuration": 15
+    },
+    "api/mcp.ts": {
+      "maxDuration": 30
+    },
+    "api/cron.ts": {
+      "maxDuration": 60
+    }
   },
   "headers": [
-    { "source": "/api/feed", "headers": [{ "key": "Cache-Control", "value": "s-maxage=60, stale-while-revalidate=300" }] }
+    {
+      "source": "/api/feed",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "s-maxage=60, stale-while-revalidate=300"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/mcp/:token",
+      "destination": "/api/mcp?token=:token"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "0 3 * * *"
+    }
   ]
 }

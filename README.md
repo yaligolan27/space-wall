@@ -1,61 +1,53 @@
 # צג חלל · מנהלת החלל — Space Wall
 
-A 1920×1080 lobby display of OSINT space news for the directorate, with a fully automatic backend
-that updates it live. **There is no Anthropic API key anywhere in this project**: every model task
-runs through the Claude Code CLI on one always-on machine, on that machine's subscription.
+A 1920×1080 lobby display for the directorate: the weekly space newsletter, the office's events and people,
+industry events and opportunities, and upcoming launches. **There is no Anthropic API key and no always-on
+machine**: operators update it by chatting with Claude through a dedicated MCP connector, on their subscription.
 
 ```
 app/              the display (static; served by Vercel, polls /api/feed every minute)
 api/feed.ts       Vercel function: builds the feed JSON from Supabase (cached 60 s)
-api/telegram.ts   Vercel function: queues Telegram messages, applies confirmed actions — no model
-lib/              shared: db client, feed builder, zod contracts, action applier, dates
+api/mcp.ts        Vercel function: the "צג חלל" MCP connector for operators
+api/cron.ts       Vercel cron: daily launches + space weather
+api/telegram.ts   optional Telegram intake (queues messages; the local runner parses them)
+lib/              shared: db client, feed builder, wall operations (wall-ops.ts), zod contracts, dates
 agent/src/        the local runner: collection, enrichment, launches, weather, numbers, intake
 agent/src/cc.ts   the bridge to the Claude Code CLI (task.json in, validated result.json out)
 agent/test/       bridge tests against stub CLI binaries (npm test)
 supabase/         schema migrations (already applied to project rrbivwhratkmzcfxqjih)
-docs/             local-runner.md (setup, autostart, limits) · telegram-setup.md
+docs/             operator-guide.md (Hebrew, for the office) · local-runner.md · telegram-setup.md
 project/, chats/  the original Claude Design handoff bundle
 ```
 
 ## How it flows
 
-1. **The runner** (`npm run runner`, on the always-on machine) schedules itself. Every 10 minutes it
-   pulls the approved RSS sources, dedupes, and stores new items unenriched. Every 10 minutes, *only
-   if something is waiting*, it hands a batch to Claude Code, which classifies each item, scores its
-   relevance and writes the Hebrew headline, the English headline and the "למה חשוב למנהלת" line.
-   The result is validated against a zod schema before it is stored, so a malformed answer is
-   retried rather than displayed. Launches come from Launch Library 2 and space weather from NOAA,
-   both without a model.
-2. **Vercel** serves `app/` and `/api/feed`, which assembles the display JSON from the database:
-   the 24-hour loop, two feature cards with a QR to the article, the numbers of the week, the
-   directorate block (life events, birthdays computed from the people table, internal events), the
-   events ticker and the next launches.
-3. **The Telegram bot** takes free Hebrew text from anyone on the allow-list. The webhook only
-   queues it; the runner parses it within a minute and replies with a summary and ✅/❌; on confirm
-   the webhook writes to `people`, `life_events`, `directorate_events` or `industry_events`.
-
-Every run is recorded in `agent_runs`, every message in `intake_messages`. Failures and usage-limit
-pauses are pushed to `TELEGRAM_ALERT_CHAT_ID`. Send `/status` to the bot for a health summary.
-
-**When the machine is off**, the display keeps serving the last good feed and turns its live dot
-amber once the feed is more than three hours old. Nothing is lost; the queue waits.
+1. **Operators** (the directorate office, with a dedicated Claude account) update the wall by chatting
+   with Claude through the **"צג חלל" MCP connector** (`api/mcp.ts`, served at `/mcp/<MCP_TOKEN>`).
+   Its tools can only add, edit and remove people, life events, directorate events and ticker items, and
+   import a newsletter issue; there is no raw SQL and people are soft-deleted. Guide: `docs/operator-guide.md`.
+2. **Vercel** serves the display (`app/`) and `/api/feed`, which assembles the v4 feed from Supabase.
+   A daily Vercel cron (`api/cron.ts`) refreshes launches and space weather; neither needs a model.
+3. **The weekly newsletter** is imported into `newsletter_issues` through the same connector
+   (`import_newsletter_issue`); until the first import the display shows the design's sample week.
+4. **Optional:** the Telegram bot and the local Claude Code runner (`agent/`) still work for free-text intake
+   and RSS enrichment, but nothing on the wall depends on them any more.
 
 ## Setup
 
-1. **The runner** is the only part with prerequisites. Follow `docs/local-runner.md`: install Claude
-   Code, log in once with the subscription account, fill `.env` with the two Supabase values, then
-   `npm run doctor` and `npm run runner`. It also covers autostart on macOS, Linux and Windows.
-2. **The bot**: `docs/telegram-setup.md`, from @BotFather to the webhook URL.
-3. **Vercel** needs only these environment variables, and no Anthropic key:
+**Vercel** → Project `space-wall` → Settings → Environment Variables, then Redeploy:
 
 | Name | Value |
 | --- | --- |
-| `SUPABASE_URL` | `https://rrbivwhratkmzcfxqjih.supabase.co` |
+| `SUPABASE_URL` | already set |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API Keys → `service_role` |
-| `TELEGRAM_BOT_TOKEN` | from @BotFather |
-| `TELEGRAM_WEBHOOK_SECRET` | any random string, matching the one in the webhook URL |
-| `TELEGRAM_ADMIN_IDS` | comma-separated chat ids allowed to edit (send `/whoami` to get yours) |
+| `MCP_TOKEN` | a random string of at least 32 characters; it is the connector's password |
+| `CRON_SECRET` | a random string; Vercel sends it to the cron endpoint |
 | `DISPLAY_KEY` | optional; when set, the wall must open `/?key=<DISPLAY_KEY>` |
+
+Also turn off Settings → Deployment Protection → Vercel Authentication so the lobby screen can load the page.
+
+**Connector** for the operator: `https://space-wall.vercel.app/mcp/<MCP_TOKEN>`, added in Claude under
+Settings → Connectors → Add custom connector. To revoke access, change `MCP_TOKEN` and redeploy.
 
 ## Commands
 
