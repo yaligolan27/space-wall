@@ -1,9 +1,12 @@
 // Space Wall v4 — the lobby display. A direct port of the Claude Design "Space Wall v4" template:
 // the same 1920×1080 stage, layout, styles and motion, rendered with React (vendored UMD, no build).
-// Content comes from /api/feed (weekly newsletter + database) with the bundled sample as fallback.
-// Full-screen moments (launch mode, personal celebration, 12:00 show, important event) live in overlays.js,
-// the 3D emblem in emblem-v2.js. The remote control (app/remote) drives design, brightness, the urgent banner
-// and full-screen moments through /api/live, polled every few seconds; URL options override the stored design.
+// Content comes from /api/feed (weekly newsletter + database). Until it answers the wall shows a calm "connecting"
+// state, never invented content: the bundled sample (data/feed.json) appears only with ?sample=1, or lends a ?demo= its
+// moment when there is no real one. Full-screen moments (launch mode, personal celebration, 12:00 show, important
+// event) live in overlays.js, the 3D emblem in emblem-v2.js. The remote control (app/remote) drives design, brightness,
+// the urgent banner and full-screen moments through /api/live, polled every few seconds; URL options override the
+// stored design. /api/live also gives the server's clock, which times everything here, and the deployment, so the
+// wall reloads itself after a deploy (and nightly at 04:00) and runs for weeks unattended.
 (() => {
   const h = React.createElement;
   const { useState, useEffect } = React;
@@ -17,6 +20,7 @@
     key: q.get('key') || '',
     refresh: Math.max(10, num('refresh', 60)),
     demo: q.get('demo') || 'off',                 // off | launch | greeting | noon
+    sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
     noonShow: bool('noon', true),
     showQr: bool('qr', true),
     featureSeconds: Math.min(30, Math.max(6, num('feature', 12))),
@@ -40,6 +44,27 @@
     }
     return changed;
   }
+
+  // ---- time, fetches, reloads --------------------------------------------------------------------
+  // The server's clock (from /api/live's `at`): a kiosk whose own clock drifts still opens and closes moments on time.
+  let skew = 0;
+  const serverNow = () => Date.now() + skew;
+  window.wallNow = serverNow;                       // overlays.js counts down with it
+  const timeout = (ms) => { if (AbortSignal.timeout) return AbortSignal.timeout(ms); const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
+  const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+  // A reload happens only when the page itself answers (never strand the lobby on the browser's offline page) and at
+  // most once per `gap` across reloads (sessionStorage), so a page that breaks on load cannot loop.
+  const store = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} } };
+  async function reloadPage(gap) {
+    if (Date.now() - (Number(store.get('wall:reloadAt')) || 0) < gap) return;
+    try { if (!(await fetch(location.href, { cache: 'no-store', signal: timeout(10e3) })).ok) return; } catch (e) { return; }
+    store.set('wall:reloadAt', String(Date.now()));
+    location.reload();
+  }
+  // Launch Library statuses for a launch that has flown; a Go launch counts as flown after its time only while the data
+  // is recent, since the launches come from a daily cron (the feed refreshes them near a launch).
+  const FLOWN = { Success: 1, 'In Flight': 1, Failure: 1, 'Partial Failure': 1 };
+  const goNow = (l, now) => l.code === 'Go' && now - Date.parse(l.checked) < 6 * 3600e3;
 
   // ---- QR, generated locally (no third-party image service) ------------------------------------
   const qrCache = {};
@@ -72,87 +97,135 @@
   const MUTED = '#8b9dbd';
 
   class Wall extends React.Component {
-    constructor(p) { super(p); this.state = { scale: 1, now: Date.now(), data: null, ov: null, toast: null }; }
+    constructor(p) { super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0 }; }
 
     // ---- lifecycle ----------------------------------------------------------------------------
     componentDidMount() {
       this.t0 = Date.now();
       this.fit = () => { const s = Math.min(innerWidth / 1920, innerHeight / 1080); if (s > 0) this.setState({ scale: s }); };
       this.fit(); addEventListener('resize', this.fit); this.fitRetry = setTimeout(this.fit, 800);
-      this.tick = setInterval(() => { this.setState({ now: Date.now() }); this.schedule(); }, 1000);
+      this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } }, 1000);
       this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(); if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'escape') this.setState({ ov: null }); };
       addEventListener('keydown', this.onKey);
-      this.load(); this.poll = setInterval(() => this.load(), CFG.refresh * 1000);
+      this.load();
       this.loadLive(); this.livePoll = setInterval(() => this.loadLive(), CFG.livePoll * 1000);
     }
-    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearInterval(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); removeEventListener('resize', this.fit); }
+    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); removeEventListener('resize', this.fit); }
 
     // ---- live state from the remote -------------------------------------------------------------
+    get liveOk() { return Date.now() - (this._liveOkAt || 0) < 30e3; }   // one missed poll is not an outage
     async loadLive() {
+      if (this._liveBusy) return;
+      this._liveBusy = true;
       try {
-        const L = JSON.parse(await this.fetchText(CFG.live));
-        this.liveOk = true;
+        const t0 = Date.now(), L = JSON.parse(await this.fetchText(CFG.live, 8e3)), t1 = Date.now(), at = Date.parse(L.at);
+        if (at) {
+          if (at < (this._liveAt || 0)) return;          // a late answer must not undo a newer one (e.g. close a moment)
+          this._liveAt = at;
+          const off = at - (t0 + t1) / 2;                 // server clock minus ours, give or take half the round trip
+          if (Math.abs(off - skew) > 1000) skew = off;
+        }
+        this._liveOkAt = Date.now();
+        // A new deployment counts once it has answered twice in a row; '' (unknown) never does.
+        if (L.build && !this._build) this._build = L.build;
+        this._newBuild = L.build && L.build !== this._build ? (this._newBuild || 0) + 1 : 0;
         if (L.design && applyDesign(L.design)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ovK = null; }
-        this.setState({ live: L }, () => this.syncTakeover());
-      } catch (e) { this.liveOk = false; }
+        this.setState({ live: L, now: serverNow() }, () => this.syncTakeover());
+      } catch (e) { /* liveOk lapses by itself */ } finally { this._liveBusy = false; }
     }
     /** A full-screen moment from the remote (or an important event / the 12:00 show, decided by the server). */
     syncTakeover() {
-      const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = Date.now();
-      if (!tk) { if (ov && ov.live) this.setState({ ov: null }); return; }
-      if (tk.id === this._tkSeen) return;
+      const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow();
+      // Forget what was shown once the server reports none, so the remote's undo of "back to normal" brings it back.
+      if (!tk) { this._tkSeen = null; if (ov && ov.live) this.setState({ ov: null }); return; }
+      if (tk.id === this._tkSeen) return;                // shown already, maybe ended here first: not again
       this._tkSeen = tk.id;
       const until = Date.parse(tk.until) || now + 60e3;
+      if (until <= now) return;
       if (tk.kind === 'noon') this.setState({ ov: { kind: 'noon', id: tk.id, live: true, until } });
       else if (tk.kind === 'celebrate' && tk.person) this.setState({ ov: { kind: 'celebrate', id: tk.id, live: true, person: tk.person, until } });
       else if (tk.kind === 'event') this.setState({ ov: { kind: 'event', id: tk.id, live: true, event: tk, until } });
     }
 
-    async fetchText(url) {
+    async fetchText(url, ms) {
       const sep = url.includes('?') ? '&' : '?';
-      const res = await fetch(url + sep + 't=' + Date.now() + (CFG.key ? '&key=' + encodeURIComponent(CFG.key) : ''), { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const res = await fetch(url + sep + 't=' + Date.now() + (CFG.key ? '&key=' + encodeURIComponent(CFG.key) : ''), { cache: 'no-store', signal: timeout(ms) });
+      if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
       return res.text();
     }
+    /** The feed, every `refresh` seconds. Until the first answer: retry within seconds and show nothing invented. */
     async load() {
+      if (this._loading) return;
+      this._loading = true;
+      let wait = CFG.refresh;
       try {
-        let body;
-        try { body = await this.fetchText(CFG.feed); }
-        catch (e) { if (this.state.data) throw e; console.warn('live feed unavailable, using bundled sample', e); body = await this.fetchText('/data/feed.json'); }
-        if (body === this._lastBody) return;
-        const data = JSON.parse(body);
-        if (!Array.isArray(data.news) || !Array.isArray(data.people)) throw new Error('feed is not in the v4 shape');
-        this._lastBody = body;
-        this.resetCaches();
-        this.setState({ data }, () => { if (CFG.demo !== 'off' && !this._demoDone) { this._demoDone = true; this.demo(CFG.demo); } });
-      } catch (e) { console.warn('feed load failed', e); }
+        const body = await this.fetchText(CFG.sample ? '/data/feed.json' : CFG.feed, 20e3);
+        if (body !== this._lastBody) {
+          const data = JSON.parse(body);
+          if (!Array.isArray(data.news) || !Array.isArray(data.people)) throw new Error('feed is not in the v4 shape');
+          for (const k of ['featured', 'ticker', 'launches', 'directorate']) if (!Array.isArray(data[k])) data[k] = [];
+          data.issue = data.issue || {}; data.catColor = data.catColor || {}; data.catImage = data.catImage || {};
+          this._lastBody = body;
+          this.resetCaches();
+          this.setState({ data });
+        }
+        this._feedOkAt = Date.now(); this._fails = 0;
+        if (this.state.feedErr) this.setState({ feedErr: 0 });
+      } catch (e) {
+        console.warn('feed load failed', e);
+        // Without data yet: 5 s, doubling up to the poll interval. With data: keep it (it is real) and the usual pace.
+        if (!this.state.data) { this._fails = (this._fails || 0) + 1; wait = Math.min(CFG.refresh, 5 * 2 ** (this._fails - 1)); this.setState({ feedErr: e.status || -1 }); }
+      } finally {
+        this._loading = false;
+        clearTimeout(this.poll); this.poll = setTimeout(() => this.load(), wait * 1000);
+        if (CFG.demo !== 'off' && !this._demoDone) { this._demoDone = true; this.setState({}, () => this.demo(CFG.demo)); }
+      }
     }
     resetCaches() { this._feat = this._list = this._tick = this._spot = this._trk = this._typ = null; this._featK = this._listS = this._spotI = undefined; }
+    async sample() { return this._sample || (this._sample = JSON.parse(await this.fetchText('/data/feed.json', 20e3))); }
 
     // ---- moments --------------------------------------------------------------------------------
     get D() { return this.state.data; }
-    ilParts(now) { const o = {}; fmtParts.formatToParts(new Date(now)).forEach((p) => (o[p.type] = p.value)); return { day: o.year + o.month + o.day, h: +o.hour, m: +o.minute, s: +o.second }; }
-    celebratable() { const D = this.D; return D ? D.people.filter((p) => p.celebrate !== false) : []; }
-    demo(kind) {
-      const D = this.D, now = Date.now(); if (!D) return;
-      if (kind === 'launch' && D.launches.length) this.setState({ ov: { kind: 'launch', id: now, launch: Object.assign({}, D.launches[Math.min(2, D.launches.length - 1)], { at: new Date(now + 15000).toISOString() }), until: now + 27000 } });
-      if (kind === 'greeting') { const P = this.celebratable(); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[(this._demoP = ((this._demoP ?? -1) + 1)) % P.length], until: now + 14000 } }); }
-      if (kind === 'noon') this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } });
+    ilParts(now) { const o = {}; fmtParts.formatToParts(new Date(now)).forEach((p) => (o[p.type] = p.value)); return { day: o.year + o.month + o.day, iso: o.year + '-' + o.month + '-' + o.day, h: +o.hour, m: +o.minute, s: +o.second }; }
+    /** People greeted full-screen today: from the day of their moment to two days after it, never mourning. */
+    celebratable(today) { const D = this.D; return D ? D.people.filter((p) => p.celebrate !== false && p.on && p.on <= today && today <= addDays(p.on, 2)) : []; }
+    /** A moment on request (?demo=, keys L/G/N): real content when there is some, else the sample's; it is a demo. */
+    async demo(kind) {
+      if (kind === 'noon') { const t = serverNow(); return this.setState({ ov: { kind: 'noon', id: t, demo: true, until: t + 15 * 60e3 } }); }
+      if (kind !== 'launch' && kind !== 'greeting') return;
+      const pick = (S) => (kind === 'launch' ? S.launches : S.people.filter((p) => p.celebrate !== false)) || [];
+      let list = this.D ? pick(this.D) : [];
+      if (!list.length) { try { list = pick(await this.sample()); } catch (e) { return; } }
+      const t = serverNow();
+      if (!list.length) return;
+      if (kind === 'launch') this.setState({ ov: { kind: 'launch', id: t, demo: true, launch: Object.assign({}, list[Math.min(2, list.length - 1)], { at: new Date(t + 15000).toISOString() }), until: t + 27000 } });
+      else this.setState({ ov: { kind: 'celebrate', id: t, demo: true, person: list[(this._demoP = ((this._demoP ?? -1) + 1)) % list.length], until: t + 14000 } });
     }
     schedule() {
-      const D = this.D, now = Date.now(); if (!D) return;
+      const D = this.D, now = serverNow();
       let ov = this.state.ov;
-      if (ov && now > ov.until) { if (ov.kind === 'launch') this.setState({ toast: { title: 'שוגר', line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.setState({ ov: null }); }
+      if (ov && now > ov.until) { if (ov.kind === 'launch' && !ov.demo) this.setState({ toast: { title: 'שוגר', line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.setState({ ov: null }); }
       if (this.state.toast && now > this.state.toast.until) this.setState({ toast: null });
-      if (ov && (ov.kind === 'noon' || ov.live)) return;
       const T = this.ilParts(now);
+      this.maybeReload(T, ov);
+      if (ov && (ov.kind === 'noon' || ov.live)) return;
       // The 12:00 show is decided by the server (it can be skipped or stopped from the remote); locally only as a fallback.
       if (!this.liveOk && CFG.noonShow && T.h === 12 && T.m === 0 && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
-      const L = D.launches.find((l) => { const d = Date.parse(l.at) - now; return d > -12000 && d <= 600e3; });
+      if (!D) return;
+      // Launch mode only for a launch Launch Library calls Go (and recently): never for TBD/TBC/Hold.
+      const L = D.launches.find((l) => { const d = Date.parse(l.at) - now; return d > -12000 && d <= 600e3 && goNow(l, now); });
       if (L) { if (!ov || ov.kind !== 'launch' || ov.launch.at !== L.at) this.setState({ ov: { kind: 'launch', id: L.at, launch: L, until: Date.parse(L.at) + 12000 } }); return; }
-      // A personal celebration every half hour (:00 and :30), cycling through the people panel.
+      // A personal celebration every half hour (:00 and :30), cycling through the people whose day it is.
       const slotKey = T.day + T.h + ':' + T.m;
-      if (!ov && (T.m === 0 || T.m === 30) && T.s < 5 && this._celebSlot !== slotKey) { this._celebSlot = slotKey; const P = this.celebratable(); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[(T.h * 2 + (T.m ? 1 : 0)) % P.length], until: now + 14000 } }); }
+      if (!ov && (T.m === 0 || T.m === 30) && T.s < 5 && this._celebSlot !== slotKey) { this._celebSlot = slotKey; const P = this.celebratable(T.iso); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[(T.h * 2 + (T.m ? 1 : 0)) % P.length], until: now + 14000 } }); }
+    }
+    /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment. */
+    maybeReload(T, ov) {
+      if (ov || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0)) return;
+      const nightly = T.h === 4 && T.m < 20 && Date.now() - this.t0 > 3600e3;
+      if (!nightly && (this._newBuild || 0) < 2) return;
+      this._reloadTry = Date.now() + 60e3;
+      reloadPage(nightly ? 3600e3 : 10 * 60e3);
     }
     overlay() {
       const ov = this.state.ov, toast = this.state.toast;
@@ -164,7 +237,7 @@
       if (ov && ov.kind === 'launch') el = h(O.LaunchMode, { key: k, launch: ov.launch });
       if (ov && ov.kind === 'celebrate') el = h(O.Celebration, { key: k, person: ov.person });
       if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: k, src: (this.D && this.D.promoVideo) || '/assets/promo.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.setState({ ov: null }) });
-      if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: k, event: ov.event });
+      if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: k, event: ov.event, until: ov.until });
       return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
     }
 
@@ -274,31 +347,31 @@
         const when = fmtWhen.format(new Date(at)).replace(',', ' ·');
         const isNext = !gone && !nextFound; if (isNext) nextFound = true;
         const a = Math.abs(d), dd = Math.floor(a / 86400e3), hh = Math.floor(a / 3600e3) % 24, mm = Math.floor(a / 60e3) % 60, ss = Math.floor(a / 1e3) % 60;
-        const segs = gone ? [{ v: 'T+', u: '' }, { v: p(Math.min(99, Math.floor(a / 3600e3))), u: 'שע׳' }, { v: p(mm), u: 'דק׳' }] : [{ v: p(dd), u: 'ימים' }, { v: p(hh), u: 'שע׳' }, { v: p(mm), u: 'דק׳' }, { v: p(ss), u: 'שנ׳' }];
-        const status = gone ? 'שוגר' : l.status, statusColor = gone ? '#6f82a6' : l.status === 'אושר' ? '#8fe0b8' : '#e9b872';
+        // Past its time a launch reads as launched only on Launch Library's word; otherwise it probably slipped.
+        const flew = gone && (FLOWN[l.code] || goNow(l, now));
+        const segs = !gone ? [{ v: p(dd), u: 'ימים' }, { v: p(hh), u: 'שע׳' }, { v: p(mm), u: 'דק׳' }, { v: p(ss), u: 'שנ׳' }]
+          : flew ? [{ v: 'T+', u: '' }, { v: p(Math.min(99, Math.floor(a / 3600e3))), u: 'שע׳' }, { v: p(mm), u: 'דק׳' }] : [{ v: '--', u: 'שע׳' }, { v: '--', u: 'דק׳' }];
+        const status = !gone ? l.status : !flew ? 'ממתין לעדכון' : l.code === 'Go' ? 'שוגר' : l.status;
+        const statusColor = gone ? '#6f82a6' : l.status === 'אושר' ? '#8fe0b8' : '#e9b872';
         return Object.assign({}, l, { when, segs, status, statusColor, numColor: gone ? '#6f82a6' : isNext ? '#d4f25c' : '#e6f1ff', border: isNext ? 'rgba(212,242,92,.55)' : 'rgba(150,190,240,.14)', shadow: isNext ? '0 0 24px rgba(212,242,92,.16)' : 'none' });
       });
     }
+    /** "updated X ago" from the feed's generatedAt; amber when stale, or when the feed itself has stopped answering. */
     updatedAgo(D) {
-      const t = Date.parse(D.generatedAt); if (!t) return { text: '—', stale: true };
+      const off = !CFG.sample && Date.now() - (this._feedOkAt || Date.now()) > Math.max(5 * 60e3, 3 * CFG.refresh * 1000);
+      const t = Date.parse(D.generatedAt); if (!t) return { text: off ? 'אין חיבור לנתונים' : 'עודכן —', stale: true };
       const min = Math.max(0, Math.round((this.state.now - t) / 6e4));
       const text = min < 1 ? 'עכשיו' : min < 60 ? `לפני ${min} דק׳` : min < 1440 ? `לפני ${Math.floor(min / 60)} שע׳` : `לפני ${Math.floor(min / 1440)} ימים`;
-      return { text, stale: min > CFG.staleAfterMin };
+      return { text: (off ? 'אין חיבור לנתונים · ' : '') + 'עודכן ' + text, stale: off || min > CFG.staleAfterMin };
     }
 
     // ---- the template -----------------------------------------------------------------------------
     render() {
-      const D = this.D, now = this.state.now, t = now - (this.t0 || now), nd = new Date(now);
+      const D = this.D, now = this.state.now, t = Date.now() - (this.t0 || Date.now()), nd = new Date(now);
       const stage = (children) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
         h('div', { dir: 'rtl', style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } }, children));
-      if (!D) return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), h('div', { key: 'e', style: { gridRow: '1 / -1', display: 'flex' } }, this.emblem()), this.liveLayers()]);
-
-      const fsec = CFG.featureSeconds, fIdx = D.featured.length ? Math.floor(t / (fsec * 1000)) % D.featured.length : 0;
-      const pIdx = D.people.length ? Math.floor(t / 7000) % D.people.length : 0, focusIdx = Math.floor(t / 9000) % 4;
-      const hi = (i) => (focusIdx === i ? 'rgba(212,242,92,.45)' : 'rgba(150,190,240,.16)');
-      const cur = D.people[pIdx];
-      const ago = this.updatedAgo(D);
-      const dot = h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
+      const ago = D && this.updatedAgo(D);
+      const dot = ago && h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
       const timeBox = (big, small, extra, smallStyle) => h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },
         h('span', { style: Object.assign({ fontSize: 26, letterSpacing: '.03em' }, extra.big) }, big), h('span', { style: Object.assign({ fontSize: 12, color: MUTED }, smallStyle) }, small));
 
@@ -309,15 +382,37 @@
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, 'צג חלל · מנהלת החלל'))),
         h('div'),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, fontFamily: "'Lexend',sans-serif" } },
-          h('div', { style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, 'עודכן ' + ago.text)),
+          ago ? h('div', { style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, ago.text)) : null,
           timeBox(fmtIL.format(nd), fmtDate.format(nd), { box: { padding: '6px 20px' }, big: { fontWeight: 400 } }, { fontFamily: 'Heebo' }),
           timeBox(fmtUTC.format(nd), 'UTC', { box: { padding: '6px 18px' }, big: { fontWeight: 300, color: '#9fdcff' } }, { letterSpacing: '.12em' })));
+      const quiet = (text, extra) => h('span', { style: Object.assign({ fontSize: 15, color: MUTED, lineHeight: 1.4 }, extra) }, text);
 
-      const directorate = D.directorate.map((d, i) => h('div', { key: i, style: { display: 'grid', gridTemplateColumns: '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: i === 0 ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${i === 0 ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
-        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } },
-          h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } }, h('span', { style: { fontSize: 17, fontWeight: 500, lineHeight: 1.25, textWrap: 'pretty' } }, d.name), h('span', { style: { fontSize: 13, color: MUTED } }, d.place)),
-        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), h('span', { style: { fontSize: 12, fontWeight: 500, color: '#d4f25c' } }, i === 0 ? 'הבא' : ''))));
+      // No feed yet: the emblem, the clock and a calm word. Nothing invented; full-screen moments from the remote still show.
+      if (!D) {
+        const denied = this.state.feedErr === 401 || this.state.feedErr === 403;
+        return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header,
+          h('div', { key: 'e', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem()),
+          h('div', { key: 'w', style: { gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 } },
+            h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, 'מתחבר לנתונים…'),
+            denied ? quiet('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת') : null),
+          h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()]);
+      }
+
+      const fsec = CFG.featureSeconds, fIdx = D.featured.length ? Math.floor(t / (fsec * 1000)) % D.featured.length : 0;
+      const pIdx = D.people.length ? Math.floor(t / 7000) % D.people.length : 0, focusIdx = Math.floor(t / 9000) % 4;
+      const hi = (i) => (focusIdx === i ? 'rgba(212,242,92,.45)' : 'rgba(150,190,240,.16)');
+      const cur = D.people[pIdx];
+
+      // Events that have ended drop out between feed updates too; "עכשיו" while one runs, "הבא" only for the next to come.
+      let nextTagged = false;
+      const directorate = D.directorate.filter((d) => !d.end || Date.parse(d.end) > now).map((d, i) => {
+        const tag = d.start && Date.parse(d.start) <= now ? 'עכשיו' : nextTagged ? '' : ((nextTagged = true), 'הבא');
+        return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
+          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } },
+            h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } }, h('span', { style: { fontSize: 17, fontWeight: 500, lineHeight: 1.25, textWrap: 'pretty' } }, d.name), h('span', { style: { fontSize: 13, color: MUTED } }, d.place)),
+          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), h('span', { style: { fontSize: 12, fontWeight: 500, color: '#d4f25c' } }, tag)));
+      });
 
       const peopleGrid = D.people.map((p, i) => { const on = p === cur; return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 14, background: on ? 'rgba(111,214,234,.1)' : 'rgba(8,16,34,.35)', border: `1px solid ${on ? p.color : 'rgba(150,190,240,.1)'}`, transition: 'all .6s ease', minWidth: 0 } },
         h('img', { src: window.wallAvatar(96, p.photo, p.name), alt: '', style: { width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', flex: 'none', border: `1.5px solid ${p.color}` } }),
@@ -328,12 +423,12 @@
 
       const right = h('section', { key: 'r', style: { display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 } },
         h('div', { style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }) },
-          this.sheen(1, 0), panelHead('אירועים במנהלת', 'השבוע'), directorate.length ? directorate : h('span', { style: { fontSize: 15, color: MUTED } }, 'אין אירועים השבוע')),
+          this.sheen(1, 0), panelHead('אירועים במנהלת', 'השבוע'), directorate.length ? directorate : quiet('אין אירועים השבוע')),
         h('div', { style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
           this.sheen(2, 4.5),
           panelHead('אנשים במנהלת', D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),
-          this.spotlight(D, pIdx),
-          h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid)));
+          D.people.length ? this.spotlight(D, pIdx) : quiet('אין ימי הולדת או רגעים אישיים בימים הקרובים'),
+          D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null));
 
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
         h('div', { style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem()));
@@ -341,18 +436,18 @@
       const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }) },
         this.sheen(3, 9),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, 'ניוזלטר החלל השבועי'), h('span', { style: { fontSize: 13, color: MUTED } }, 'רקיע · הפורום הישראלי לחלל · ' + D.issue.range)),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, 'ניוזלטר החלל השבועי'), h('span', { style: { fontSize: 13, color: MUTED } }, ['רקיע · הפורום הישראלי לחלל', D.issue.range].filter(Boolean).join(' · '))),
           CFG.showQr && D.issue.url ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
             h('span', { style: { fontSize: 11, color: MUTED, textAlign: 'left', lineHeight: 1.3 } }, 'לגיליון', h('br'), 'המלא'),
             h('img', { src: qrData(D.issue.url), alt: 'QR', style: { width: 52, height: 52, borderRadius: 8, background: '#0b1430', padding: 3, border: '1px solid rgba(230,241,255,.25)' } })) : null),
-        D.news.length ? this.featured(D, fIdx, fsec) : null,
+        D.news.length ? this.featured(D, fIdx, fsec) : quiet('הגיליון השבועי יופיע כאן אחרי שייקלט'),
         D.news.length ? this.newsList(D) : null);
 
       const main = h('main', { key: 'main', style: { display: 'grid', gridTemplateColumns: '470px minmax(0,1fr) 470px', gap: 26, padding: '14px 36px 16px', minHeight: 0, position: 'relative', zIndex: 2 } }, right, center, left);
 
       const tickerBar = h('div', { key: 'tk', style: { display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' } },
         h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', height: '100%', borderLeft: '1px solid rgba(150,190,240,.14)', fontSize: 15, fontWeight: 700 } }, 'אירועים והזדמנויות'),
-        this.ticker(D));
+        D.ticker.length ? this.ticker(D) : quiet('אין אירועים או הזדמנויות קרובים', { padding: '0 26px' }));
 
       const launches = this.launchVals(D.launches, now).slice(0, 4).map((l, i) => h('div', { key: i, style: { height: 84, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '0 14px', borderRadius: 22, background: 'linear-gradient(180deg,rgba(40,62,104,.38),rgba(12,22,44,.6))', border: `1px solid ${l.border}`, boxShadow: l.shadow, minWidth: 0 } },
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
@@ -365,7 +460,7 @@
           h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 17, fontWeight: 400, color: l.numColor, lineHeight: 1.1 } }, s.v), h('span', { style: { fontSize: 10, color: '#6f82a6' } }, s.u))))));
       const footer = h('footer', { key: 'ft', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, 'שיגורים קרובים'), h('span', { style: { fontSize: 12, color: MUTED } }, 'שעון ישראל · Launch Library')),
-        launches);
+        launches.length ? launches : quiet('אין כרגע נתוני שיגורים', { gridColumn: '2 / -1' }));
 
       return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer, h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()]);
     }
@@ -378,5 +473,16 @@
     }
   }
 
-  ReactDOM.createRoot(document.getElementById('root')).render(h(Wall));
+  /** A render crash leaves a dark screen and reloads the page: after half a minute, then at most every five minutes. */
+  class Guard extends React.Component {
+    constructor(p) { super(p); this.state = { crashed: false }; }
+    static getDerivedStateFromError() { return { crashed: true }; }
+    componentDidCatch(e) { console.error('wall crashed', e); if (!this.retry) this.retry = setInterval(() => reloadPage(5 * 60e3), 30e3); }
+    componentWillUnmount() { clearInterval(this.retry); }
+    render() {
+      return this.state.crashed ? h('div', { style: { position: 'fixed', inset: 0, background: '#040914', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 22 } }, 'הצג יחזור בעוד רגע') : this.props.children;
+    }
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(h(Guard, null, h(Wall)));
 })();

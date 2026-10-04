@@ -7,8 +7,11 @@ window.wallAvatar = (sz, photo, name) => {
   const key = sz + '|' + name; if (cache[key]) return cache[key];
   const c = document.createElement('canvas'); c.width = c.height = sz; const g = c.getContext('2d');
   const gr = g.createLinearGradient(0, 0, sz, sz); gr.addColorStop(0, '#1d3a6e'); gr.addColorStop(1, '#0c1a38'); g.fillStyle = gr; g.fillRect(0, 0, sz, sz);
-  const RANKS = /^(רס״ן|רס"ן|סרן|סגן|סג״מ|סא״ל|אל״מ|תא״ל|רס״ל|רס״ר|סמל|רב"ט|רב״ט)$/;
-  const ini = String(name || '').replace(/[^\u0590-\u05FFA-Za-z״" ]/g, '').trim().split(/\s+/).filter((w) => !RANKS.test(w)).slice(0, 2).map((w) => w[0]).join('');
+  // A rank before the name is not an initial ("רס״ן דנה כהן" → דכ). It is written with ״, " or ” (or none), so compare bare.
+  const RANKS = new Set(['טוראי', 'טור', 'רבט', 'סמל', 'סמר', 'רסל', 'רסר', 'רסמ', 'רסם', 'רסב', 'רנג', 'סגמ', 'סגם', 'סגן', 'סרן', 'רסן', 'סאל', 'אלמ', 'אלם', 'תאל', 'אלוף', 'ראל']);
+  const words = String(name || '').replace(/[^\u0590-\u05FFA-Za-z״" ]/g, '').trim().split(/\s+/);
+  while (words.length > 1 && RANKS.has(words[0].replace(/[״"׳]/g, ''))) words.shift();
+  const ini = words.slice(0, 2).map((w) => w[0]).join('');
   g.fillStyle = '#e6f1ff'; g.font = '700 ' + Math.round(sz * 0.38) + 'px Heebo, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl'; g.fillText(ini, sz / 2, sz / 2 + sz * 0.03);
   return (cache[key] = c.toDataURL());
 };
@@ -16,7 +19,9 @@ window.makeWallOverlays = (React) => {
   const h = React.createElement, { useState, useEffect, useRef } = React;
   const LEX = "'Lexend',sans-serif", MONO = "'IBM Plex Mono',monospace";
   const p2 = (n) => String(n).padStart(2, '0');
-  const useNow = (ms = 100) => { const [n, set] = useState(Date.now()); useEffect(() => { const id = setInterval(() => set(Date.now()), ms); return () => clearInterval(id); }, [ms]); return n; };
+  const clock = () => (window.wallNow ? window.wallNow() : Date.now());   // the wall's server-corrected clock
+  const useNow = (ms = 100) => { const [n, set] = useState(clock()); useEffect(() => { const id = setInterval(() => set(clock()), ms); return () => clearInterval(id); }, [ms]); return n; };
+  const fmtHM = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false });
   const shell = (children, extra) => h('div', { style: Object.assign({ position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', animation: 'ovIn .9s ease both', direction: 'rtl', fontFamily: 'Heebo, sans-serif', color: '#e6f1ff' }, extra) }, children);
 
   // ---------- particles: fireworks + confetti ----------
@@ -46,7 +51,7 @@ window.makeWallOverlays = (React) => {
   };
 
   // ---------- Celebration ----------
-  const TITLES = { 'יום הולדת': 'יום הולדת שמח!', 'שחרור': 'בהצלחה בהמשך הדרך!', 'ברוכים הבאים': 'ברוכה הבאה למנהלת!', 'מזל טוב': 'מזל טוב!' };
+  const TITLES = { 'יום הולדת': 'יום הולדת שמח!', 'שחרור': 'בהצלחה בהמשך הדרך!', 'ברוכים הבאים': 'ברוכים הבאים למנהלת!', 'מזל טוב': 'מזל טוב!' };
   const Celebration = ({ person }) => {
     const p = person;
     return shell([
@@ -111,13 +116,14 @@ window.makeWallOverlays = (React) => {
   };
 
   // ---------- important directorate event, started from the remote or automatically while it runs ----------
-  const EventTakeover = ({ event }) => shell([
+  // `until` is when this screen itself ends (the remote can show an event for less, or after, its own end).
+  const EventTakeover = ({ event, until }) => shell([
     h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'linear-gradient(160deg,#0b1d42 0%,#040914 70%)' } }),
     h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27, padding: 134, boxSizing: 'border-box' } },
       h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, 'עכשיו במנהלת'),
       h('span', { style: { fontSize: 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
       h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, event.start + '–' + event.end + (event.place ? ' · ' + event.place : ''))),
-    h('span', { key: 'end', style: { position: 'absolute', bottom: 77, right: 134, fontSize: 29, color: '#8b9dbd' } }, 'יורד לבד ב-' + event.end)
+    h('span', { key: 'end', style: { position: 'absolute', bottom: 77, right: 134, fontSize: 29, color: '#8b9dbd' } }, 'יורד לבד ב-' + (until ? fmtHM.format(new Date(until)) : event.end))
   ]);
 
   // ---------- small toast (e.g. "שוגר") ----------
