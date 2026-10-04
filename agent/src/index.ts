@@ -1,11 +1,12 @@
 // One-off task runner, for testing and manual fills.
-//   npm run agent -- collect enrich launches weather numbers intake feed doctor
+//   npm run agent -- collect enrich launches weather numbers newsletter intake feed doctor
 // For continuous operation use `npm run runner` instead.
 import { runCollect } from './collect.js';
 import { runEnrich, expireStaleReview, pendingCount } from './enrich.js';
 import { runLaunches } from './launches.js';
 import { runWeather } from './weather.js';
 import { runNumbers } from './numbers.js';
+import { runNewsletter } from './newsletter.js';
 import { processIntake, queuedCount } from './intake.js';
 import { claudeAvailable } from './cc.js';
 import { buildFeed } from '../../lib/feed.js';
@@ -20,6 +21,7 @@ for (const t of list) {
     case 'launches': await runLaunches(); break;
     case 'weather': await runWeather(); break;
     case 'numbers': await runNumbers(); break;
+    case 'newsletter': console.log(await runNewsletter(process.env.FORCE === '1')); break;
     case 'intake': console.log(`handled ${await processIntake()} message(s)`); break;
     case 'expire': await expireStaleReview(); break;
     case 'feed': console.log(JSON.stringify(await buildFeed(), null, 2)); break;
