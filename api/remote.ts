@@ -1,14 +1,25 @@
 // The remote control's API (app/remote). GET returns everything the remote shows; POST {action, ...} runs one
 // operation from lib/remote-ops.ts and returns the fresh state.
-// Access: the x-remote-token header must equal REMOTE_TOKEN (the operators' private link is /remote/?t=<token>).
+// Access: the x-remote-token header must equal the remote's password (the operators' private link is
+// /remote/?t=<token>): REMOTE_TOKEN in the environment, else the `remote_token` row of app_settings in Supabase,
+// which can be set without access to the Vercel project.
 // x-remote-who carries the operator's name for the history; it is a label, not an identity check.
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { timingSafeEqual } from 'node:crypto';
 import { ZodError } from 'zod';
+import { db } from '../lib/db.js';
 import { ACTIONS, snapshot } from '../lib/remote-ops.js';
 
-function tokenOk(given: string | undefined): boolean {
-  const want = process.env.REMOTE_TOKEN || '';
+let cached: { value: string; at: number } | null = null;
+async function wantedToken(): Promise<string> {
+  if (process.env.REMOTE_TOKEN) return process.env.REMOTE_TOKEN;
+  if (cached && Date.now() - cached.at < 60e3) return cached.value;
+  const r = await db().from('app_settings').select('value').eq('key', 'remote_token').maybeSingle();
+  cached = { value: (!r.error && r.data?.value) || '', at: Date.now() };
+  return cached.value;
+}
+async function tokenOk(given: string | undefined): Promise<boolean> {
+  const want = await wantedToken();
   if (want.length < 24 || !given) return false;            // no token configured = closed, never open
   const a = Buffer.from(given), b = Buffer.from(want);
   return a.length === b.length && timingSafeEqual(a, b);
@@ -22,7 +33,7 @@ const config = () => ({ displayKey: process.env.DISPLAY_KEY || '', sheetUrl: pro
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
-  if (!tokenOk(req.headers['x-remote-token'] as string | undefined)) return res.status(401).json({ error: 'unauthorized' });
+  if (!(await tokenOk(req.headers['x-remote-token'] as string | undefined))) return res.status(401).json({ error: 'unauthorized' });
   try {
     if (req.method === 'GET') return res.status(200).json({ ...(await snapshot()), config: config() });
     if (req.method !== 'POST') return res.status(405).setHeader('Allow', 'GET, POST').json({ error: 'method not allowed' });

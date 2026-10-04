@@ -54,7 +54,7 @@ project/, chats/  the original Claude Design handoff bundle
 | `MCP_TOKEN` | a random string of at least 32 characters; it is the connector's password |
 | `CRON_SECRET` | a random string; Vercel sends it to the cron endpoint |
 | `DISPLAY_KEY` | optional; when set, the wall must open `/?key=<DISPLAY_KEY>` |
-| `REMOTE_TOKEN` | a random string of at least 32 characters; the remote's password. Operators open `/remote/?t=<REMOTE_TOKEN>` |
+| `REMOTE_TOKEN` | a random string of at least 32 characters; the remote's password. Operators open `/remote/?t=<REMOTE_TOKEN>`. Optional: when unset, the password is the `remote_token` row of `app_settings` in Supabase (migration 0007) |
 | `PEOPLE_SHEET_URL` | optional; a link to the people sheet, shown in the remote next to the birthday list |
 
 **Database:** apply `supabase/migrations/0006_remote.sql` (wall state, remote history, important events,
