@@ -1,5 +1,6 @@
 // The remote control's API (app/remote). GET returns everything the remote shows; POST {action, ...} runs one
-// operation from lib/remote-ops.ts and returns the fresh state.
+// operation from lib/remote-ops.ts, or the agent (lib/remote-agent.ts: action "agent", and "agentKey" to connect
+// it), and returns the fresh state.
 // Access: the x-remote-token header must equal the remote's password (the operators' private link is
 // /remote/?t=<token>): REMOTE_TOKEN in the environment, else the `remote_token` row of app_settings in Supabase,
 // which can be set without access to the Vercel project.
@@ -8,12 +9,14 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { timingSafeEqual } from 'node:crypto';
 import { z, ZodError } from 'zod';
 import { ACTIONS, snapshot } from '../lib/remote-ops.js';
+import { AGENT_ACTIONS, agentConfig } from '../lib/remote-agent.js';
 import { setting } from '../lib/settings.js';
 
 z.config(z.locales.he());   // validation messages in Hebrew; they reach the operator as toasts
 const FIELD_HE: Record<string, string> = { title: 'שם האירוע', name: 'שם', first: 'שם פרטי', last: 'שם משפחה', date: 'תאריך', start: 'התחלה', end: 'סיום',
   place: 'מקום', url: 'קישור', type: 'מה קרה', note: 'ברכה', text: 'הודעה', birthday: 'תאריך לידה', joined: 'תאריך הצטרפות', leaves: 'תאריך שחרור',
-  email: 'מייל', phone: 'טלפון', rank: 'דרגה', role: 'תפקיד', unit: 'אגף', notes: 'הערות', rows: 'שורות', dataUrl: 'תמונה', value: 'ערך' };
+  email: 'מייל', phone: 'טלפון', rank: 'דרגה', role: 'תפקיד', unit: 'אגף', notes: 'הערות', rows: 'שורות', dataUrl: 'תמונה', value: 'ערך',
+  key: 'מפתח', files: 'קבצים', images: 'תמונות', history: 'השיחה' };
 
 async function tokenOk(given: string | undefined): Promise<boolean> {
   const want = await setting('REMOTE_TOKEN', 'remote_token');
@@ -26,7 +29,10 @@ function whoOf(req: VercelRequest): string {
   try { w = decodeURIComponent(String(req.headers['x-remote-who'] || '')); } catch { /* malformed: anonymous */ }
   return w.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40) || 'מפעיל/ה';
 }
-const config = async () => ({ displayKey: await setting('DISPLAY_KEY', 'display_key') });
+const config = async () => ({ displayKey: await setting('DISPLAY_KEY', 'display_key'), agent: await agentConfig() });
+/** Own properties only, so "constructor" or "__proto__" never reach a function. */
+const actionOf = (name: unknown) => (typeof name !== 'string' ? undefined
+  : Object.hasOwn(AGENT_ACTIONS, name) ? AGENT_ACTIONS[name] : Object.hasOwn(ACTIONS, name) ? ACTIONS[name] : undefined);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 'no-store');
@@ -35,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'GET') return res.status(200).json({ ...(await snapshot()), config: await config() });
     if (req.method !== 'POST') return res.status(405).setHeader('Allow', 'GET, POST').json({ error: 'method not allowed' });
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-    const fn = ACTIONS[body.action];
+    const fn = actionOf(body.action);
     if (!fn) return res.status(400).json({ error: 'פעולה לא מוכרת' });
     const result = await fn(body, whoOf(req));
     return res.status(200).json({ result: result ?? null, state: { ...(await snapshot()), config: await config() } });

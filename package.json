@@ -11,7 +11,7 @@
     "feed:preview": "tsx agent/src/index.ts feed",
     "typecheck": "tsc --noEmit",
     "dev": "vercel dev",
-    "test": "tsx agent/test/bridge.test.mts && tsx agent/test/newsletter.test.mts",
+    "test": "tsx agent/test/bridge.test.mts && tsx agent/test/newsletter.test.mts && tsx agent/test/remote-agent.test.mts",
     "agent:cloud": "bash scripts/cloud-run.sh"
   },
   "dependencies": {

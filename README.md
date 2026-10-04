@@ -13,7 +13,7 @@ api/feed.ts       Vercel function: builds the feed JSON from Supabase (cached 60
 api/mcp.ts        Vercel function: the "צג חלל" MCP connector for operators, behind MCP_TOKEN
 api/cron.ts       Vercel cron: daily launches + space weather + the weekly newsletter import
 api/telegram.ts   optional Telegram intake (queues messages; the local runner parses them)
-lib/              shared: db client, feed builder, wall operations (wall-ops.ts), remote operations with undo (remote-ops.ts), zod contracts, dates, settings (env or app_settings)
+lib/              shared: db client, feed builder, wall operations (wall-ops.ts), remote operations with undo (remote-ops.ts), the remote's agent (remote-agent.ts), zod contracts, dates, settings (env or app_settings)
 agent/src/        the cron's tasks (launches, weather, newsletter) and the optional local runner: collection, enrichment, numbers, intake
 agent/src/cc.ts   the bridge to the Claude Code CLI (task.json in, validated result.json out)
 agent/test/       npm test: the bridge against stub CLI binaries, the newsletter parser against saved pages
@@ -32,9 +32,10 @@ project/, chats/  the original Claude Design handoff bundle
    full-screen moments now (the 12:00 show, a greeting, an important event), personal and directorate events,
    ticker items, the newsletter link, the urgent banner, brightness and the wall's design. Its "אנשים" tab is
    the people list: add, edit, delete, import from Excel (including the Google Form's response sheet) and
-   export. Every change is stored in `remote_history` with its undo operations. Its agent panel hands free-text
-   requests to Claude with the connector, so there is still no API key. The wall reads the live part from
-   `/api/live` every 5 seconds.
+   export. Every change is stored in `remote_history` with its undo operations. Its agent panel ("סוכן הצג",
+   `lib/remote-agent.ts`) carries out free-text requests on the server: Claude through the Anthropic API, with
+   the remote's own operations as tools, so one tap undoes everything a request changed. It needs an API key,
+   which an operator pastes once in the remote. The wall reads the live part from `/api/live` every 5 seconds.
 3. **Vercel** serves the display (`app/`) and `/api/feed`, which assembles the v4 feed from Supabase.
    A daily Vercel cron (`api/cron.ts`, 03:00 UTC) refreshes launches and space weather and imports the
    newsletter; none of it needs a model. The three steps run side by side, each bounded by its fetch timeouts;
@@ -63,6 +64,7 @@ project/, chats/  the original Claude Design handoff bundle
 | `CRON_SECRET` | a random string; Vercel sends it to the cron endpoint. Unset: the cron refuses every call |
 | `DISPLAY_KEY` | the lobby screen's key. Once set, the wall must open `/?key=<DISPLAY_KEY>`, and the feed and the live state answer 401 without it. Until a key is set the feed (staff names, ranks, photos, birthdays) is open to anyone who has the URL, so set one |
 | `REMOTE_TOKEN` | the remote's password, at least 24 characters. Operators open `/remote/?t=<REMOTE_TOKEN>`. Unset or shorter: the remote is closed |
+| `ANTHROPIC_API_KEY` | optional: the remote's agent. Usually pasted in the remote instead (stored as the `anthropic_api_key` row of `app_settings`). `AGENT_MODEL` overrides the model (default `claude-sonnet-5-5`, else the newest Sonnet the key can use) |
 | `TELEGRAM_*` | only for the optional Telegram intake, see `docs/telegram-setup.md`. Without `TELEGRAM_WEBHOOK_SECRET` the webhook refuses every update |
 
 **Tokens kept in Supabase:** `MCP_TOKEN`, `DISPLAY_KEY` and `REMOTE_TOKEN` can instead be rows of `app_settings`

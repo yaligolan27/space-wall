@@ -27,7 +27,7 @@ const NOON_MS = 150e3;            // 10 s countdown + the 107 s promo, with a ma
 const CELEBRATE_MS = 60e3;
 const EVENT_FALLBACK_MS = 30 * 60e3;
 const EVENT_PREVIEW_MS = 10 * 60e3;
-const HE_TYPE: Record<string, string> = { birthday: 'יום הולדת', wedding: 'חתונה', birth: 'לידה', bereavement: 'אבל', promotion: 'העלאה בדרגה', discharge: 'שחרור', joined: 'קליטה', other: 'אירוע' };
+export const HE_TYPE: Record<string, string> = { birthday: 'יום הולדת', wedding: 'חתונה', birth: 'לידה', bereavement: 'אבל', promotion: 'העלאה בדרגה', discharge: 'שחרור', joined: 'קליטה', other: 'אירוע' };
 
 /** Mourning words as whole words (with a ו/ב/ה/ל prefix), so "חתימות" or "השלמות" aren't read as "מות". Same list as the remote's tpl(). */
 export const SAD = /(^|[\s,.;:()"'־-])[ובהל]?(אבל|אבלות|צער|נפטר|נפטרה|פטירה|פטירת|מות|לוויה|הלוויה|ז"ל|ז״ל)(?=$|[\s,.;:()"'־-])/;
@@ -463,7 +463,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
   },
 
   /** Imports an issue of the Rakia newsletter site directly (the home or archive page means its newest issue),
-   *  or a link that serves the newsletter as JSON; any other link is handed to Claude by the remote. */
+   *  or a link that serves the newsletter as JSON; any other link answers handoff: true (the remote says which links work). */
   async newsletter(a, who) {
     const { url } = z.object({ url: z.string().url().regex(/^https?:\/\//) }).parse(a);
     let content: z.infer<typeof NewsletterContent> | null = null, issueDate = isoDateIL(), sourceUrl = url;

@@ -1,7 +1,8 @@
 // שלט צג החלל: the operators' remote control. A port of the Claude Design file "Space Wall Remote v2":
 // the same layout, styles and flows, rendered with React (vendored UMD, no build) like the wall itself.
 // Data and every change go through /api/remote (lib/remote-ops.ts); the wall picks changes up from /api/live.
-// The agent panel hands requests to Claude, which edits the wall through the "צג חלל" connector (api/mcp.ts).
+// The agent panel sends requests to /api/remote's "agent" action (lib/remote-agent.ts): Claude carries them out on the
+// server through the Anthropic API, with the remote's own operations, and every change can be undone here.
 (() => {
   const h = React.createElement;
 
@@ -62,9 +63,14 @@
   ];
   const LABEL = Object.fromEntries(SPEC.flatMap((s) => s.controls).map((c) => [c.key, c.label]));
   const TYPE_CHIPS = ['יום הולדת', 'חתונה', 'לידה', 'העלאה בדרגה', 'סיום תואר', 'שחרור', 'קליטה', 'אבל'];
-  const SUGGESTIONS = ['מה מוצג עכשיו בצג?', 'תוסיף/י לרשימת האנשים את מי שבקובץ המצורף', 'תעביר/י את האירוע של היום לשעה 16:00', 'תהפוך/י את הגלובוס לריאליסטי'];
-  const CLAUDE_NEW = 'https://claude.ai/new';
-  const CONNECTOR = 'צג חלל';
+  // Examples under the agent's greeting: a question goes out at once, a request lands in the box to be finished.
+  const SUGGESTIONS = [
+    { label: 'מה מוצג עכשיו בצג?', send: true },
+    { label: 'מי חוגג/ת יום הולדת החודש?', send: true },
+    { label: 'להוסיף יום הולדת…', fill: 'תוסיף/י יום הולדת ל' },
+    { label: 'להזיז אירוע…', fill: 'תעביר/י את האירוע ' },
+  ];
+  const AGENT_FILES = 3, AGENT_TEXT = 20000;   // per message, as the server takes them (lib/remote-agent.ts)
 
   // Mourning words as whole words, so "חתימות" isn't read as "מות" (the server's classifyLife uses the same list).
   const SAD = /(^|[\s,.;:()"'־-])[ובהל]?(אבל|אבלות|צער|נפטר|נפטרה|פטירה|פטירת|מות|לוויה|הלוויה|ז"ל|ז״ל)(?=$|[\s,.;:()"'־-])/;
@@ -242,7 +248,7 @@
     } catch (e) { throw new Error('אין חיבור לשרת. בדקו את האינטרנט ונסו שוב.'); }
     const j = await res.json().catch(() => ({}));
     if (res.status === 401) { const e = new Error('קוד הגישה לשלט לא תקף. פתחו שוב את הקישור הפרטי.'); e.auth = true; throw e; }
-    if (!res.ok) throw new Error(j.error || 'הפעולה נכשלה');
+    if (!res.ok) { const e = new Error(j.error || 'הפעולה נכשלה'); e.status = res.status; throw e; }
     return j;
   }
 
@@ -260,7 +266,8 @@
         pq: '', showInactive: false, gateErr: '',
         wallSrc: '',
         chatOpen: false, chatInput: '', attach: [], dragging: false,
-        messages: [{ id: 1, role: 'bot', text: 'שלום' + (who ? ' ' + who : '') + '! כתבו כאן מה לשנות בצג, ואפתח את Claude עם הבקשה. Claude מחובר לצג דרך המחבר "' + CONNECTOR + '" ויכול להוסיף, לערוך ולמחוק כל דבר. אפשר לצרף אקסל ו-CSV; תמונות מצרפים שוב בחלון של Claude.', actions: [] }],
+        messages: [], agentBusy: false, agentAt: 0,
+        keyDraft: '', keyBusy: false, keyErr: '', keyOpen: false,
       };
       this.fileRef = React.createRef(); this.photoRef = React.createRef(); this.scrollRef = React.createRef(); this.previewRef = React.createRef();
       this.personPhotoRef = React.createRef(); this.importRef = React.createRef(); this.panelRef = React.createRef();
@@ -302,9 +309,10 @@
     }
 
     // ---- server ----------------------------------------------------------------------------------
+    /** Reloads everything; returns the fresh data (null when it failed), since this.state catches up only on the next render. */
     async refresh() {
-      try { const data = await api('GET'); this.setState({ data, loadErr: '' }); }
-      catch (e) { if (e.auth) this.setState({ auth: false, data: null, gateErr: 'קוד הגישה לא נכון, או שהקישור הוחלף. בקשו את הקישור העדכני.' }); else this.setState({ loadErr: e.message || 'אין חיבור' }); }
+      try { const data = await api('GET'); this.setState({ data, loadErr: '' }); return data; }
+      catch (e) { if (e.auth) this.setState({ auth: false, data: null, gateErr: 'קוד הגישה לא נכון, או שהקישור הוחלף. בקשו את הקישור העדכני.' }); else this.setState({ loadErr: e.message || 'אין חיבור' }); return null; }
     }
     /** Run an action; toast its label (or label(result)) with an undo button when the action made a new history entry. */
     async run(action, args, label, opts = {}) {
@@ -326,16 +334,21 @@
     /** Sliders: show the value at once, send it when the hand stops. */
     burst(key, fn) { const t = this.timers[key] || (this.timers[key] = {}); clearTimeout(t.t); t.t = setTimeout(() => { delete this.timers[key]; fn(); }, 900); }
     toast(text, undoId) { clearTimeout(this.tt); this.setState({ toast: { text, undoId } }); this.tt = setTimeout(() => this.setState({ toast: null }), 4500); }
+    /** Undo a change and everything after it; asks first when that reaches further, or someone else's change. True when done. */
     async restore(id) {
-      const H = this.D ? this.D.history : [], later = H.filter((x) => x.id > id), me = this.state.who;
-      const target = H.find((x) => x.id === id), others = [target, ...later].filter((x) => x && x.who !== me);
+      const H = this.D ? this.D.history : [], later = H.filter((x) => x.id > id), me = this.meWho();
+      const target = H.find((x) => x.id === id), mine = (x) => x.who === me || x.who === me + ' · סוכן';
+      const others = [target, ...later].filter((x) => x && !mine(x));
       if (later.length || others.length) {
         const lines = [target, ...later].filter(Boolean).reverse().map((x) => '· ' + x.text + ' (' + x.who + ')').slice(0, 8).join('\n');
-        if (!window.confirm((later.length ? 'הביטול יחזיר אחורה ' + (later.length + 1) + ' שינויים, כולל מה שנעשה אחרי:' : 'הביטול יחזיר אחורה שינוי של ' + target.who + ':') + '\n' + lines + '\n\nלהמשיך?')) return;
+        if (!window.confirm((later.length ? 'הביטול יחזיר אחורה ' + (later.length + 1) + ' שינויים, כולל מה שנעשה אחרי:' : 'הביטול יחזיר אחורה שינוי של ' + (target ? target.who : 'מישהו אחר') + ':') + '\n' + lines + '\n\nלהמשיך?')) return false;
       }
       const r = await this.run('restore', { id }, null, { quiet: true }).catch(() => null);
       if (r) this.toast('בוטל: ' + r.label);
+      return !!r;
     }
+    /** The operator's name as the server writes it in the history (api/remote.ts whoOf). */
+    meWho() { return (this.state.who || '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 40) || 'מפעיל/ה'; }
 
     // ---- derived -----------------------------------------------------------------------------------
     get D() { return this.state.data; }
@@ -536,19 +549,12 @@
     async importNl() {
       const url = ((this.state.sheet.f.url) || '').trim();
       if (!/^https?:\/\/\S+\.\S+/.test(url)) return this.toast('הדביקו קישור מלא, שמתחיל ב-https://');
-      // Links to the newsletter site import here. For any other link, open the Claude tab now, inside the click,
-      // so the browser doesn't block it; close it if the import worked here after all.
-      const tab = /^https?:\/\/rakia-weekly\.vercel\.app(\/|$)/.test(url) ? null : window.open('about:blank', '_blank');
       this.setState({ nlBusy: true });
       try {
-        const r = await this.run('newsletter', { url }, 'יובא גיליון הניוזלטר');
-        if (r && r.handoff) {
-          const prompt = 'דרך המחבר "' + CONNECTOR + '": ייבא/י לצג את גיליון הניוזלטר השבועי מהקישור הזה, עם import_newsletter_issue:\n' + url;
-          if (tab) tab.location.href = CLAUDE_NEW + '?q=' + encodeURIComponent(prompt);
-          this.toast('פתחתי את Claude עם הקישור. הייבוא יסתיים שם, והצג יתעדכן תוך דקה.');
-        } else if (tab) tab.close();
-        this.closeSheet();
-      } catch (e) { if (tab) tab.close(); }
+        const r = await this.run('newsletter', { url }, (x) => (x && x.handoff ? null : 'יובא גיליון הניוזלטר'));
+        if (r && r.handoff) this.toast('אפשר לייבא רק גיליון מאתר הניוזלטר של רקיע (rakia-weekly.vercel.app). גיליון חדש נטען לבד בכל בוקר.');
+        else this.closeSheet();
+      } catch (e) { /* toasted */ }
       finally { this.setState({ nlBusy: false }); }
     }
     setDesign(k, v, label) {
@@ -560,49 +566,73 @@
       this.burst('d' + k, () => this.run('design', { patch: { [k]: v }, label: LABEL[k] + ': ' + v + unit }, null, { quiet: true }).catch(() => {}).finally(() => this.setState({ design: null })));
     }
 
-    // ---- agent panel → Claude ----------------------------------------------------------------------
+    // ---- agent panel: Claude carries out requests on the server (lib/remote-agent.ts) -------------------------
+    agentInfo() { return (this.D && this.D.config && this.D.config.agent) || { ready: false, fromServer: false, hint: '' }; }
     async addFiles(list) {
       for (const f of Array.from(list || [])) {
+        const kind = f.type.startsWith('image/') ? 'image' : /\.(xlsx|xls|csv|txt|json|md)$/i.test(f.name) ? 'sheet' : '';
+        if (!kind) { this.toast('סוג קובץ לא נתמך: ' + f.name); continue; }
+        if (this.state.attach.filter((a) => a.kind === kind).length >= AGENT_FILES) { this.toast(kind === 'image' ? 'אפשר לצרף עד 3 תמונות להודעה' : 'אפשר לצרף עד 3 קבצים להודעה'); continue; }
         try {
-          if (f.type.startsWith('image/')) {
-            const src = await shrinkImage(f, 512);
-            this.setState((s) => ({ attach: [...s.attach, { id: 'a' + Date.now() + Math.random(), name: f.name, kind: 'image', src, info: 'תמונה · לצרף שוב ב-Claude' }] }));
-          } else if (/\.(xlsx|xls|csv|txt|json|md)$/i.test(f.name)) {
-            const { text, rows } = await readSheet(f);
-            this.setState((s) => ({ attach: [...s.attach, { id: 'a' + Date.now() + Math.random(), name: f.name, kind: 'sheet', text, rows, info: rows + ' שורות' }] }));
-          } else this.toast('סוג קובץ לא נתמך: ' + f.name);
+          if (kind === 'image') {
+            const src = await shrinkImage(f, 1024);
+            this.setState((s) => ({ attach: [...s.attach, { id: 'a' + Date.now() + Math.random(), name: f.name, kind, src, info: 'תמונה' }] }));
+          } else {
+            const { text, rows } = await readSheet(f), cut = text.length > AGENT_TEXT;
+            this.setState((s) => ({ attach: [...s.attach, { id: 'a' + Date.now() + Math.random(), name: f.name, kind, text: text.slice(0, AGENT_TEXT), rows, info: rows + ' שורות' + (cut ? ' · רק ההתחלה תישלח' : '') }] }));
+          }
         } catch (e) { this.toast('לא הצלחתי לקרוא את ' + f.name); }
       }
     }
-    sendChat(override) {
+    async sendChat(override) {
       const s = this.state, text = (override != null ? override : s.chatInput).trim(), att = s.attach;
-      if (!text && !att.length) return;
-      let prompt = 'דרך המחבר "' + CONNECTOR + '" (התחל/י ב-wall_overview): ' + (text || 'עבד/י את הקבצים המצורפים ועדכן/י את הצג בהתאם.');
-      const actions = ['נפתח ב-Claude עם המחבר "' + CONNECTOR + '"'];
-      att.forEach((a) => {
-        if (a.kind === 'sheet') {
-          const cut = a.text.length > 15000;
-          prompt += '\n\n[קובץ מצורף: ' + a.name + ' — ' + a.rows + ' שורות' + (cut ? ', נחתך: רק ההתחלה מופיעה כאן' : '') + ']\n' + a.text.slice(0, 15000);
-          actions.push(cut ? 'הקובץ ' + a.name + ' ארוך, אז רק ההתחלה צורפה. רשימת אנשים מלאה עדיף לייבא במסך "אנשים"' : 'הקובץ ' + a.name + ' צורף לבקשה כטקסט');
-        }
-        if (a.kind === 'image') { prompt += '\n[תמונה: ' + a.name + ' — מצורפת בנפרד]'; actions.push('צרפו את התמונה ' + a.name + ' בחלון של Claude'); }
-      });
-      let url = CLAUDE_NEW + '?q=' + encodeURIComponent(prompt);
-      const long = url.length > 7500;   // too long for a link: copy it and open an empty chat
-      if (long) url = CLAUDE_NEW;
-      const copying = long && navigator.clipboard ? navigator.clipboard.writeText(prompt).then(() => true, () => false) : Promise.resolve(false);
-      // No 'noopener' feature: with it window.open returns null even when the tab opened, which read as "blocked".
-      const win = window.open(url, '_blank');
-      if (win) { try { win.opener = null; } catch (e) { /* already cross-origin */ } }
-      const userMsg = { id: Date.now(), role: 'user', text, files: att.map((a) => ({ name: a.name, kind: a.kind, src: a.src, info: a.info })) };
-      const rid = Date.now() + 1;
-      const reply = !win
-        ? { id: rid, role: 'bot', err: true, text: 'הדפדפן חסם את החלון. אפשרו חלונות קופצים לאתר הזה ונסו שוב.', actions: [] }
-        : { id: rid, role: 'bot', text: 'פתחתי את Claude עם הבקשה. כשהשינוי יישמר שם, הוא יופיע כאן ובצג תוך דקה.', actions };
-      this.setState({ messages: [...s.messages, userMsg, reply], chatInput: '', attach: [] });
-      if (long && win) copying.then((ok) => this.setState((st) => ({ messages: st.messages.map((m) => (m.id === rid ? Object.assign({}, m, { actions: m.actions.concat(ok
-        ? 'הבקשה ארוכה, אז העתקתי אותה: הדביקו בחלון של Claude'
-        : 'הבקשה ארוכה מדי לקישור ולא הצלחתי להעתיק אותה: קצרו אותה, או צרפו את הקובץ ישירות ב-Claude') }) : m)) })));
+      if (s.agentBusy || (!text && !att.length)) return;
+      if (!this.agentInfo().ready) return this.setState({ keyOpen: true });
+      const files = att.filter((a) => a.kind === 'sheet').map((a) => ({ name: a.name, text: a.text, rows: a.rows }));
+      const images = att.filter((a) => a.kind === 'image').map((a) => ({ name: a.name, dataUrl: a.src }));
+      const userMsg = { id: Date.now(), role: 'user', text, files: att.map((a) => ({ name: a.name, kind: a.kind, src: a.src, info: a.info })), sent: { files, images } };
+      // What the agent is reminded of: the last turns (a failed one says so), and the attachments of a recent message,
+      // which it may have asked about.
+      const prior = s.messages.slice(-12);
+      const withAtt = files.length || images.length ? null
+        : prior.slice(-4).reverse().find((m) => m.role === 'user' && m.sent && (m.sent.files.length || m.sent.images.length));
+      const history = prior.map((m) => (m.role === 'user'
+        ? Object.assign({ role: 'user', text: m.text || '(קבצים מצורפים)' }, m === withAtt ? m.sent : {})
+        : { role: 'assistant', text: m.err && !(m.actions && m.actions.length) ? '[הבקשה לא בוצעה: ' + m.text + ']'
+          : m.text + (m.actions && m.actions.length ? '\n[בוצע: ' + m.actions.join(' · ') + ']' + (m.undone ? ' [בוטל אחר כך]' : '') : '') }));
+      const before = this.D && this.D.history[0] ? this.D.history[0].id : 0;
+      this.setState({ messages: [...s.messages, userMsg], chatInput: '', attach: [], agentBusy: true, agentAt: Date.now() });
+      let reply;
+      try {
+        const j = await api('POST', { action: 'agent', text, files, images, history });
+        const r = j.result || {};
+        this.setState({ data: j.state, loadErr: '' });
+        reply = { text: r.reply || 'בוצע.', actions: r.done || [], undoId: r.undoId || null, err: !!r.error && !(r.done || []).length };
+      } catch (e) {
+        if (e.auth) this.setState({ auth: false, data: null, gateErr: e.message });
+        const fresh = e.auth ? null : await this.refresh();
+        // Cut off before the answer (the server's time limit): what the agent changed is in the history all the same.
+        const me = this.meWho() + ' · סוכן', changed = (fresh ? fresh.history : []).filter((x) => x.id > before && x.who === me).reverse();
+        reply = { err: true, text: e.status === 504 ? 'הסוכן לא הספיק לסיים בזמן.' + (changed.length ? ' מה שכבר בוצע מופיע כאן.' : ' נסו בקשה קצרה יותר.') : e.message || 'הבקשה נכשלה',
+          actions: changed.map((x) => x.text), undoId: changed.length && changed[0].canRestore ? changed[0].id : null };
+      }
+      this.setState((st) => ({ agentBusy: false, messages: [...st.messages, Object.assign({ id: Date.now() + 1, role: 'bot' }, reply)] }));
+    }
+    async undoReply(m) {
+      if (await this.restore(m.undoId)) this.setState((st) => ({ messages: st.messages.map((x) => (x.id === m.id ? Object.assign({}, x, { undone: true }) : x)) }));
+    }
+    /** Connects the agent with the operator's API key (checked with Claude, kept on the server); null disconnects. */
+    async saveKey(key) {
+      if (key !== null && !key.trim()) return this.setState({ keyErr: 'הדביקו את המפתח' });
+      if (key === null && !window.confirm('לנתק את הסוכן? כדי להשתמש בו שוב יהיה צריך להדביק מפתח.')) return;
+      this.setState({ keyBusy: true, keyErr: '' });
+      try {
+        const j = await api('POST', { action: 'agentKey', key: key === null ? null : key.trim() });
+        this.setState({ data: j.state, keyDraft: '', keyOpen: false });
+        this.toast(key === null ? 'הסוכן נותק' : 'הסוכן מחובר ומוכן');
+      } catch (e) {
+        if (e.auth) this.setState({ auth: false, data: null, gateErr: e.message }); else this.setState({ keyErr: e.message || 'לא הצלחתי לשמור את המפתח' });
+      } finally { this.setState({ keyBusy: false }); }
     }
 
     // ---- view values (as in the design) ------------------------------------------------------------
@@ -613,6 +643,7 @@
       const seg = (on) => ({ bg: on ? ICE : 'transparent', fg: on ? '#040914' : '#e6f1ff' });
       const design = this.design(), noonToday = D ? D.state.noonToday : true;
       const brightness = s.brightness != null ? s.brightness : D ? D.state.brightness : 100;
+      const agent = this.agentInfo(), agentOn = !!D && agent.ready;
       const urgent = D ? D.state.urgent : '';
       const all = this.celebs(), cel = all.filter((x) => !x.tpl.quiet), quiet = all.filter((x) => x.tpl.quiet);
       const celRow = (x) => ({ key: x.key, name: dn(x.person), type: x.type, color: x.tpl.color, av: this.avatar(x.person, x.noPhoto ? null : x.photoSrc),
@@ -764,15 +795,24 @@
         pickFiles: () => this.fileRef.current && this.fileRef.current.click(),
         onChatFiles: (e) => { this.addFiles(e.target.files); e.target.value = ''; },
         msgs: s.messages.map((m) => Object.assign({}, m, { isUser: m.role === 'user', isBot: m.role === 'bot', hasText: !!m.text, color: m.err ? '#ffb4a8' : '#e6f1ff',
-          hasActions: !!(m.actions && m.actions.length),
+          hasActions: !!(m.actions && m.actions.length), hasUndo: !!m.undoId, undo: () => this.undoReply(m),
           files: (m.files || []).map((fl) => Object.assign({}, fl, { isImg: fl.kind === 'image', isDoc: fl.kind !== 'image', el: fl.src ? imgEl(fl.src, { display: 'block', maxWidth: 180, maxHeight: 120, borderRadius: 10, border: '1px solid rgba(150,190,240,.2)' }) : null })) })),
-        showSuggest: s.messages.length <= 1,
-        suggestions: SUGGESTIONS.map((label) => ({ label, send: () => this.sendChat(label) })),
+        agentReady: agentOn, agentSub: !D ? '' : agent.ready ? 'כתבו מה לשנות, והסוכן יבצע. אפשר לבטל כל שינוי.' : 'צריך לחבר פעם אחת מפתח API',
+        greeting: agentOn && !s.messages.length ? 'שלום' + (s.who ? ' ' + s.who : '') + '! כתבו כאן מה לשנות בצג, ואבצע את זה מיד: להוסיף יום הולדת או שמחה, להזיז אירוע, להעלות הודעה דחופה, לעדכן את רשימת האנשים ועוד. כל שינוי אפשר לבטל. אפשר גם לצרף אקסל, CSV או תמונה.' : '',
+        agentBusy: s.agentBusy, busyText: 'עובד על זה…' + (s.agentBusy && now - s.agentAt >= 5000 ? ' ' + Math.round((now - s.agentAt) / 1000) + ' שנ׳' : ''),
+        showSuggest: agentOn && !s.messages.length && !s.agentBusy,
+        suggestions: SUGGESTIONS.map((sg) => ({ label: sg.label, send: () => (sg.send ? this.sendChat(sg.label) : this.setState({ chatInput: sg.fill }, () => { const t = document.getElementById('agent-input'); if (t) { t.focus(); t.setSelectionRange(sg.fill.length, sg.fill.length); } })) })),
+        // the key: a setup card until the agent is connected, then a small card to replace or disconnect it
+        keyCard: !!D && (!agent.ready || s.keyOpen), keySetup: !agent.ready, keyHint: agent.hint, keyFromServer: agent.fromServer,
+        keyManage: agentOn, toggleKey: () => this.setState({ keyOpen: !s.keyOpen, keyErr: '' }),
+        keyDraft: s.keyDraft, setKeyDraft: (e) => this.setState({ keyDraft: e.target.value, keyErr: '' }), keyErr: s.keyErr, keyBusy: s.keyBusy,
+        saveKey: () => !s.keyBusy && this.saveKey(s.keyDraft), dropKey: () => !s.keyBusy && this.saveKey(null),
+        keyEnter: (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!s.keyBusy) this.saveKey(s.keyDraft); } },
         hasAttach: s.attach.length > 0,
         attachList: s.attach.map((a) => Object.assign({}, a, { isImg: a.kind === 'image', el: a.src ? imgEl(a.src, { width: 28, height: 28, borderRadius: 6, objectFit: 'cover' }) : null, remove: () => this.setState((st) => ({ attach: st.attach.filter((x) => x.id !== a.id) })) })),
         chatInput: s.chatInput, setChatInput: (e) => this.setState({ chatInput: e.target.value }),
-        chatKey: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.sendChat(); } },
-        sendChat: () => this.sendChat(), sendBg: LIME,
+        chatKey: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); this.sendChat(); } },
+        sendChat: () => this.sendChat(), sendBg: LIME, sendOpacity: s.agentBusy ? 0.5 : 1,
         dragging: s.dragging,
         onDragOver: (e) => { e.preventDefault(); if (!s.dragging) this.setState({ dragging: true }); },
         onDragLeave: (e) => { if (e.currentTarget.contains(e.relatedTarget)) return; this.setState({ dragging: false }); },
@@ -888,7 +928,7 @@
       const submit = () => {
         if (needToken) { const t = s.tokenDraft.trim(); if (!t) return this.setState({ gateErr: 'הדביקו את קוד הגישה' }); store.set('sw-remote-token', t); this.setState({ auth: true, tokenDraft: '', gateErr: '' }, () => this.refresh()); }
         const w = s.whoDraft.trim();
-        if (!s.who && w) { store.set('sw-remote-who', w); this.setState((st) => ({ who: w, messages: st.messages.map((m, i) => (i === 0 ? Object.assign({}, m, { text: m.text.replace(/^שלום!?/, 'שלום ' + w + '!') }) : m)) })); }
+        if (!s.who && w) { store.set('sw-remote-who', w); this.setState({ who: w }); }
       };
       return el('div', 'min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;background:radial-gradient(1200px 600px at 60% -10%, #0c1c3a 0%, #040914 60%)', { dir: 'rtl' },
         el('form', 'width:100%;max-width:420px;background:#0a1530;border:1px solid rgba(150,190,240,.2);border-radius:20px;box-shadow:0 24px 70px rgba(0,0,0,.6);padding:22px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box', { onSubmit: (e) => { e.preventDefault(); submit(); } },
@@ -1070,14 +1110,38 @@
             c.kind === 'seg' ? segWrap(2, c.options.map((o) => el('button', `min-height:40px;border-radius:9px;border:none;background:${o.bg};color:${o.fg};font-size:15px;font-weight:600;cursor:pointer`, { key: o.v, onClick: o.pick }, o.label))) : null))))) : null;
 
       // ---- agent panel
+      const closeX = 'flex:none;width:40px;height:40px;border-radius:10px;border:none;background:rgba(150,190,240,.08);color:#8b9dbd;font-size:16px;cursor:pointer';
+      const keyCard = v.keyCard ? el('div', 'display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:14px;background:rgba(4,9,20,.6);border:1px solid rgba(212,242,92,.3)', null,
+        v.keySetup ? h(React.Fragment, null,
+          el('span', 'font-size:16px;font-weight:800', null, 'מחברים את הסוכן, פעם אחת'),
+          el('span', 'font-size:14px;color:#b9c8e2;line-height:1.5;text-wrap:pretty', null, 'הסוכן עובד עם Claude ומבצע את הבקשות כאן, בשלט. לשם כך צריך מפתח API:'),
+          el('ol', 'margin:0;padding:0 20px 0 0;display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.5', null,
+            el('li', null, null, 'נכנסים ל-', el('a', 'color:#9fdcff', { href: 'https://console.anthropic.com', target: '_blank', rel: 'noopener noreferrer' }, 'console.anthropic.com'), ' ומתחברים.'),
+            el('li', null, null, 'ב-Billing מוסיפים אמצעי תשלום וקרדיט. התשלום לפי שימוש, בערך כמה סנטים לבקשה.'),
+            el('li', null, null, 'ב-API Keys לוחצים Create Key, מעתיקים את המפתח ומדביקים כאן:')))
+          : el('div', 'display:flex;align-items:flex-start;justify-content:space-between;gap:10px', null,
+            el('span', 'font-size:14px;line-height:1.5;text-wrap:pretty;padding-top:8px', null, 'הסוכן מחובר' + (v.keyHint ? ' עם מפתח שמסתיים ב-\u2066' + v.keyHint + '\u2069' : '') + '.' + (v.keyFromServer ? ' המפתח מוגדר בהגדרות השרת.' : ' כדי להחליף, מדביקים מפתח אחר:')),
+            el('button', closeX, { onClick: v.toggleKey, 'aria-label': 'סגירה' }, '✕')),
+        v.keyFromServer ? null : el('div', 'display:flex;gap:8px', null,
+          el('input', "flex:1;min-width:0;min-height:44px;box-sizing:border-box;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;direction:ltr;text-align:left;font-family:'IBM Plex Mono',monospace",
+            { type: 'password', value: v.keyDraft, onChange: v.setKeyDraft, onKeyDown: v.keyEnter, placeholder: 'sk-ant-…', autoComplete: 'off', spellCheck: false, 'aria-label': 'מפתח API' }),
+          el('button', `flex:none;min-width:76px;height:44px;padding:0 14px;border-radius:12px;border:none;background:${LIME};color:#0b1400;font-size:15px;font-weight:800;cursor:pointer;opacity:${v.keyBusy ? 0.6 : 1}`, { onClick: v.saveKey }, v.keyBusy ? 'בודק…' : v.keySetup ? 'חיבור' : 'החלפה')),
+        v.keyErr ? el('span', 'font-size:13px;color:#ffb4a8;line-height:1.5;text-wrap:pretty', { role: 'alert' }, v.keyErr) : null,
+        v.keySetup ? el('span', 'font-size:12px;color:#8b9dbd;line-height:1.5', null, 'המפתח נשמר בשרת של הצג ולא מוצג שוב.') : null,
+        !v.keySetup && !v.keyFromServer ? el('button', 'align-self:flex-start;padding:0;border:none;background:none;color:#ffb4a8;font-size:13px;cursor:pointer;text-decoration:underline', { onClick: v.dropKey }, 'ניתוק הסוכן') : null) : null;
       const agent = el('aside', { position: v.agentPos, top: 0, left: v.agentSide, right: v.agentSide, bottom: v.agentSide, height: v.agentH, zIndex: v.agentZ, display: v.agentDisplay, flexDirection: 'column', background: '#081127', borderRight: '1px solid rgba(150,190,240,.14)', boxSizing: 'border-box' },
         { onDragOver: v.onDragOver, onDragLeave: v.onDragLeave, onDrop: v.onDrop },
         el('div', 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid rgba(150,190,240,.12)', null,
-          el('div', 'display:flex;flex-direction:column;gap:2px', null,
+          el('div', 'display:flex;flex-direction:column;gap:2px;min-width:0', null,
             el('span', 'font-size:17px;font-weight:800', null, 'סוכן הצג'),
-            el('span', 'font-size:12px;color:#8b9dbd', null, 'כתבו מה לשנות, כל דבר בצג · נפתח ב-Claude עם המחבר "' + CONNECTOR + '"')),
-          v.narrow ? el('button', 'width:40px;height:40px;border-radius:10px;border:none;background:rgba(150,190,240,.08);color:#8b9dbd;font-size:16px;cursor:pointer', { onClick: v.closeChat, 'aria-label': 'סגירה' }, '✕') : null),
+            el('span', 'font-size:12px;color:#8b9dbd', null, v.agentSub)),
+          el('div', 'display:flex;gap:6px;flex:none', null,
+            v.keyManage ? el('button', 'height:40px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#9fdcff;font-size:13px;cursor:pointer', { onClick: v.toggleKey }, 'מפתח') : null,
+            v.narrow ? el('button', closeX, { onClick: v.closeChat, 'aria-label': 'סגירה' }, '✕') : null)),
+        // the key card stays in view above the conversation, however far down it is scrolled
+        keyCard ? el('div', 'flex:none;max-height:70vh;overflow-y:auto;padding:16px 18px 0', null, keyCard) : null,
         el('div', 'flex:1;min-height:0;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px', { ref: this.scrollRef },
+          v.greeting ? el('div', 'font-size:15px;line-height:1.55;white-space:pre-wrap;text-wrap:pretty', null, v.greeting) : null,
           v.msgs.map((m) => el('div', 'display:flex;flex-direction:column;gap:6px', { key: m.id },
             m.isUser ? el('div', 'align-self:flex-end;max-width:88%;display:flex;flex-direction:column;gap:6px;align-items:flex-end', null,
               m.files.map((fl, i) => el('div', null, { key: i },
@@ -1087,18 +1151,23 @@
             m.isBot ? el('div', 'display:flex;flex-direction:column;gap:8px;max-width:95%', null,
               el('div', `font-size:15px;line-height:1.55;white-space:pre-wrap;text-wrap:pretty;color:${m.color}`, null, m.text),
               m.hasActions ? el('div', 'display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:12px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.12)', null,
-                m.actions.map((a, i) => el('div', 'display:flex;align-items:baseline;gap:8px;font-size:13px;color:#b9c8e2', { key: i }, el('span', 'flex:none;width:6px;height:6px;border-radius:50%;background:#d4f25c;transform:translateY(-1px)'), el('span', null, null, a)))) : null) : null)),
+                m.actions.map((a, i) => el('div', `display:flex;align-items:baseline;gap:8px;font-size:13px;color:#b9c8e2${m.undone ? ';text-decoration:line-through' : ''}`, { key: i }, el('span', 'flex:none;width:6px;height:6px;border-radius:50%;background:#d4f25c;transform:translateY(-1px)'), el('span', null, null, a))),
+                m.hasUndo ? el('div', 'display:flex;padding-top:6px', null, m.undone
+                  ? el('span', 'font-size:13px;color:#8b9dbd', null, 'בוטל')
+                  : el('button', 'min-height:34px;padding:0 14px;border-radius:10px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:13px;font-weight:600;cursor:pointer', { onClick: m.undo }, 'ביטול')) : null) : null) : null)),
+          v.agentBusy ? el('div', 'align-self:flex-start;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.12);font-size:14px;color:#b9c8e2', { role: 'status' },
+            el('span', 'flex:none;width:8px;height:8px;border-radius:50%;background:#d4f25c'), v.busyText) : null,
           v.showSuggest ? el('div', 'display:flex;flex-wrap:wrap;gap:6px', null, v.suggestions.map((sg) =>
             el('button', 'min-height:34px;padding:6px 12px;line-height:1.35;border-radius:999px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#cfe0f7;font-size:13px;cursor:pointer;text-align:right', { key: sg.label, onClick: sg.send }, sg.label))) : null),
-        v.hasAttach ? el('div', 'display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px 0', null, v.attachList.map((at) =>
+        v.agentReady && v.hasAttach ? el('div', 'display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px 0', null, v.attachList.map((at) =>
           el('div', 'display:flex;align-items:center;gap:8px;padding:4px 4px 4px 10px;border-radius:10px;background:rgba(159,220,255,.1);border:1px solid rgba(159,220,255,.25);max-width:100%', { key: at.id },
             at.isImg ? at.el : null,
             el('div', 'display:flex;flex-direction:column;min-width:0', null, el('span', 'font-size:12px;font-weight:600;direction:ltr;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px', null, at.name), el('span', 'font-size:11px;color:#8b9dbd', null, at.info)),
             el('button', 'width:24px;height:24px;border-radius:6px;border:none;background:transparent;color:#8b9dbd;font-size:12px;cursor:pointer', { onClick: at.remove, 'aria-label': 'הסרה' }, '✕')))) : null,
-        el('div', 'display:flex;align-items:flex-end;gap:8px;padding:12px 18px 18px', null,
+        v.agentReady ? el('div', 'display:flex;align-items:flex-end;gap:8px;padding:12px 18px 18px', null,
           el('button', 'flex:none;width:44px;height:44px;border-radius:12px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#9fdcff;font-size:22px;line-height:1;cursor:pointer', { onClick: v.pickFiles, 'aria-label': 'צירוף קובץ', title: 'צירוף אקסל, CSV או תמונה' }, '+'),
-          el('textarea', 'flex:1;min-width:0;min-height:44px;max-height:140px;overflow:hidden;resize:none;box-sizing:border-box;padding:11px 12px;border-radius:12px;border:1px solid rgba(150,190,240,.22);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;line-height:1.45', { value: v.chatInput, onChange: v.setChatInput, onKeyDown: v.chatKey, rows: 1, placeholder: 'מה לשנות בצג?' }),
-          el('button', `flex:none;min-width:64px;height:44px;padding:0 14px;border-radius:12px;border:none;background:${v.sendBg};color:#0b1400;font-size:15px;font-weight:800;cursor:pointer`, { onClick: v.sendChat }, 'שליחה')),
+          el('textarea', 'flex:1;min-width:0;min-height:44px;max-height:140px;overflow:hidden;resize:none;box-sizing:border-box;padding:11px 12px;border-radius:12px;border:1px solid rgba(150,190,240,.22);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;line-height:1.45', { id: 'agent-input', value: v.chatInput, onChange: v.setChatInput, onKeyDown: v.chatKey, rows: 1, placeholder: 'מה לשנות בצג?' }),
+          el('button', `flex:none;min-width:64px;height:44px;padding:0 14px;border-radius:12px;border:none;background:${v.sendBg};color:#0b1400;font-size:15px;font-weight:800;cursor:pointer;opacity:${v.sendOpacity}`, { onClick: v.sendChat, 'aria-busy': v.agentBusy }, 'שליחה')) : null,
         v.dragging ? el('div', 'position:absolute;inset:8px;border-radius:16px;border:2px dashed #d4f25c;background:rgba(4,9,20,.88);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#d4f25c;pointer-events:none', null, 'שחררו כדי לצרף') : null);
 
       // ---- sheets
