@@ -15,9 +15,15 @@
   const q = new URLSearchParams(location.search);
   const bool = (k, d) => q.has(k) ? !/^(0|false|no|off)$/i.test(q.get(k)) : d;
   const num = (k, d) => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : d);
+  // The display key: the URL's, kept for visits without one (an installed app opens "/" with no query).
+  function displayKey() {
+    const k = q.get('key') || '';
+    try { if (k) localStorage.setItem('wall:key', k); else return localStorage.getItem('wall:key') || ''; } catch (e) { /* no storage: the URL's only */ }
+    return k;
+  }
   const CFG = {
     feed: q.get('feed') || '/api/feed',
-    key: q.get('key') || '',
+    key: displayKey(),
     refresh: Math.max(10, num('refresh', 60)),
     demo: q.get('demo') || 'off',                 // off | launch | greeting | noon
     sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
@@ -120,7 +126,8 @@
       try {
         const t0 = Date.now(), L = JSON.parse(await this.fetchText(CFG.live, 8e3)), t1 = Date.now(), at = Date.parse(L.at);
         if (at) {
-          if (at < (this._liveAt || 0)) return;          // a late answer must not undo a newer one (e.g. close a moment)
+          // A late answer must not undo a newer one (e.g. close a moment); a server clock set back by minutes is not late.
+          if (at < (this._liveAt || 0) && this._liveAt - at < 120e3) return;
           this._liveAt = at;
           const off = at - (t0 + t1) / 2;                 // server clock minus ours, give or take half the round trip
           if (Math.abs(off - skew) > 1000) skew = off;
@@ -215,6 +222,8 @@
       // Launch mode only for a launch Launch Library calls Go (and recently): never for TBD/TBC/Hold.
       const L = D.launches.find((l) => { const d = Date.parse(l.at) - now; return d > -12000 && d <= 600e3 && goNow(l, now); });
       if (L) { if (!ov || ov.kind !== 'launch' || ov.launch.at !== L.at) this.setState({ ov: { kind: 'launch', id: L.at, launch: L, until: Date.parse(L.at) + 12000 } }); return; }
+      // Held, scrubbed or moved during the countdown (the feed no longer has a Go launch at that time): close, no "שוגר".
+      if (ov && ov.kind === 'launch' && !ov.demo && now < ov.until && !D.launches.some((l) => l.at === ov.launch.at && l.code === 'Go')) { ov = null; this.setState({ ov: null }); }
       // A personal celebration every half hour (:00 and :30), cycling through the people whose day it is.
       const slotKey = T.day + T.h + ':' + T.m;
       if (!ov && (T.m === 0 || T.m === 30) && T.s < 5 && this._celebSlot !== slotKey) { this._celebSlot = slotKey; const P = this.celebratable(T.iso); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[(T.h * 2 + (T.m ? 1 : 0)) % P.length], until: now + 14000 } }); }
@@ -473,6 +482,39 @@
     }
   }
 
+  // ---- kiosk: full screen and the cursor ----------------------------------------------------------
+  // Full screen needs a user gesture (the corner button, a double-click or F), so it is never asked for on load. It also
+  // ends when the page reloads itself (a deploy, 04:00); F11 or a kiosk-mode browser keeps it. The button and the cursor
+  // show while the mouse moves and go after three seconds still.
+  const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  function toggleFullscreen() {
+    const d = document, el = d.documentElement, on = fsOn(), fn = on ? d.exitFullscreen || d.webkitExitFullscreen : el.requestFullscreen || el.webkitRequestFullscreen;
+    try { const r = fn && fn.call(on ? d : el); if (r && r.catch) r.catch((e) => console.warn('fullscreen refused', e)); } catch (e) { console.warn('fullscreen refused', e); }
+  }
+  if (!CFG.preview) document.head.appendChild(Object.assign(document.createElement('style'), { textContent: 'html{-webkit-user-select:none;user-select:none}html.idle,html.idle *{cursor:none!important}' }));
+  function ScreenControls() {
+    const [awake, setAwake] = useState(false), [full, setFull] = useState(fsOn());
+    useEffect(() => {
+      let idle = 0, last = '';
+      const wake = (e) => {
+        if (e.type === 'mousemove') { const at = e.screenX + ',' + e.screenY; if (at === last) return; last = at; }   // Chrome repeats a move that did not happen
+        setAwake(true); clearTimeout(idle); idle = setTimeout(() => setAwake(false), 3000);
+      };
+      const sync = () => setFull(fsOn());
+      const dbl = (e) => { if (!(e.target.closest && e.target.closest('button'))) toggleFullscreen(); };
+      const key = (e) => { if ((e.code === 'KeyF' || e.key === 'f' || e.key === 'F') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) toggleFullscreen(); };
+      const on = [['mousemove', wake], ['pointerdown', wake], ['dblclick', dbl], ['keydown', key]], fsEvents = ['fullscreenchange', 'webkitfullscreenchange'];
+      on.forEach(([t, f]) => addEventListener(t, f)); fsEvents.forEach((t) => document.addEventListener(t, sync));
+      return () => { clearTimeout(idle); on.forEach(([t, f]) => removeEventListener(t, f)); fsEvents.forEach((t) => document.removeEventListener(t, sync)); document.documentElement.classList.remove('idle'); };
+    }, []);
+    useEffect(() => { document.documentElement.classList.toggle('idle', !awake); }, [awake]);
+    const label = full ? 'יציאה ממסך מלא' : 'מסך מלא';
+    return h('button', { type: 'button', dir: 'rtl', title: label, onClick: toggleFullscreen, style: { position: 'fixed', left: 24, bottom: 24, zIndex: 100, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px 10px 16px', borderRadius: 999, background: 'rgba(14,26,50,.88)', border: '1px solid rgba(150,190,240,.3)', boxShadow: '0 10px 30px rgba(0,0,0,.45)', color: '#e6f1ff', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 16, fontWeight: 500, cursor: 'pointer', opacity: awake ? 1 : 0, pointerEvents: awake ? 'auto' : 'none', transition: 'opacity .5s ease' } },
+      h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: '#9fdcff', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+        h('path', { d: full ? 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6' : 'M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6' })),
+      label);
+  }
+
   /** A render crash leaves a dark screen and reloads the page: after half a minute, then at most every five minutes. */
   class Guard extends React.Component {
     constructor(p) { super(p); this.state = { crashed: false }; }
@@ -484,5 +526,5 @@
     }
   }
 
-  ReactDOM.createRoot(document.getElementById('root')).render(h(Guard, null, h(Wall)));
+  ReactDOM.createRoot(document.getElementById('root')).render(h(Guard, null, h(Wall), CFG.preview ? null : h(ScreenControls)));
 })();

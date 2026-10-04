@@ -7,8 +7,14 @@ are local, so the page works offline once loaded. The stage scales to any screen
 Content comes from `/api/feed` and is polled every minute. The live part, set from the remote control
 (`app/remote/`), comes from `/api/live` every 5 seconds: the stored design, brightness, the urgent banner and
 the full-screen moment (one started from the remote, an important event while it runs, or the 12:00 show unless
-it was skipped today). If `/api/live` is unreachable the wall falls back to its own 12:00 show. If the API is unreachable on the first load, the
-bundled sample `data/feed.json` (the design's own week, 13–19.9) is shown instead.
+it was skipped today). If `/api/live` is unreachable the wall falls back to its own 12:00 show. Until `/api/feed` first
+answers, the wall shows a calm "connecting" state and keeps retrying; it never shows invented content. The bundled
+sample `data/feed.json` (the design's own week, 13–19.9) appears only with `?sample=1`.
+
+**Full screen:** moving the mouse shows a "מסך מלא" button in the bottom-left corner; it and the cursor hide after
+three seconds still. A double-click or the F key does the same. Browser full screen ends when the page reloads itself
+(after a deploy, nightly at 04:00), so a lobby PC should use F11 or a kiosk-mode browser (`chrome --kiosk <url>`), as
+`docs/operator-guide.md` explains. `manifest.webmanifest` also makes the wall installable as an app.
 
 ## Screen
 
@@ -31,7 +37,8 @@ personal celebration with fireworks every half hour at :00 and :30 (cycling thro
 
 | Param | Default | Meaning |
 | --- | --- | --- |
-| `key` | | `DISPLAY_KEY`, if the backend requires one |
+| `key` | | `DISPLAY_KEY`, if the backend requires one; remembered by the browser for later visits without it |
+| `sample` | `0` | `1` shows the bundled sample feed instead of `/api/feed` (design demos) |
 | `demo` | `off` | `launch`, `greeting` or `noon`: trigger a moment on load (keys L, G, N do the same; Esc closes) |
 | `noon` | `1` | `0` disables the 12:00 show |
 | `qr` | `1` | `0` hides the QR codes |
@@ -78,6 +85,7 @@ It never shows a stock portrait next to a real name.
 
 ```
 index.html            page shell
+manifest.webmanifest  installs the wall as an app (icons: assets/app-icon-192.png, app-icon-512.png)
 styles.css            keyframes and globals, verbatim from the design
 src/wall.js           the wall (React, no JSX)
 src/overlays.js       full-screen moments: launch mode, celebration, 12:00 show, important event, toast
