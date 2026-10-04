@@ -82,7 +82,7 @@ export async function buildFeed() {
     seen.add(`${e.type}|${p.display_name}|${e.event_date}`);
     people.push({ type: L.type, color: L.color, name: displayName(p), line: e.text_he || L.line(p, whenWord(e.event_date, today)), date: shortDate(e.event_date), photo: p.photo_url || null, celebrate: e.type !== 'bereavement', sort: e.event_date });
   }
-  const roster = must(await s.from('people').select('display_name,rank,unit,photo_url,birthday').eq('active', true).not('birthday', 'is', null), 'people') as any[];
+  const roster = must(await s.from('people').select('display_name,rank,unit,photo_url,birthday').eq('active', true).eq('show_birthday', true).not('birthday', 'is', null), 'people') as any[];
   for (const p of roster) {
     const next = nextYearly(p.birthday.slice(5), from, cfg.peopleHorizonDays + cfg.peopleBackDays);
     if (!next || seen.has(`birthday|${p.display_name}|${next}`)) continue;

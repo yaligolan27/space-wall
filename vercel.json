@@ -13,6 +13,9 @@
     },
     "api/cron.ts": {
       "maxDuration": 60
+    },
+    "api/survey.ts": {
+      "maxDuration": 30
     }
   },
   "headers": [
@@ -30,6 +33,14 @@
     {
       "source": "/mcp/:token",
       "destination": "/api/mcp?token=:token"
+    },
+    {
+      "source": "/join",
+      "destination": "/join.html"
+    },
+    {
+      "source": "/join/review",
+      "destination": "/join-review.html"
     }
   ],
   "crons": [

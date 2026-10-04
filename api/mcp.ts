@@ -10,6 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import * as ops from '../lib/wall-ops.js';
+import * as survey from '../lib/survey.js';
 import { isoDateIL } from '../lib/dates.js';
 
 const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המסך בלובי של מנהלת החלל. דרך הכלים האלה מעדכנים את מה שמוצג: אנשים, אירועים אישיים, אירועי מנהלת, ורצועת האירועים וההזדמנויות.
@@ -22,6 +23,7 @@ const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המס
 - יום הולדת: עדיף לשמור תאריך לידה באדם (birthday) ואז הוא יופיע אוטומטית כל שנה; אירוע birthday נפרד רק כשאין תאריך לידה.
 - מחיקה בלתי הפיכה: delete_event דורש אישור מפורש. remove_person רק מסתיר את האדם.
 - אם משהו לא ברור (איזה "דני"? איזה תאריך?), שאל/י שאלה אחת קצרה במקום לנחש.
+- טפסי "היכרות" שאנשי המנהלת ממלאים ב-/join ממתינים לאישור: list_survey_submissions, ואז approve_survey_submission או reject_survey_submission. אם יש התאמה לאדם קיים (matches), אשר/י עם person_id שלו.
 - ענה/י בעברית, קצר.`;
 
 const idOf = z.string().uuid();
@@ -114,6 +116,26 @@ function buildServer(): McpServer {
     description: `טעינת גיליון שבועי של ניוזלטר רקיע לעמודת הניוזלטר בצג. קרא/י את הגיליון (מקישור או מטקסט שהודבק), וכתוב/י לכל ידיעה: cat (ביטחון | שיגורים | חקר החלל | כלכלה ותעשייה | תקשורת לוויינית | חישה מרחוק | מדיניות), il (האם קשור לישראל), date (למשל 14–15.09), src (שם המקור), title (כותרת עברית עד 90 תווים), dek (משפט הסבר אחד), url (קישור לכתבה, לקוד QR). featured: אינדקסים של 4–6 הידיעות החשובות. summary: 3–5 שורות תמצית. ticker: אירועים והזדמנויות מהגיליון. היום ${isoDateIL()}.`,
     inputSchema: { issue_date: ops.DATE, source_url: z.string().url(), content: ops.NewsletterContent },
   }, guard(async (a: any) => ops.importNewsletter(a.issue_date, a.source_url, a.content)));
+
+  server.registerTool('list_survey_submissions', {
+    title: 'טפסי היכרות',
+    description: 'טפסי ההיכרות שאנשי המנהלת מילאו (ברירת מחדל: ממתינים לאישור). matches = אדם קיים באותו שם; photo = קישור זמני לתמונה.',
+    inputSchema: { status: z.enum(['pending', 'approved', 'rejected']).optional() },
+    annotations: { readOnlyHint: true },
+  }, guard(async (a: { status?: 'pending' | 'approved' | 'rejected' }) => survey.listSubmissions(a.status)));
+
+  server.registerTool('approve_survey_submission', {
+    title: 'אישור טופס היכרות',
+    description: 'מאשר טופס: יוצר את האדם (או מעדכן אדם קיים כשנשלח person_id), ומפרסם את התמונה בצג אם האדם הסכים.',
+    inputSchema: { id: idOf, person_id: idOf.optional() },
+  }, guard(async (a: { id: string; person_id?: string }) => survey.approveSubmission(a.id, a.person_id)));
+
+  server.registerTool('reject_survey_submission', {
+    title: 'דחיית טופס היכרות',
+    description: 'דוחה טופס (כפול, בדיחה, טעות) ומוחק את התמונה שלו.',
+    inputSchema: { id: idOf, note: z.string().max(200).optional() },
+    annotations: { destructiveHint: true },
+  }, guard(async (a: { id: string; note?: string }) => survey.rejectSubmission(a.id, a.note)));
 
   return server;
 }

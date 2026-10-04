@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#040914">
+<title>היכרות · מנהלת החלל</title>
+<link rel="icon" href="/assets/logo-mark.png">
+<link rel="stylesheet" href="/assets/fonts/v4/fonts.css">
+<style>
+:root{--bg:#040914;--card:rgba(20,34,64,.62);--line:rgba(150,190,240,.16);--text:#e6f1ff;--muted:#8b9dbd;--accent:#6fd6ea;--lime:#d4f25c;--err:#ff8a8a}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:'Heebo',system-ui,sans-serif;font-size:16px;line-height:1.5}
+body{min-height:100vh;background:radial-gradient(1200px 600px at 80% -10%,rgba(60,110,200,.35),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgba(111,214,234,.14),transparent 60%),var(--bg)}
+.stars{position:fixed;inset:0;pointer-events:none;background-image:radial-gradient(1px 1px at 20% 30%,#fff8,transparent),radial-gradient(1px 1px at 70% 80%,#fff6,transparent),radial-gradient(1.5px 1.5px at 40% 70%,#fff5,transparent),radial-gradient(1px 1px at 90% 20%,#fff7,transparent),radial-gradient(1px 1px at 55% 15%,#fff5,transparent);background-size:340px 340px;opacity:.6}
+html,body{overflow-x:hidden}
+main{position:relative;max-width:640px;margin:0 auto;padding:28px 16px 64px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+header img{width:52px;height:52px}
+header small{display:block;color:var(--accent);font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.14em}
+h1{margin:0;font-size:26px;font-weight:800;line-height:1.2}
+.intro{color:var(--muted);margin:0 0 22px}
+section{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px 18px;margin-bottom:16px;backdrop-filter:blur(8px)}
+section h2{margin:0 0 4px;font-size:18px;font-weight:700;display:flex;gap:10px;align-items:center}
+section h2 span{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:rgba(111,214,234,.15);color:var(--accent);font-size:13px;font-family:'IBM Plex Mono',monospace}
+section .hint{color:var(--muted);font-size:14px;margin:0 0 14px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:480px){.row{grid-template-columns:1fr}}
+label.f{display:block;margin-bottom:14px}
+label.f>b{display:block;font-weight:500;font-size:14px;margin-bottom:6px}
+label.f>b i{color:var(--lime);font-style:normal}
+input[type=text],input[type=email],input[type=tel],input[type=date],textarea{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:rgba(4,9,20,.6);color:var(--text);font:inherit;font-size:16px;outline:none;transition:border-color .2s}
+input:focus,textarea:focus{border-color:var(--accent)}
+input[type=date]{color-scheme:dark;min-height:48px}
+textarea{min-height:76px;resize:vertical}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chips label{cursor:pointer}
+.chips input{position:absolute;opacity:0;pointer-events:none}
+.chips span{display:inline-block;padding:9px 16px;border-radius:999px;border:1px solid var(--line);background:rgba(4,9,20,.5);font-size:15px;transition:all .15s}
+.chips input:checked+span{background:rgba(111,214,234,.18);border-color:var(--accent);color:#fff}
+.chips input:focus-visible+span{outline:2px solid var(--accent)}
+.check{display:flex;gap:12px;align-items:flex-start;cursor:pointer;padding:6px 0}
+.check input{width:22px;height:22px;flex:none;margin:2px 0 0;accent-color:var(--accent)}
+.photo{display:flex;gap:18px;align-items:center}
+.avatar{width:120px;height:120px;flex:none;border-radius:50%;border:3px solid var(--accent);background:rgba(4,9,20,.7) center/cover no-repeat;display:grid;place-items:center;color:var(--muted);font-size:13px;text-align:center;box-shadow:0 0 0 6px rgba(111,214,234,.08)}
+.btn{display:inline-block;padding:11px 18px;border-radius:12px;border:1px solid var(--accent);color:var(--accent);background:transparent;font:inherit;font-weight:500;cursor:pointer}
+.btn:hover{background:rgba(111,214,234,.1)}
+.hidden{display:none!important}
+.submit{width:100%;padding:16px;border:0;border-radius:14px;background:linear-gradient(90deg,#6fd6ea,#d4f25c);color:#04101e;font:inherit;font-size:18px;font-weight:800;cursor:pointer;margin-top:6px}
+.submit:disabled{opacity:.6;cursor:wait}
+.err{color:var(--err);font-size:14px;margin-top:10px;min-height:1em}
+.bad{border-color:var(--err)!important}
+.done{text-align:center;padding:48px 18px}
+.done .big{font-size:56px}
+.done h2{display:block;font-size:24px}
+.hp{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+footer{color:var(--muted);font-size:13px;text-align:center;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="stars"></div>
+<main>
+  <header>
+    <img src="/assets/logo-mark.png" alt="">
+    <div><small>SPACE DIRECTORATE · צג חלל</small><h1>נעים להכיר!</h1></div>
+  </header>
+  <p class="intro">אנחנו בונים את צג החלל בלובי ואת ספר האנשים של המנהלת. כמה דקות של מילוי, ונוכל לחגוג איתך ימי הולדת ושמחות, ולהציג אותך כמו שצריך. שדות עם <b style="color:var(--lime)">*</b> הם חובה.</p>
+
+  <form id="form" novalidate>
+    <section>
+      <h2><span>1</span>מי את/ה</h2>
+      <div class="row">
+        <label class="f"><b>שם פרטי <i>*</i></b><input type="text" name="first_name" autocomplete="given-name" required maxlength="40"></label>
+        <label class="f"><b>שם משפחה <i>*</i></b><input type="text" name="last_name" autocomplete="family-name" required maxlength="40"></label>
+      </div>
+      <label class="f"><b>תאריך לידה <i>*</i></b><input type="date" name="birthday" required></label>
+      <label class="check"><input type="checkbox" name="show_birthday" checked><span>לחגוג לי את יום ההולדת על הצג 🎂 <span style="color:var(--muted)">(השנה לא מוצגת)</span></span></label>
+    </section>
+
+    <section>
+      <h2><span>2</span>תמונת פרופיל</h2>
+      <p class="hint">תמונה שאת/ה אוהב/ת, עם פנים ברורות. היא תוצג בעיגול, אז עדיף שהפנים יהיו במרכז.</p>
+      <div class="photo">
+        <div class="avatar" id="avatar">אין תמונה</div>
+        <div>
+          <input type="file" id="file" accept="image/*" class="hidden">
+          <button type="button" class="btn" id="pick">בחירת תמונה</button>
+          <button type="button" class="btn hidden" id="clear" style="border-color:var(--line);color:var(--muted)">הסרה</button>
+          <div class="err" id="photoErr"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2><span>3</span>במנהלת</h2>
+      <b style="display:block;font-weight:500;font-size:14px;margin-bottom:8px">מעמד</b>
+      <div class="chips" id="kind">
+        <label><input type="radio" name="kind" value="civilian" checked><span>אזרח/ית</span></label>
+        <label><input type="radio" name="kind" value="soldier"><span>חובה / קבע</span></label>
+        <label><input type="radio" name="kind" value="officer"><span>קצין/ה</span></label>
+        <label><input type="radio" name="kind" value="reservist"><span>מילואים</span></label>
+      </div>
+      <label class="f hidden" id="rankBox"><b>דרגה</b><input type="text" name="rank" maxlength="30" placeholder="למשל: סרן, רס״ן, סמ״ר"></label>
+      <div class="row">
+        <label class="f"><b>אגף / ענף / צוות</b><input type="text" name="unit" maxlength="60"></label>
+        <label class="f"><b>תפקיד</b><input type="text" name="role" maxlength="80"></label>
+      </div>
+      <div class="row">
+        <label class="f"><b>מתי הצטרפת למנהלת?</b><input type="date" name="joined_on"></label>
+        <label class="f hidden" id="leavesBox"><b>תאריך שחרור / סיום צפוי</b><input type="date" name="leaves_on"></label>
+      </div>
+    </section>
+
+    <section>
+      <h2><span>4</span>קצת עליך</h2>
+      <p class="hint">הכל רשות, אבל זה החלק הכיף. חלק מהתשובות עשויות להופיע בצג.</p>
+      <label class="f"><b>תחומי מומחיות</b><input type="text" name="expertise" maxlength="200" placeholder="מכ״ם, הנעה, משפט חלל, סייבר..."></label>
+      <label class="f"><b>תחביבים</b><input type="text" name="hobbies" maxlength="200" placeholder="ריצות, צילום שמיים, גינון..."></label>
+      <label class="f"><b>משהו שלא יודעים עליי</b><textarea name="fun_fact" maxlength="200"></textarea></label>
+      <label class="f"><b>אם הייתי טס/ה לחלל, הייתי לוקח/ת איתי...</b><input type="text" name="space_q" maxlength="200"></label>
+    </section>
+
+    <section>
+      <h2><span>5</span>יש שמחה בדרך?</h2>
+      <p class="hint">חתונה, לידה, עלייה בדרגה, סיום תואר? ספר/י ונדאג שהמנהלת תחגוג איתך.</p>
+      <label class="f"><b>מה ומתי</b><textarea name="upcoming" maxlength="300" placeholder="למשל: מתחתנת ב-12.11 🎉"></textarea></label>
+    </section>
+
+    <section>
+      <h2><span>6</span>פרטי קשר והסכמה</h2>
+      <p class="hint">פרטי הקשר נשארים בלשכה בלבד ולא מוצגים בשום מקום.</p>
+      <div class="row">
+        <label class="f"><b>מייל</b><input type="email" name="email" autocomplete="email" maxlength="120" dir="ltr"></label>
+        <label class="f"><b>טלפון</b><input type="tel" name="phone" autocomplete="tel" maxlength="20" dir="ltr"></label>
+      </div>
+      <label class="f"><b>עוד משהו ללשכה?</b><textarea name="notes" maxlength="500"></textarea></label>
+      <label class="check"><input type="checkbox" name="consent_wall"><span><b>אני מסכים/ה ששמי, תמונתי ושמחות שלי יוצגו על צג החלל בלובי.</b> בלי הסכמה הפרטים נשמרים בלשכה בלבד.</span></label>
+      <label class="hp" aria-hidden="true">אתר<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+    </section>
+
+    <button class="submit" id="submit" type="submit">שליחה 🚀</button>
+    <div class="err" id="err" role="alert"></div>
+  </form>
+
+  <section class="done hidden" id="done">
+    <div class="big">🛰️</div>
+    <h2>תודה, קיבלנו!</h2>
+    <p class="hint" style="margin:0">הלשכה תעבור על הפרטים, ואחרי אישור הם יופיעו במערכת ובצג.</p>
+  </section>
+  <footer>מנהלת החלל · צג חלל</footer>
+</main>
+<script>
+(() => {
+  const form = document.getElementById('form');
+  const $ = n => form.elements[n];
+  const formKey = new URLSearchParams(location.search).get('k') || '';
+  let photo = null;   // { mime, data }
+
+  // Rank and discharge date only matter for people in uniform.
+  function syncKind() {
+    const k = form.querySelector('input[name=kind]:checked').value;
+    document.getElementById('rankBox').classList.toggle('hidden', k === 'civilian');
+    document.getElementById('leavesBox').classList.toggle('hidden', k === 'civilian');
+  }
+  document.getElementById('kind').addEventListener('change', syncKind);
+
+  // Photo: centre-crop to a square and shrink to 800px, so the upload is small and fits the wall's round avatars.
+  const file = document.getElementById('file'), avatar = document.getElementById('avatar'), photoErr = document.getElementById('photoErr');
+  document.getElementById('pick').onclick = () => file.click();
+  document.getElementById('clear').onclick = () => { photo = null; file.value = ''; avatar.style.backgroundImage = ''; avatar.textContent = 'אין תמונה'; document.getElementById('clear').classList.add('hidden'); };
+  file.onchange = async () => {
+    photoErr.textContent = '';
+    const f = file.files && file.files[0]; if (!f) return;
+    try {
+      const url = URL.createObjectURL(f);
+      const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = url; });
+      const side = Math.min(img.naturalWidth, img.naturalHeight), out = Math.min(800, side);
+      const c = document.createElement('canvas'); c.width = c.height = out;
+      c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, out, out);
+      URL.revokeObjectURL(url);
+      const data = c.toDataURL('image/jpeg', 0.86);
+      photo = { mime: 'image/jpeg', data };
+      avatar.textContent = ''; avatar.style.backgroundImage = `url(${data})`;
+      document.getElementById('clear').classList.remove('hidden');
+    } catch (e) {
+      photo = null; photoErr.textContent = 'לא הצלחנו לקרוא את התמונה. נסו קובץ JPG או PNG.';
+    }
+  };
+
+  const err = document.getElementById('err'), btn = document.getElementById('submit');
+  form.addEventListener('input', ev => ev.target.classList && ev.target.classList.remove('bad'));
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    err.textContent = '';
+    form.querySelectorAll('.bad').forEach(x => x.classList.remove('bad'));
+    const missing = ['first_name', 'last_name', 'birthday'].filter(n => !$(n).value.trim());
+    if (missing.length) { missing.forEach(n => $(n).classList.add('bad')); $(missing[0]).focus(); err.textContent = 'חסרים שם פרטי, שם משפחה או תאריך לידה.'; return; }
+    if ($('email').value && !$('email').checkValidity()) { $('email').classList.add('bad'); err.textContent = 'כתובת המייל לא תקינה.'; return; }
+
+    const kind = form.querySelector('input[name=kind]:checked').value, uniform = kind !== 'civilian';
+    const v = n => $(n).value.trim();
+    const fields = {
+      first_name: v('first_name'), last_name: v('last_name'), birthday: v('birthday'),
+      show_birthday: $('show_birthday').checked, consent_wall: $('consent_wall').checked,
+      kind, rank: uniform ? v('rank') : '', unit: v('unit'), role: v('role'),
+      joined_on: v('joined_on'), leaves_on: uniform ? v('leaves_on') : '',
+      email: v('email'), phone: v('phone'),
+      profile: { expertise: v('expertise'), hobbies: v('hobbies'), fun_fact: v('fun_fact'), space_q: v('space_q'), upcoming: v('upcoming'), notes: v('notes') },
+    };
+    if (photo && !fields.consent_wall && !confirm('בלי סימון ההסכמה התמונה לא תוצג בצג. לשלוח בכל זאת?')) return;
+
+    btn.disabled = true; btn.textContent = 'שולח...';
+    try {
+      const r = await fetch('/api/survey', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fields, photo, k: formKey, website: v('website') }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'השליחה נכשלה');
+      form.classList.add('hidden'); document.getElementById('done').classList.remove('hidden'); scrollTo(0, 0);
+    } catch (e) {
+      err.textContent = e.message || 'השליחה נכשלה. נסו שוב.';
+    } finally { btn.disabled = false; btn.textContent = 'שליחה 🚀'; }
+  });
+})();
+</script>
+</body>
+</html>
