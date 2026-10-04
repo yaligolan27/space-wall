@@ -2,7 +2,7 @@
 // keyword dictionary, and anything unmatched keeps its English name and can be fixed by hand
 // in the `translations` table.
 import { db, must } from '../../lib/db.js';
-import { withRun, fetchJson, type RunCtx } from './run.js';
+import { withRun, fetchJson, type RunCtx, type RunOpts } from './run.js';
 
 const LL2 = 'https://ll.thespacedevs.com/2.3.0/launches/upcoming/?limit=20&mode=normal';
 
@@ -59,7 +59,7 @@ function siteHe(name: string | undefined, overrides: Map<string, string>): strin
   return best || name;
 }
 
-export async function runLaunches() {
+export async function runLaunches(opts?: RunOpts) {
   return withRun('launches', async (ctx: RunCtx) => {
     const s = db();
     const data = await fetchJson(LL2);
@@ -98,5 +98,5 @@ export async function runLaunches() {
     ctx.published = rows.length;
     if (unmatched.length) ctx.log.untranslated_sites = [...new Set(unmatched)];
     return rows.length;
-  });
+  }, opts);
 }

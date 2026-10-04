@@ -1,6 +1,8 @@
 // "צג חלל" — an MCP server for operating the lobby wall from the Claude app.
-// Add it in Claude as a custom connector with the URL  https://<host>/mcp/<MCP_TOKEN>
-// The token in the path is the only credential, so keep the URL private; rotate MCP_TOKEN to revoke it.
+// Add it in Claude as a custom connector with the URL  https://<host>/mcp/<token>
+// The token in the path is the only credential, so keep the URL private. It is MCP_TOKEN in the environment, else
+// the mcp_token row of app_settings in Supabase (for when the Vercel environment can't be edited); change it to
+// revoke the URL (an app_settings change reaches every instance within a minute).
 //
 // Stateless Streamable HTTP: every request gets a fresh server, which fits serverless functions.
 // The tools can only do what lib/wall-ops.ts allows: no raw SQL, no schema changes, soft-delete for people.
@@ -12,6 +14,7 @@ import { z } from 'zod';
 import * as ops from '../lib/wall-ops.js';
 import { ACTIONS, DesignPatch } from '../lib/remote-ops.js';
 import { isoDateIL } from '../lib/dates.js';
+import { setting } from '../lib/settings.js';
 
 const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המסך בלובי של מנהלת החלל. דרך הכלים האלה מעדכנים את מה שמוצג: אנשים, אירועים אישיים, אירועי מנהלת, ורצועת האירועים וההזדמנויות.
 
@@ -19,6 +22,7 @@ const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המס
 - התחל/י כל שיחה ב-wall_overview כדי לדעת מה כבר קיים ומה התאריך היום.
 - לפני כל אירוע אישי חפש/י את האדם עם find_people. אם אינו קיים, הוסף/י אותו עם add_person ורק אז את האירוע.
 - לפני כתיבה, סכם/י בשורה אחת מה עומד להישמר ובקש/י אישור. אחרי השמירה אשר/י מה נשמר, כולל תאריך בפורמט יום.חודש.
+- שעות של אירועי מנהלת: לפי השדות date, time ו-end_time (שעון ישראל). starts_at ו-ends_at הם UTC, לא לצטט מהם שעה.
 - תאריך בלי שנה פירושו המופע הבא שלו. אם אין שעה לאירוע מנהלת, שאל/י; אם אין תשובה, 09:00.
 - יום הולדת: עדיף לשמור תאריך לידה באדם (birthday) ואז הוא יופיע אוטומטית כל שנה; אירוע birthday נפרד רק כשאין תאריך לידה.
 - מחיקה בלתי הפיכה: delete_event דורש אישור מפורש. remove_person רק מסתיר את האדם.
@@ -57,13 +61,13 @@ function buildServer(): McpServer {
 
   server.registerTool('update_person', {
     title: 'עדכון פרטי אדם',
-    description: 'עדכון פרטים (דרגה, אגף, תפקיד, תאריכים, תמונה). רק השדות שנשלחים משתנים.',
-    inputSchema: { id: idOf, ...ops.PersonFields.partial().shape },
+    description: 'עדכון פרטים (דרגה, אגף, תפקיד, תאריכים, תמונה, הסכמה להופיע בצג). רק השדות שנשלחים משתנים; null מוחק שדה (למשל birthday: null). active: true מחזיר אדם שהוסר.',
+    inputSchema: { id: idOf, ...ops.PersonPatch.shape },
   }, guard(async ({ id, ...patch }: any) => ops.updatePerson(id, patch)));
 
   server.registerTool('remove_person', {
     title: 'הסרת אדם',
-    description: 'מסתיר אדם שעזב מהצג ומחישוב ימי ההולדת. ההיסטוריה נשמרת וניתן להחזיר עם update_person.',
+    description: 'מסתיר אדם שעזב מהצג ומחישוב ימי ההולדת. ההיסטוריה נשמרת וניתן להחזיר עם update_person ו-active: true.',
     inputSchema: { id: idOf },
     annotations: { destructiveHint: true },
   }, guard(async (a: { id: string }) => ops.removePerson(a.id)));
@@ -77,6 +81,7 @@ function buildServer(): McpServer {
       event_date: ops.DATE,
       text_he: z.string().max(80).optional().describe('שורת תצוגה מותאמת, למשל "להולדת הבת · אגף הנדסה". ריק = אוטומטי'),
       show_from: ops.DATE.optional(), show_until: ops.DATE.optional(),
+      rank: z.string().min(1).max(30).optional().describe('רק ב-promotion: הדרגה החדשה. מתעדכנת גם בפרטי האדם, וממנה השורה בצג'),
     },
   }, guard(async (a: any) => ops.addLifeEvent(a)));
 
@@ -101,7 +106,7 @@ function buildServer(): McpServer {
 
   server.registerTool('update_event', {
     title: 'עריכת אירוע',
-    description: 'עריכת אירוע קיים לפי kind ו-id (מתוך wall_overview). directorate: title,type,date,time,place,audience. life: type,event_date,text_he,show_from,show_until. ticker: name,kind,starts_on,ends_on,place,url.',
+    description: 'עריכת אירוע קיים לפי kind ו-id (מתוך wall_overview). directorate: title,type,date,time,end_time,place,audience; שינוי date או time מזיז גם את שעת הסיום (אותו משך), end_time קובע אותה, ו-end_time: null מבטל אותה. life: type,event_date,text_he,show_from,show_until. ticker: name,kind,starts_on,ends_on,place,url.',
     inputSchema: { kind: z.enum(['directorate', 'life', 'ticker']), id: idOf, fields: z.record(z.string(), z.any()) },
   }, guard(async (a: { kind: ops.EventKind; id: string; fields: Record<string, unknown> }) => ops.updateEvent(a.kind, a.id, a.fields)));
 
@@ -114,7 +119,7 @@ function buildServer(): McpServer {
 
   server.registerTool('import_newsletter_issue', {
     title: 'ייבוא גיליון ניוזלטר',
-    description: `טעינת גיליון שבועי של ניוזלטר רקיע לעמודת הניוזלטר בצג. קרא/י את הגיליון (מקישור או מטקסט שהודבק), וכתוב/י לכל ידיעה: cat (ביטחון | שיגורים | חקר החלל | כלכלה ותעשייה | תקשורת לוויינית | חישה מרחוק | מדיניות), il (האם קשור לישראל), date (למשל 14–15.09), src (שם המקור), title (כותרת עברית עד 90 תווים), dek (משפט הסבר אחד), url (קישור לכתבה, לקוד QR). featured: אינדקסים של 4–6 הידיעות החשובות. summary: 3–5 שורות תמצית. ticker: אירועים והזדמנויות מהגיליון. היום ${isoDateIL()}.`,
+    description: `טעינת גיליון שבועי של ניוזלטר רקיע לעמודת הניוזלטר בצג. קרא/י את הגיליון (מקישור או מטקסט שהודבק), וכתוב/י לכל ידיעה: cat (ביטחון | שיגורים | חקר החלל | כלכלה ותעשייה | תקשורת לוויינית | חישה מרחוק | מדיניות), il (האם קשור לישראל), date (למשל 14–15.09), src (שם המקור), title (כותרת עברית עד 90 תווים), dek (משפט הסבר אחד), url (קישור לכתבה, לקוד QR). featured: אינדקסים של 4–6 הידיעות החשובות. summary: 3–5 שורות תמצית. ticker: אירועים והזדמנויות מהגיליון, לכל אחד end (היום האחרון שלו, YYYY-MM-DD) כדי שירד מהרצועה כשעבר. היום ${isoDateIL()}.`,
     inputSchema: { issue_date: ops.DATE, source_url: z.string().url(), content: ops.NewsletterContent },
   }, guard(async (a: any) => ops.importNewsletter(a.issue_date, a.source_url, a.content)));
 
@@ -166,15 +171,15 @@ function buildServer(): McpServer {
   return server;
 }
 
-function tokenOk(given: string | undefined): boolean {
-  const want = process.env.MCP_TOKEN || '';
+async function tokenOk(given: string | undefined): Promise<boolean> {
+  const want = await setting('MCP_TOKEN', 'mcp_token');
   if (want.length < 24 || !given) return false;            // no token configured = closed, never open
   const a = Buffer.from(given), b = Buffer.from(want);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!tokenOk(req.query.token as string | undefined)) return res.status(404).json({ error: 'not found' });
+  if (!(await tokenOk(req.query.token as string | undefined).catch(() => false))) return res.status(404).json({ error: 'not found' });
   if (req.method !== 'POST') return res.status(405).setHeader('Allow', 'POST').json({ error: 'method not allowed' });
   const server = buildServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

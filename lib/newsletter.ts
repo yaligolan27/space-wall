@@ -9,7 +9,8 @@
 export const NEWSLETTER_SITE = 'https://rakia-weekly.vercel.app';
 
 export type ParsedNews = { cat: string; il?: boolean; date: string; src: string; title: string; dek: string; url: string; image: null };
-export type ParsedTicker = { kind: 'אירוע' | 'הזדמנות'; date: string; name: string };
+/** date: as the wall shows it ("27–29.10"); end: its last day as YYYY-MM-DD, so the feed can drop it once it has passed. */
+export type ParsedTicker = { kind: 'אירוע' | 'הזדמנות'; date: string; name: string; end: string };
 export type ParsedIssue = {
   issue_date: string;
   source_url: string;
@@ -126,11 +127,9 @@ function parseNews(html: string): ParsedNews[] {
   return out.filter(n => n.cat);
 }
 
-type Dated = ParsedTicker & { end: string };
-
 function parseTicker(html: string, issueDate: string, today: string): ParsedTicker[] {
-  const items: Dated[] = [];
-  const add = (kind: Dated['kind'], whenText: string, name: string) => {
+  const items: ParsedTicker[] = [];
+  const add = (kind: ParsedTicker['kind'], whenText: string, name: string) => {
     const end = endDate(whenText, issueDate), date = shortWhen(whenText);
     if (!end || !date || !name || end < today) return;
     items.push({ kind, date, name, end });
@@ -165,8 +164,7 @@ function parseTicker(html: string, issueDate: string, today: string): ParsedTick
   return items
     .filter(t => !seen.has(t.name) && (seen.add(t.name), true))
     .sort((a, b) => a.end.localeCompare(b.end))
-    .slice(0, MAX_TICKER)
-    .map(({ end, ...t }) => t);
+    .slice(0, MAX_TICKER);
 }
 
 /**

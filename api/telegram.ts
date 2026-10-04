@@ -4,8 +4,12 @@
 //
 // Register the webhook once:
 //   https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<host>/api/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>
+// Telegram echoes that secret in a header on every update; without it anyone could post updates in an admin's
+// name, so the webhook refuses every call until TELEGRAM_WEBHOOK_SECRET is set.
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { db, must } from '../lib/db.js';
+import { isoDateIL, timeIL } from '../lib/dates.js';
 import { buildFeed } from '../lib/feed.js';
 import { applyActions } from '../lib/intake-apply.js';
 import { esc, sendMessage, tg } from '../lib/telegram.js';
@@ -28,10 +32,15 @@ async function authorized(chatId: number): Promise<{ ok: boolean; name?: string 
   return row?.active ? { ok: true, name: row.name } : { ok: false };
 }
 
+const digest = (s: string) => createHash('sha256').update(s).digest();
+function signed(req: VercelRequest): boolean {
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET, given = req.headers['x-telegram-bot-api-secret-token'];
+  return !!secret && typeof given === 'string' && timingSafeEqual(digest(given), digest(secret));
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end();
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
-  if (secret && req.headers['x-telegram-bot-api-secret-token'] !== secret) return res.status(401).end();
+  if (!signed(req)) return res.status(401).end();
   const update = req.body || {};
   try {
     if (update.callback_query) await onCallback(update.callback_query);
@@ -138,9 +147,10 @@ async function statusText(): Promise<string> {
     `הודעות בתור: ${v.queued_intake ?? '?'}`,
   ];
   if (v.model_paused_until && Date.parse(v.model_paused_until) > Date.now()) {
-    lines.push(`⏸ עבודת המודל בהשהיה עד ${esc(String(v.model_paused_until).slice(11, 16))} (מגבלת שימוש)`);
+    lines.push(`⏸ עבודת המודל בהשהיה עד ${timeIL(new Date(v.model_paused_until))} (מגבלת שימוש)`);
   }
   const feed = await buildFeed();
-  lines.push(`עודכן לאחרונה: ${esc(String(feed.generatedAt).slice(0, 16).replace('T', ' '))}`);
+  const at = new Date(feed.generatedAt);   // UTC; shown on Israel's clock
+  lines.push(`עודכן לאחרונה: ${Number.isFinite(at.getTime()) ? `${isoDateIL(at)} ${timeIL(at)}` : esc(String(feed.generatedAt))}`);
   return lines.join('\n');
 }

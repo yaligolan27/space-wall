@@ -26,6 +26,17 @@ export function relLabel(iso: string, todayIso: string): string {
   const dow = new Date(iso + 'T00:00:00Z').getUTCDay();
   return `${HEB_DAYS[dow]} ${shortDate(iso)}`;
 }
+/** Israel wall-clock date + time → ISO with that moment's offset (+03:00 in summer, +02:00 in winter). */
+export function ilToIso(date: string, time = '09:00'): string {
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, timeZoneName: 'longOffset' });
+  const offAt = (t: number) => (fmt.formatToParts(new Date(t)).find(p => p.type === 'timeZoneName')?.value.replace('GMT', '') || '+00:00');
+  const mins = (o: string) => { const m = o.match(/^([+-])(\d\d):(\d\d)$/); return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0; };
+  const naive = Date.parse(`${date}T${time}:00Z`);
+  // The offset at the wall-clock time read as UTC is a guess; checking it again at the real instant settles the
+  // night the clocks change.
+  const off = offAt(naive - mins(offAt(naive)) * 60e3);
+  return `${date}T${time}:00${off}`;
+}
 /** HH:MM in Israel time */
 export function timeIL(d: Date): string {
   return new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);

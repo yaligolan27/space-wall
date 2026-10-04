@@ -36,7 +36,10 @@ check('six featured, lead first', cur.content.featured.length === 6 && cur.conte
 check('ticker has events and opportunities', cur.content.ticker.some(t => t.kind === 'אירוע') && cur.content.ticker.some(t => t.kind === 'הזדמנות'));
 check('ticker drops what has passed', cur.content.ticker.every(t => endDate(t.date, '2026-10-08')! >= '2026-10-04'));
 check('ticker capped', cur.content.ticker.length <= 14);
+check('ticker items carry their last day', cur.content.ticker.every(t => /^\d{4}-\d{2}-\d{2}$/.test(t.end) && t.end === endDate(t.date, '2026-10-08') && t.end >= '2026-10-04'));
 check('fits NewsletterContent', NewsletterContent.safeParse(cur.content).success);
+check('NewsletterContent keeps the last day', NewsletterContent.parse(cur.content).ticker.every(t => t.end));
+check('an issue stored before end existed still fits', NewsletterContent.safeParse({ ...cur.content, ticker: [{ kind: 'אירוע', date: '27–29.10', name: 'x' }] }).success);
 
 // Older layouts: an empty range div (falls back to og:title) and a news-only issue with Israeli items.
 const sep = parseIssue(page('rakia-2026-09-03.html'), '2026-09-03');

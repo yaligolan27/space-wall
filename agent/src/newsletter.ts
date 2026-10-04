@@ -5,20 +5,24 @@ import { db, must } from '../../lib/db.js';
 import { isoDateIL } from '../../lib/dates.js';
 import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from '../../lib/newsletter.js';
 import { NewsletterContent, importNewsletter } from '../../lib/wall-ops.js';
-import { withRun, type RunCtx } from './run.js';
+import { withRun, type RunCtx, type RunOpts } from './run.js';
 
-async function fetchText(url: string, timeoutMs = 30000): Promise<string> {
+// Two pages at most (archive, then the new issue): 15 s each keeps this step near 30 s at worst, well inside the
+// daily cron's 60 s even if the site hangs.
+async function fetchText(url: string, timeoutMs = 15000): Promise<string> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, { signal: ctrl.signal, headers: { 'user-agent': 'space-wall-agent/1.0', accept: 'text/html' } });
     if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
     return await res.text();
+  } catch (e) {
+    throw ctrl.signal.aborted ? new Error(`${url} → no answer in ${timeoutMs / 1000} s`) : e;
   } finally { clearTimeout(t); }
 }
 
 /** Imports the newest issue unless it is already stored. `force` re-imports it anyway. */
-export async function runNewsletter(force = false) {
+export async function runNewsletter(force = false, opts?: RunOpts) {
   return withRun('newsletter', async (ctx: RunCtx) => {
     const latest = latestFromArchive(await fetchText(`${NEWSLETTER_SITE}/archive/`));
     if (!latest) throw new Error('הניוזלטר: דף הארכיון לא מציג אף גיליון');
@@ -34,5 +38,5 @@ export async function runNewsletter(force = false) {
     ctx.published = content.news.length;
     ctx.log.ticker = content.ticker.length;
     return { issue_date: parsed.issue_date, imported: true, news: content.news.length, ticker: content.ticker.length };
-  });
+  }, opts);
 }
