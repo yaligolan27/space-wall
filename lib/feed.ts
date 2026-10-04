@@ -5,7 +5,8 @@
 //                      the category colours and images, which are style, not content)
 //   directorate      ← directorate_events in the next 7 days that have not ended
 //   people           ← life_events + birthdays computed from people, next 10 days (and 3 back);
-//                      only people on the wall (on_wall) and birthdays they agreed to (show_birthday)
+//                      only people on the wall (on_wall) and birthdays they agreed to (show_birthday); a life event
+//                      can also name someone outside the people list
 //   ticker           ← newsletter ticker + industry_events, one item per event, by date, nothing that has ended
 //   launches         ← launches table, empty until the cron has filled it; refreshed here when stale near a launch
 import { db, must } from './db.js';
@@ -172,7 +173,10 @@ export async function buildFeed() {
   const people: any[] = [];
   const seen = new Set<string>();
   for (const e of life) {
-    const p = e.people; if (!p || p.active === false || p.on_wall === false) continue;
+    // Someone outside the people list carries just a name (life_events.name): no rank or unit, a photo only if uploaded.
+    const named = !e.people && typeof e.name === 'string' && e.name.trim();
+    const p = e.people || (named ? { display_name: named } : null);
+    if (!p || (e.people && (p.active === false || p.on_wall === false))) continue;
     const windowed = e.show_from || e.show_until;
     if (windowed ? !lifeShown(e, today) : (e.event_date < from || e.event_date > until)) continue;
     seen.add(`${e.type}|${p.display_name}|${e.event_date}`);

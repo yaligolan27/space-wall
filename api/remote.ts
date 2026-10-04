@@ -40,7 +40,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const result = await fn(body, whoOf(req));
     return res.status(200).json({ result: result ?? null, state: { ...(await snapshot()), config: await config() } });
   } catch (e: any) {
-    if (e instanceof ZodError) return res.status(400).json({ error: 'חלק מהפרטים לא תקינים: ' + [...new Set(e.issues.map(i => (FIELD_HE[String(i.path[0])] || i.path.join('.')) + ': ' + i.message))].join('; ') });
+    if (e instanceof ZodError) {
+      const issues = [...new Set(e.issues.map(i => { const f = FIELD_HE[String(i.path[0])] || i.path.join('.'); return f ? f + ': ' + i.message : i.message; }))];
+      return res.status(400).json({ error: (e.issues.every(i => !i.path.length) ? '' : 'חלק מהפרטים לא תקינים: ') + issues.join('; ') });
+    }
     const msg = String(e?.message || '');
     // Our own errors are Hebrew sentences for the operator; anything else is a server fault, shown with its detail.
     if (/[\u0590-\u05ff]/.test(msg)) return res.status(400).json({ error: msg });

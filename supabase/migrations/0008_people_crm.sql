@@ -11,3 +11,12 @@ alter table people add column if not exists phone         text;
 -- Consent: false keeps the person in the office's list only. The wall never shows them: no birthday,
 -- no personal moments, no photo.
 alter table people add column if not exists on_wall boolean not null default true;
+
+-- A personal event can belong to someone who isn't in the people list: then it carries just the name to show.
+-- person_id was always nullable; every row needs one of the two.
+alter table life_events add column if not exists name text;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'life_events_who') then
+    alter table life_events add constraint life_events_who check (person_id is not null or coalesce(btrim(name), '') <> '');
+  end if;
+end $$;

@@ -32,7 +32,7 @@ export async function overview() {
   const s = db(), today = isoDateIL(), until = addDays(today, 45);
   const [dir, life, ind, feed, liveState] = await Promise.all([
     s.from('directorate_events').select('id,title,type,starts_at,ends_at,place,audience,takeover').gte('starts_at', ilToIso(today, '00:00')).lt('starts_at', ilToIso(addDays(until, 1), '00:00')).order('starts_at'),
-    s.from('life_events').select('id,type,label,event_date,text_he,people(id,display_name,rank,unit)').gte('event_date', addDays(today, -3)).lte('event_date', until).order('event_date'),
+    s.from('life_events').select('id,type,label,event_date,text_he,name,people(id,display_name,rank,unit)').gte('event_date', addDays(today, -3)).lte('event_date', until).order('event_date'),
     s.from('industry_events').select('id,name,kind,starts_on,ends_on,place_he,url').gte('starts_on', addDays(today, -30)).order('starts_on').limit(60),
     buildFeed(),
     import('./remote-ops.js').then(m => m.live()),   // lazy: remote-ops imports this module
@@ -105,15 +105,29 @@ export async function removePerson(id: string) {
 }
 
 // ---- events ---------------------------------------------------------------------------------------
-export async function addLifeEvent({ rank, ...a }: { person_id: string; type: typeof LIFE_TYPES[number]; event_date: string; text_he?: string; show_from?: string; show_until?: string; rank?: string }) {
+/** For someone in the people list (person_id), or anyone by name: a name that is exactly one listed person's full
+ *  name links to them; any other name is kept as is and shown on the wall as written. */
+export async function addLifeEvent({ rank, person_id, name, ...a }: { person_id?: string; name?: string; type: typeof LIFE_TYPES[number]; event_date: string; text_he?: string; show_from?: string; show_until?: string; rank?: string }) {
   assertRealDate(a.event_date);
-  const person = must(await db().from('people').select('id,display_name').eq('id', a.person_id).maybeSingle(), 'person') as any;
-  if (!person) throw new Error('לא נמצא אדם עם המזהה הזה. חפשו קודם עם find_people.');
+  let personId: string | null = person_id || null, freeName: string | null = null, shown: string;
+  if (personId) {
+    const person = must(await db().from('people').select('id,display_name').eq('id', personId).maybeSingle(), 'person') as any;
+    if (!person) throw new Error('לא נמצא אדם עם המזהה הזה. חפשו קודם עם find_people.');
+    shown = person.display_name;
+  } else {
+    const n = (name || '').replace(/\s+/g, ' ').trim();
+    if (n.length < 2) throw new Error('חסר person_id (מ-find_people) או name');
+    const key = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase();
+    const rows = must(await db().from('people').select('id,first_name,last_name,display_name'), 'people') as any[];
+    const same = rows.filter(r => key([r.first_name, r.last_name].filter(Boolean).join(' ')) === key(n));
+    if (same.length > 1) throw new Error(`יש ברשימה ${same.length} אנשים בשם ${n}. בחר/י person_id עם find_people.`);
+    if (same.length === 1) { personId = same[0].id; shown = same[0].display_name; } else { freeName = n; shown = n; }
+  }
   // The person row carries what the wall shows: a promotion's line reads the new rank from it, a discharge sets the last day.
-  const set = a.type === 'promotion' && rank ? { rank } : a.type === 'discharge' ? { leaves_on: a.event_date } : null;
-  if (set) must(await db().from('people').update(set).eq('id', a.person_id), 'person side-effect');
-  const row = must(await db().from('life_events').insert({ ...clean(a), created_by: 'mcp' }).select('id,type,event_date').single(), 'add_life_event') as Record<string, unknown>;
-  return { ...row, person: person.display_name, ...(set ? { person_updated: set } : {}) };
+  const set = !personId ? null : a.type === 'promotion' && rank ? { rank } : a.type === 'discharge' ? { leaves_on: a.event_date } : null;
+  if (set) must(await db().from('people').update(set).eq('id', personId), 'person side-effect');
+  const row = must(await db().from('life_events').insert({ ...clean(a), person_id: personId, name: freeName, created_by: 'mcp' }).select('id,type,event_date').single(), 'add_life_event') as Record<string, unknown>;
+  return { ...row, person: shown, in_people_list: !!personId, ...(set ? { person_updated: set } : {}) };
 }
 
 export async function addDirectorateEvent(a: { title: string; type?: typeof DIR_TYPES[number]; date: string; time?: string; end_time?: string; place?: string; audience?: string }) {

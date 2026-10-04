@@ -115,7 +115,7 @@ export async function snapshot() {
   const [st, big, people, life, events, ticker, nl, hist] = await Promise.all([
     wallState(), bigEventsNow(now),
     s.from('people').select(PERSON_COLS).order('display_name'),
-    s.from('life_events').select('id,person_id,type,label,event_date,show_from,show_until,text_he,photo_mode,photo_url')
+    s.from('life_events').select('id,person_id,name,type,label,event_date,show_from,show_until,text_he,photo_mode,photo_url')
       .gte('event_date', addDays(today, -30)).lte('event_date', addDays(today, 365)).order('event_date'),
     s.from('directorate_events').select('id,title,starts_at,ends_at,place,takeover').eq('approved', true)
       .gte('starts_at', ilToIso(today, '00:00')).lt('starts_at', ilToIso(addDays(today, EVENTS_DAYS + 1), '00:00')).order('starts_at'),
@@ -128,7 +128,7 @@ export async function snapshot() {
   return {
     now: now.toISOString(), today,
     people: (must(people, 'people') as Row[]).map(personOut),
-    life: (must(life, 'life') as Row[]).map(l => ({ id: l.id, personId: l.person_id, kind: l.type, type: l.label || HE_TYPE[l.type] || 'אירוע', date: l.event_date,
+    life: (must(life, 'life') as Row[]).map(l => ({ id: l.id, personId: l.person_id || null, name: l.name || '', kind: l.type, type: l.label || HE_TYPE[l.type] || 'אירוע', date: l.event_date,
       showFrom: l.show_from || addDays(l.event_date, -10), showUntil: l.show_until || addDays(l.event_date, 3), note: l.text_he || '', photo: l.photo_mode || 'crm', photoSrc: l.photo_url || null })),
     events: (must(events, 'events') as Row[]).map(e => { const st0 = new Date(e.starts_at), en = e.ends_at ? new Date(e.ends_at) : new Date(st0.getTime() + 60 * 60e3);
       return { id: e.id, title: e.title, date: isoDateIL(st0), start: timeIL(st0), end: timeIL(en), place: e.place || '', big: !!e.takeover }; }),
@@ -179,8 +179,9 @@ async function applyUndo(ops: UndoOp[]) {
 
 // ---- actions ------------------------------------------------------------------------------------------
 const UUID = z.string().uuid();
+// Who: a person from the list (personId), or just a name for someone who isn't in it.
 const LifeInput = z.object({
-  id: UUID.optional(), personId: UUID, type: z.string().trim().min(1).max(40), date: DATE, showFrom: DATE.optional(),
+  id: UUID.optional(), personId: UUID.nullable().optional(), name: z.string().trim().max(60).optional(), free: z.boolean().optional(), type: z.string().trim().min(1).max(40), date: DATE, showFrom: DATE.optional(),
   photo: z.enum(['crm', 'upload', 'none']).default('crm'), photoSrc: z.string().url().nullable().optional(), note: z.string().trim().max(120).optional(), showNow: z.boolean().optional(),
 });
 const EventInput = z.object({
@@ -233,8 +234,24 @@ function assertOnWall(p: Row) {
   if (p.on_wall === false) throw new Error(displayName(p) + ' ביקש/ה לא להופיע בצג (אפשר לשנות במסך האנשים)');
   if (p.active === false) throw new Error(displayName(p) + ' מסומן/ת כמי שכבר לא במנהלת');
 }
+/** Who a personal event is for: the chosen person, the one person whose full name is exactly the typed name, or
+ *  (nobody by that name) just the name, shown as is. */
+async function lifeWho(personId: string | null | undefined, name: string | undefined, free = false): Promise<{ p: Row; personId: string | null; name: string | null }> {
+  if (personId) { const p = await personRow(personId); assertOnWall(p); return { p, personId, name: null }; }
+  const n = (name || '').replace(/\s+/g, ' ').trim();
+  if (n.length < 2) throw new Error('כתבו למי השמחה');
+  if (free) return { p: { display_name: n }, personId: null, name: n };   // the operator unlinked a namesake on purpose
+  const rows = must(await db().from('people').select('id,first_name,last_name'), 'people') as Row[];
+  const same = rows.filter(r => nameKey(r.first_name, r.last_name) === nameKey(n));
+  if (same.length > 1) throw new Error('יש ברשימה כמה אנשים בשם ' + n + '. בחרו את האדם מההצעות');
+  if (same.length === 1) { const p = await personRow(same[0].id); assertOnWall(p); return { p, personId: p.id, name: null }; }
+  return { p: { display_name: n }, personId: null, name: n };
+}
+/** The person a life event row is about: from the list, or its own name. */
+const lifeRowPerson = async (e: Row): Promise<Row> => (e.person_id ? personRow(e.person_id) : { display_name: e.name || '' });
+
 /** person = the wall's card; type/note = the operator's wording, for the remote's preview. */
-function celebrateTakeover(card: Row, personId: string, type: string, note: string, now = Date.now()): Row {
+function celebrateTakeover(card: Row, personId: string | null, type: string, note: string, now = Date.now()): Row {
   return { id: 'rt:' + now, kind: 'celebrate', personId, person: card, type, note, until: new Date(now + CELEBRATE_MS).toISOString() };
 }
 
@@ -244,17 +261,23 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     await record(who, 'הופעל מופע הצהריים', [await patchState({ takeover: { id: 'rt:' + now, kind: 'noon', until: new Date(now + NOON_MS).toISOString() } }, who)]);
   },
   async celebrate(a, who) {
-    const { personId, lifeId } = z.object({ personId: UUID, lifeId: UUID.optional() }).parse(a);
-    const p = await personRow(personId), today = isoDateIL();
-    assertOnWall(p);
-    let card: Row, type = 'יום הולדת', note = '';
+    const { personId, lifeId } = z.object({ personId: UUID.nullable().optional(), lifeId: UUID.optional() })
+      .refine(x => x.personId || x.lifeId, 'חסר למי הברכה').parse(a);
+    const today = isoDateIL();
+    let p: Row, card: Row, type = 'יום הולדת', note = '';
     if (lifeId) {
       const e = await rowOf('life_events', lifeId);
-      if (!e || e.person_id !== personId) throw new Error('האירוע לא נמצא');
+      if (!e || (personId && e.person_id !== personId)) throw new Error('האירוע לא נמצא');
       if (e.type === 'bereavement') throw new Error('הודעת אבל לא עולה על כל המסך');
+      p = await lifeRowPerson(e);
+      if (e.person_id) assertOnWall(p);
       card = lifeCard(e, p, today); type = e.label || HE_TYPE[e.type]; note = e.text_he || '';
-    } else card = birthdayCard(p, today, today);
-    await record(who, 'ברכה על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, personId, type, note) }, who)]);
+    } else {
+      p = await personRow(personId!);
+      assertOnWall(p);
+      card = birthdayCard(p, today, today);
+    }
+    await record(who, 'ברכה על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note) }, who)]);
   },
   async showEvent(a, who) {
     const { eventId } = z.object({ eventId: UUID }).parse(a);
@@ -276,10 +299,9 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
   async saveLife(a, who) {
     const f = LifeInput.parse(a);
     assertRealDate(f.date); if (f.showFrom) assertRealDate(f.showFrom);
-    const p = await personRow(f.personId), kind = classifyLife(f.type);
-    assertOnWall(p);
+    const { p, personId, name } = await lifeWho(f.personId, f.name, f.free), kind = classifyLife(f.type);
     if (f.photo === 'upload' && !f.photoSrc) throw new Error('בחרו תמונה להעלאה');
-    const row: Row = { person_id: f.personId, type: kind, label: f.type, event_date: f.date, show_from: f.showFrom || f.date, show_until: addDays(f.date, 10),
+    const row: Row = { person_id: personId, name, type: kind, label: f.type, event_date: f.date, show_from: f.showFrom || f.date, show_until: addDays(f.date, 10),
       text_he: f.note || null, photo_mode: f.photo, photo_url: f.photo === 'upload' ? f.photoSrc : null };
     const undo: (UndoOp | null)[] = [];
     let saved: Row;
@@ -292,7 +314,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
       saved = must(await db().from('life_events').insert({ ...row, created_by: 'remote:' + who }).select('*').single(), 'add life') as Row;
       undo.push({ op: 'del', table: 'life_events', id: saved.id });
     }
-    if (f.showNow && kind !== 'bereavement') undo.push(await patchState({ takeover: celebrateTakeover(lifeCard(saved, p, isoDateIL()), p.id, f.type, f.note || '') }, who));
+    if (f.showNow && kind !== 'bereavement') undo.push(await patchState({ takeover: celebrateTakeover(lifeCard(saved, p, isoDateIL()), personId, f.type, f.note || '') }, who));
     await record(who, (f.id ? 'עודכן: ' : 'נוסף: ') + f.type + ' · ' + displayName(p), undo);
     return { id: saved.id };
   },
@@ -300,7 +322,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const { id } = z.object({ id: UUID }).parse(a);
     const prev = await rowOf('life_events', id);
     if (!prev) throw new Error('האירוע לא נמצא');
-    const p = await personRow(prev.person_id).catch(() => null);
+    const p = await lifeRowPerson(prev).catch(() => null);
     must(await db().from('life_events').delete().eq('id', id).select('id'), 'delete life');
     await record(who, 'נמחק: ' + (prev.label || HE_TYPE[prev.type]) + (p ? ' · ' + displayName(p) : ''), [{ op: 'put', table: 'life_events', row: prev }]);
   },
@@ -435,7 +457,8 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
       const ins = must(await db().from('people').insert(inserts, { defaultToNull: false }).select('id'), 'import add') as Row[];
       undo.push(...ins.map(x => ({ op: 'del', table: 'people', id: x.id }) as UndoOp));
     }
-    if (undo.length) await record(who, 'ייבוא אנשים' + (file ? ' מ-' + file : '') + ': ' + inserts.length + ' חדשים, ' + updates.length + ' עודכנו', undo);
+    const n = (k: number, one: string, many: string) => (k === 1 ? one : k + ' ' + many);
+    if (undo.length) await record(who, 'ייבוא אנשים' + (file ? ' מ-' + file : '') + ': ' + [inserts.length ? n(inserts.length, 'אחד חדש', 'חדשים') : '', updates.length ? n(updates.length, 'אחד עודכן', 'עודכנו') : ''].filter(Boolean).join(', '), undo);
     return { added: inserts.length, updated: updates.length, same, skipped };
   },
 

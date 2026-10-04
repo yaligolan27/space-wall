@@ -20,7 +20,7 @@ const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המס
 
 כללי עבודה:
 - התחל/י כל שיחה ב-wall_overview כדי לדעת מה כבר קיים ומה התאריך היום.
-- לפני כל אירוע אישי חפש/י את האדם עם find_people. אם אינו קיים, הוסף/י אותו עם add_person ורק אז את האירוע.
+- לפני כל אירוע אישי חפש/י את האדם עם find_people ושלח/י את ה-person_id שלו. מי שאינו ברשימה: אם הוא מאנשי המנהלת, הוסף/י אותו עם add_person; אחרת אפשר לשמור את האירוע עם name בלבד, והשם יוצג בצג כפי שנכתב.
 - לפני כתיבה, סכם/י בשורה אחת מה עומד להישמר ובקש/י אישור. אחרי השמירה אשר/י מה נשמר, כולל תאריך בפורמט יום.חודש.
 - שעות של אירועי מנהלת: לפי השדות date, time ו-end_time (שעון ישראל). starts_at ו-ends_at הם UTC, לא לצטט מהם שעה.
 - תאריך בלי שנה פירושו המופע הבא שלו. אם אין שעה לאירוע מנהלת, שאל/י; אם אין תשובה, 09:00.
@@ -74,9 +74,10 @@ function buildServer(): McpServer {
 
   server.registerTool('add_life_event', {
     title: 'אירוע אישי',
-    description: 'אירוע אישי לאדם קיים: birthday (יום הולדת), wedding (חתונה), birth (לידה), promotion (עלייה בדרגה), discharge (שחרור), joined (קליטה), bereavement (אבל), other. מופיע בבלוק "אנשים במנהלת" ובחגיגה במסך מלא (למעט אבל).',
+    description: 'אירוע אישי לאדם מרשימת האנשים (person_id) או לכל שם (name): birthday (יום הולדת), wedding (חתונה), birth (לידה), promotion (עלייה בדרגה), discharge (שחרור), joined (קליטה), bereavement (אבל), other. מופיע בבלוק "אנשים במנהלת" ובחגיגה במסך מלא (למעט אבל).',
     inputSchema: {
-      person_id: idOf,
+      person_id: idOf.optional().describe('מ-find_people'),
+      name: z.string().min(2).max(60).optional().describe('בלי person_id: השם כפי שיוצג בצג. שם מלא של אדם אחד ברשימה מקושר אליו'),
       type: z.enum(ops.LIFE_TYPES),
       event_date: ops.DATE,
       text_he: z.string().max(80).optional().describe('שורת תצוגה מותאמת, למשל "להולדת הבת · אגף הנדסה". ריק = אוטומטי'),
@@ -129,7 +130,7 @@ function buildServer(): McpServer {
 
   server.registerTool('show_fullscreen', {
     title: 'הצגה על כל המסך',
-    description: 'מציג עכשיו על כל המסך: noon (מופע הצהריים, סרטון התדמית), celebration (ברכה לאדם: person_id, ואם יש אירוע אישי פעיל גם life_event_id; בלי life_event_id זו ברכת יום הולדת), event (אירוע מנהלת: event_id; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
+    description: 'מציג עכשיו על כל המסך: noon (מופע הצהריים, סרטון התדמית), celebration (ברכה: life_event_id של אירוע אישי, גם של מי שלא ברשימה; או person_id לבד, וזו ברכת יום הולדת), event (אירוע מנהלת: event_id; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
     inputSchema: { what: z.enum(['noon', 'celebration', 'event', 'end']), person_id: idOf.optional(), life_event_id: idOf.optional(), event_id: idOf.optional() },
   }, guard(async (a: { what: string; person_id?: string; life_event_id?: string; event_id?: string }) => {
     if (a.what === 'noon') return ACTIONS.noon({}, WHO).then(() => 'בוצע');
