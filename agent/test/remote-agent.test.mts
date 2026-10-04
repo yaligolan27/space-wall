@@ -1,8 +1,8 @@
-// The remote's agent without the network or a database: its tools as the Messages API reads them, how the
-// conversation is shaped, and what the operator reads when the API refuses.
+// The remote's agent without the network or a database: its tools as the Messages API reads them, what it's told
+// about the wall (no contact details), how the conversation is shaped, and what the operator reads when the API refuses.
 //
 //   npm test
-import { AgentInput, ApiError, TOOLS, apiErrorHe, conversation } from '../../lib/remote-agent.js';
+import { AgentInput, ApiError, TOOLS, apiErrorHe, brief, conversation } from '../../lib/remote-agent.js';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -21,6 +21,17 @@ for (const t of TOOLS) {
     sc.type === 'object' && !('$schema' in sc) && (sc.required || []).every((r: string) => props.includes(r)) && Object.values(sc.properties || {}).every(typed));
   check(`${t.name}: described in Hebrew`, /[֐-׿]/.test(t.description));
 }
+
+// ---- what the model is told about the wall
+const snap: any = {
+  now: '2026-10-04T09:30:00.000Z', today: '2026-10-04', life: [], events: [], ticker: [], newsletter: null, takeover: null, history: [],
+  state: { design: { noon: true }, brightness: 100, urgent: '', noonToday: true },
+  people: [{ id: 'p1', name: 'דנה שמש', first: 'דנה', last: 'שמש', rank: '', role: 'מהנדסת', unit: '', kind: 'civilian', birthday: '1996-10-04', showBday: true,
+    onWall: true, joined: null, leaves: null, email: 'dana@example.com', phone: '050-1234567', notes: 'הערה פנימית', photo: null, active: true, profile: { q: 'תשובה בסקר' } }],
+};
+const b = brief(snap, 'יעלי');
+check('the brief has today, the operator and the people', b.includes('(2026-10-04)') && b.includes('יעלי') && b.includes('"name":"דנה שמש"'));
+check('no contact details, notes or survey answers in the brief', !/dana@example\.com|050-1234567|הערה פנימית|תשובה בסקר/.test(b));
 
 // ---- the conversation
 const JPG = (n: number) => ({ name: `p${n}.jpg`, dataUrl: 'data:image/jpeg;base64,' + Buffer.from('img' + n).toString('base64') });

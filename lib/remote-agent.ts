@@ -103,7 +103,7 @@ const dm = (iso: string) => { const [, m, d] = iso.split('-'); return Number(d) 
 const compact = (o: Row) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== ''));
 
 /** The wall and its data as the agent sees them (a second system block, refreshed every request). */
-function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string): string {
+export function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string): string {
   const now = new Date(s.now), byId = new Map(s.people.map(p => [p.id, p]));
   const tk = s.takeover as Row | null;
   const tkText = !tk ? null : (tk.kind === 'noon' ? 'מופע הצהריים' : tk.kind === 'event' ? 'אירוע: ' + tk.title : 'ברכה: ' + (tk.person?.name || '') + (tk.type ? ' · ' + tk.type : ''))
