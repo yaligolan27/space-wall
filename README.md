@@ -5,12 +5,15 @@ industry events and opportunities, and upcoming launches. **There is no Anthropi
 machine**: operators update it by chatting with Claude through a dedicated MCP connector, on their subscription.
 
 ```
-app/              the display (static; served by Vercel, polls /api/feed every minute)
+app/              the display (static; served by Vercel, polls /api/feed every minute and /api/live every 5 s)
+app/remote/       the operators' remote control (/remote): live moments, events, design, undo
+api/live.ts       Vercel function: the wall's live state (design, brightness, urgent banner, full-screen moment)
+api/remote.ts     Vercel function: the remote's API, behind REMOTE_TOKEN
 api/feed.ts       Vercel function: builds the feed JSON from Supabase (cached 60 s)
 api/mcp.ts        Vercel function: the "צג חלל" MCP connector for operators
 api/cron.ts       Vercel cron: daily launches + space weather + the weekly newsletter import
 api/telegram.ts   optional Telegram intake (queues messages; the local runner parses them)
-lib/              shared: db client, feed builder, wall operations (wall-ops.ts), zod contracts, dates
+lib/              shared: db client, feed builder, wall operations (wall-ops.ts), remote operations with undo (remote-ops.ts), zod contracts, dates
 agent/src/        the local runner: collection, enrichment, launches, weather, numbers, intake
 agent/src/cc.ts   the bridge to the Claude Code CLI (task.json in, validated result.json out)
 agent/test/       bridge tests against stub CLI binaries (npm test)
@@ -25,14 +28,19 @@ project/, chats/  the original Claude Design handoff bundle
    with Claude through the **"צג חלל" MCP connector** (`api/mcp.ts`, served at `/mcp/<MCP_TOKEN>`).
    Its tools can only add, edit and remove people, life events, directorate events and ticker items, and
    import a newsletter issue; there is no raw SQL and people are soft-deleted. Guide: `docs/operator-guide.md`.
-2. **Vercel** serves the display (`app/`) and `/api/feed`, which assembles the v4 feed from Supabase.
+2. **The remote** (`/remote/?t=<REMOTE_TOKEN>`, `app/remote/`) is the button-first way to run the wall day to day:
+   full-screen moments now (the 12:00 show, a greeting, an important event), personal and directorate events,
+   the newsletter link, the urgent banner, brightness and the wall's design. Every change is stored in
+   `remote_history` with its undo operations. Its agent panel hands free-text requests to Claude with the
+   connector, so there is still no API key. The wall reads the live part from `/api/live` every 5 seconds.
+3. **Vercel** serves the display (`app/`) and `/api/feed`, which assembles the v4 feed from Supabase.
    A daily Vercel cron (`api/cron.ts`) refreshes launches and space weather; neither needs a model.
-3. **The weekly newsletter** is imported automatically: the daily cron checks the archive page of
+4. **The weekly newsletter** is imported automatically: the daily cron checks the archive page of
    https://rakia-weekly.vercel.app, and when a new issue is listed it parses that issue's page
    (`lib/newsletter.ts`) into `newsletter_issues`: news, featured stories, and upcoming events and
    opportunities for the ticker. Nothing to upload by hand. To re-import the current issue on demand:
    `FORCE=1 npm run agent -- newsletter`. The connector's `import_newsletter_issue` still works for corrections.
-4. **Optional:** the Telegram bot and the local Claude Code runner (`agent/`) still work for free-text intake
+5. **Optional:** the Telegram bot and the local Claude Code runner (`agent/`) still work for free-text intake
    and RSS enrichment, but nothing on the wall depends on them any more.
 
 ## Setup
@@ -46,6 +54,11 @@ project/, chats/  the original Claude Design handoff bundle
 | `MCP_TOKEN` | a random string of at least 32 characters; it is the connector's password |
 | `CRON_SECRET` | a random string; Vercel sends it to the cron endpoint |
 | `DISPLAY_KEY` | optional; when set, the wall must open `/?key=<DISPLAY_KEY>` |
+| `REMOTE_TOKEN` | a random string of at least 32 characters; the remote's password. Operators open `/remote/?t=<REMOTE_TOKEN>` |
+| `PEOPLE_SHEET_URL` | optional; a link to the people sheet, shown in the remote next to the birthday list |
+
+**Database:** apply `supabase/migrations/0006_remote.sql` (wall state, remote history, important events,
+free-text life events with photos, and the public `wall-photos` storage bucket) before deploying the remote.
 
 Also turn off Settings → Deployment Protection → Vercel Authentication so the lobby screen can load the page.
 

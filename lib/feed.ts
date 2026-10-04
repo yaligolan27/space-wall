@@ -18,7 +18,7 @@ const MON = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני',
 const dowOf = (iso: string) => DOW[new Date(iso + 'T00:00:00Z').getUTCDay()];
 
 // Life-event types → the chip label and colour the design uses.
-const LIFE: Record<string, { type: string; color: string; line: (p: any, when: string) => string }> = {
+export const LIFE: Record<string, { type: string; color: string; line: (p: any, when: string) => string }> = {
   birthday:    { type: 'יום הולדת',    color: '#e9b872', line: (p, w) => [`חוגג/ת ${w}`, p.unit].filter(Boolean).join(' · ') },
   wedding:     { type: 'מזל טוב',      color: '#b9a6f5', line: (p) => ['לרגל הנישואין', p.unit].filter(Boolean).join(' · ') },
   birth:       { type: 'מזל טוב',      color: '#b9a6f5', line: (p) => ['להולדת התינוק/ת', p.unit].filter(Boolean).join(' · ') },
@@ -36,7 +36,22 @@ function whenWord(iso: string, today: string): string {
   if (d === -1) return 'אתמול';
   return `ביום ${dowOf(iso)}`;
 }
-function displayName(p: any): string { return [p.rank, p.display_name].filter(Boolean).join(' '); }
+export function displayName(p: any): string { return [p.rank, p.display_name].filter(Boolean).join(' '); }
+
+/** The card the wall shows for a life event (people panel and full-screen celebration). */
+export function lifeCard(e: any, p: any, today: string) {
+  const L = LIFE[e.type] || LIFE.other;
+  const photo = e.photo_mode === 'none' ? null : e.photo_mode === 'upload' && e.photo_url ? e.photo_url : p.photo_url || null;
+  return { type: e.type === 'other' && e.label ? e.label : L.type, color: L.color, name: displayName(p), line: e.text_he || L.line(p, whenWord(e.event_date, today)), date: shortDate(e.event_date), photo, celebrate: e.type !== 'bereavement' };
+}
+/** A life event is on the wall from show_from (default 10 days before) until show_until (default 3 days after). */
+export function lifeShown(e: any, today: string): boolean {
+  return (e.show_from || addDays(e.event_date, -10)) <= today && today <= (e.show_until || addDays(e.event_date, 3));
+}
+export function birthdayCard(p: any, date: string, today: string) {
+  const L = LIFE.birthday;
+  return { type: L.type, color: L.color, name: displayName(p), line: L.line(p, whenWord(date, today)), date: shortDate(date), photo: p.photo_url || null, celebrate: true };
+}
 
 export async function buildFeed() {
   const s = db();
@@ -70,24 +85,23 @@ export async function buildFeed() {
 
   // ---- people: explicit life events + computed birthdays
   const from = addDays(today, -cfg.peopleBackDays), until = addDays(today, cfg.peopleHorizonDays);
+  // Wide fetch, then each event's own window decides (events added from the remote carry show_from/show_until).
   const life = must(await s.from('life_events').select('*, people(display_name,rank,unit,photo_url,active)').eq('approved', true)
-    .gte('event_date', from).lte('event_date', until).order('event_date'), 'life_events') as any[];
+    .gte('event_date', addDays(today, -30)).lte('event_date', addDays(today, 60)).order('event_date'), 'life_events') as any[];
   const people: any[] = [];
   const seen = new Set<string>();
   for (const e of life) {
-    if (e.show_from && e.show_from > today) continue;
-    if (e.show_until && e.show_until < today) continue;
     const p = e.people; if (!p || p.active === false) continue;
-    const L = LIFE[e.type] || LIFE.other;
+    const windowed = e.show_from || e.show_until;
+    if (windowed ? !lifeShown(e, today) : (e.event_date < from || e.event_date > until)) continue;
     seen.add(`${e.type}|${p.display_name}|${e.event_date}`);
-    people.push({ type: L.type, color: L.color, name: displayName(p), line: e.text_he || L.line(p, whenWord(e.event_date, today)), date: shortDate(e.event_date), photo: p.photo_url || null, celebrate: e.type !== 'bereavement', sort: e.event_date });
+    people.push({ ...lifeCard(e, p, today), sort: e.event_date });
   }
   const roster = must(await s.from('people').select('display_name,rank,unit,photo_url,birthday').eq('active', true).not('birthday', 'is', null), 'people') as any[];
   for (const p of roster) {
     const next = nextYearly(p.birthday.slice(5), from, cfg.peopleHorizonDays + cfg.peopleBackDays);
     if (!next || seen.has(`birthday|${p.display_name}|${next}`)) continue;
-    const L = LIFE.birthday;
-    people.push({ type: L.type, color: L.color, name: displayName(p), line: L.line(p, whenWord(next, today)), date: shortDate(next), photo: p.photo_url || null, celebrate: true, sort: next });
+    people.push({ ...birthdayCard(p, next, today), sort: next });
   }
   // Nearest first, today's before tomorrow's; cap to the six tiles the panel holds.
   people.sort((a, b) => Math.abs(dayDiff(today, a.sort)) - Math.abs(dayDiff(today, b.sort)) || a.sort.localeCompare(b.sort));

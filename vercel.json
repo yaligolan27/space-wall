@@ -13,6 +13,12 @@
     },
     "api/cron.ts": {
       "maxDuration": 60
+    },
+    "api/remote.ts": {
+      "maxDuration": 30
+    },
+    "api/live.ts": {
+      "maxDuration": 10
     }
   },
   "headers": [
@@ -24,12 +30,25 @@
           "value": "s-maxage=60, stale-while-revalidate=300"
         }
       ]
+    },
+    {
+      "source": "/api/live",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "s-maxage=4, stale-while-revalidate=10"
+        }
+      ]
     }
   ],
   "rewrites": [
     {
       "source": "/mcp/:token",
       "destination": "/api/mcp?token=:token"
+    },
+    {
+      "source": "/remote",
+      "destination": "/remote/index.html"
     }
   ],
   "crons": [
