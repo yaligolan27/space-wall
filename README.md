@@ -54,7 +54,7 @@ project/, chats/  the original Claude Design handoff bundle
 | `REMOTE_TOKEN` | a random string of at least 32 characters; the remote's password. Operators open `/remote/?t=<REMOTE_TOKEN>` |
 | `PEOPLE_SHEET_URL` | optional; a link to the people sheet, shown in the remote next to the birthday list |
 
-**Database:** apply `supabase/migrations/0005_remote.sql` (wall state, remote history, important events,
+**Database:** apply `supabase/migrations/0006_remote.sql` (wall state, remote history, important events,
 free-text life events with photos, and the public `wall-photos` storage bucket) before deploying the remote.
 
 Also turn off Settings → Deployment Protection → Vercel Authentication so the lobby screen can load the page.
