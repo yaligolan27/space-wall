@@ -89,10 +89,10 @@ window.makeWallOverlays = (React) => {
   };
 
   // ---------- 12:00 show: 10…0 countdown around the logo, then the promo video ----------
-  const NoonShow = ({ src, logo, onDone }) => {
+  const NoonShow = ({ src, logo, muted, onDone }) => {
     const [phase, setPhase] = useState('count'), [n, setN] = useState(10), vid = useRef(null);
     useEffect(() => { if (phase !== 'count') return; const id = setInterval(() => setN((x) => { if (x <= 0) { clearInterval(id); setTimeout(() => setPhase('video'), 900); return 0; } return x - 1; }), 1000); return () => clearInterval(id); }, [phase]);
-    useEffect(() => { if (phase !== 'video' || !vid.current) return; const v = vid.current; v.muted = false; v.volume = 1; v.play().catch(() => { v.muted = true; v.play().catch(() => onDone && onDone()); }); }, [phase]);
+    useEffect(() => { if (phase !== 'video' || !vid.current) return; const v = vid.current; v.muted = !!muted; v.volume = 1; v.play().catch(() => { v.muted = true; v.play().catch(() => onDone && onDone()); }); }, [phase]);
     const ticks = Array.from({ length: 10 }, (_, i) => i);
     return shell([
       h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 50%, rgba(14,34,70,.94), rgba(2,5,12,.99) 65%)' } }),
@@ -110,10 +110,20 @@ window.makeWallOverlays = (React) => {
     ]);
   };
 
+  // ---------- important directorate event, started from the remote or automatically while it runs ----------
+  const EventTakeover = ({ event }) => shell([
+    h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'linear-gradient(160deg,#0b1d42 0%,#040914 70%)' } }),
+    h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27, padding: 134, boxSizing: 'border-box' } },
+      h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, 'עכשיו במנהלת'),
+      h('span', { style: { fontSize: 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
+      h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, event.start + '–' + event.end + (event.place ? ' · ' + event.place : ''))),
+    h('span', { key: 'end', style: { position: 'absolute', bottom: 77, right: 134, fontSize: 29, color: '#8b9dbd' } }, 'יורד לבד ב-' + event.end)
+  ]);
+
   // ---------- small toast (e.g. "שוגר") ----------
   const Toast = ({ title, line }) => h('div', { style: { position: 'absolute', top: 104, left: '50%', transform: 'translateX(-50%)', zIndex: 40, display: 'flex', alignItems: 'center', gap: 16, padding: '14px 26px', borderRadius: 999, background: 'rgba(10,20,40,.92)', border: '1px solid rgba(233,184,114,.6)', boxShadow: '0 20px 50px rgba(0,0,0,.5), 0 0 30px rgba(233,184,114,.2)', animation: 'toastIn .7s cubic-bezier(.2,1.3,.4,1) both', direction: 'rtl', fontFamily: 'Heebo', color: '#e6f1ff', whiteSpace: 'nowrap' } },
     h('span', { style: { width: 12, height: 12, borderRadius: '50%', background: '#e9b872', boxShadow: '0 0 14px #e9b872', animation: 'breathe 1s ease-in-out infinite' } }),
     h('span', { style: { fontSize: 22, fontWeight: 700, color: '#e9b872' } }, title), h('span', { style: { fontSize: 20 } }, line));
 
-  return { Celebration, LaunchMode, NoonShow, Toast };
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Toast };
 };

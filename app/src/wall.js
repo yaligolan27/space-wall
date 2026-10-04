@@ -1,8 +1,9 @@
 // Space Wall v4 — the lobby display. A direct port of the Claude Design "Space Wall v4" template:
 // the same 1920×1080 stage, layout, styles and motion, rendered with React (vendored UMD, no build).
 // Content comes from /api/feed (weekly newsletter + database) with the bundled sample as fallback.
-// Full-screen moments (launch mode, personal celebration, 12:00 show) live in overlays.js,
-// the 3D emblem in emblem-v2.js.
+// Full-screen moments (launch mode, personal celebration, 12:00 show, important event) live in overlays.js,
+// the 3D emblem in emblem-v2.js. The remote control (app/remote) drives design, brightness, the urgent banner
+// and full-screen moments through /api/live, polled every few seconds; URL options override the stored design.
 (() => {
   const h = React.createElement;
   const { useState, useEffect } = React;
@@ -25,7 +26,20 @@
     globeStyle: q.get('globeStyle') === 'real' ? 'real' : 'holo',
     cameraSway: bool('sway', true),
     staleAfterMin: num('stale', 180),
+    live: q.get('live') || '/api/live',
+    livePoll: Math.max(3, num('livePoll', 5)),
+    preview: bool('preview', false),               // embedded in the remote: muted, no keyboard
   };
+  // Stored design (from the remote) → CFG, except where the URL sets the option explicitly.
+  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway' };
+  function applyDesign(d) {
+    let changed = false;
+    for (const k in DESIGN_KEYS) {
+      if (q.has(k) || d[k] === undefined) continue;
+      if (CFG[DESIGN_KEYS[k]] !== d[k]) { CFG[DESIGN_KEYS[k]] = d[k]; changed = true; }
+    }
+    return changed;
+  }
 
   // ---- QR, generated locally (no third-party image service) ------------------------------------
   const qrCache = {};
@@ -66,11 +80,33 @@
       this.fit = () => { const s = Math.min(innerWidth / 1920, innerHeight / 1080); if (s > 0) this.setState({ scale: s }); };
       this.fit(); addEventListener('resize', this.fit); this.fitRetry = setTimeout(this.fit, 800);
       this.tick = setInterval(() => { this.setState({ now: Date.now() }); this.schedule(); }, 1000);
-      this.onKey = (e) => { const k = e.key.toLowerCase(); if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'escape') this.setState({ ov: null }); };
+      this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(); if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'escape') this.setState({ ov: null }); };
       addEventListener('keydown', this.onKey);
       this.load(); this.poll = setInterval(() => this.load(), CFG.refresh * 1000);
+      this.loadLive(); this.livePoll = setInterval(() => this.loadLive(), CFG.livePoll * 1000);
     }
-    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearInterval(this.poll); clearTimeout(this.fitRetry); removeEventListener('resize', this.fit); }
+    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearInterval(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); removeEventListener('resize', this.fit); }
+
+    // ---- live state from the remote -------------------------------------------------------------
+    async loadLive() {
+      try {
+        const L = JSON.parse(await this.fetchText(CFG.live));
+        this.liveOk = true;
+        if (L.design && applyDesign(L.design)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ovK = null; }
+        this.setState({ live: L }, () => this.syncTakeover());
+      } catch (e) { this.liveOk = false; }
+    }
+    /** A full-screen moment from the remote (or an important event / the 12:00 show, decided by the server). */
+    syncTakeover() {
+      const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = Date.now();
+      if (!tk) { if (ov && ov.live) this.setState({ ov: null }); return; }
+      if (tk.id === this._tkSeen) return;
+      this._tkSeen = tk.id;
+      const until = Date.parse(tk.until) || now + 60e3;
+      if (tk.kind === 'noon') this.setState({ ov: { kind: 'noon', id: tk.id, live: true, until } });
+      else if (tk.kind === 'celebrate' && tk.person) this.setState({ ov: { kind: 'celebrate', id: tk.id, live: true, person: tk.person, until } });
+      else if (tk.kind === 'event') this.setState({ ov: { kind: 'event', id: tk.id, live: true, event: tk, until } });
+    }
 
     async fetchText(url) {
       const sep = url.includes('?') ? '&' : '?';
@@ -108,13 +144,15 @@
       let ov = this.state.ov;
       if (ov && now > ov.until) { if (ov.kind === 'launch') this.setState({ toast: { title: 'שוגר', line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.setState({ ov: null }); }
       if (this.state.toast && now > this.state.toast.until) this.setState({ toast: null });
-      if (ov && ov.kind === 'noon') return;
+      if (ov && (ov.kind === 'noon' || ov.live)) return;
       const T = this.ilParts(now);
-      if (CFG.noonShow && T.h === 12 && T.m === 0 && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
+      // The 12:00 show is decided by the server (it can be skipped or stopped from the remote); locally only as a fallback.
+      if (!this.liveOk && CFG.noonShow && T.h === 12 && T.m === 0 && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
       const L = D.launches.find((l) => { const d = Date.parse(l.at) - now; return d > -12000 && d <= 600e3; });
       if (L) { if (!ov || ov.kind !== 'launch' || ov.launch.at !== L.at) this.setState({ ov: { kind: 'launch', id: L.at, launch: L, until: Date.parse(L.at) + 12000 } }); return; }
-      const hourKey = T.day + T.h;
-      if (!ov && T.m === 30 && T.s < 5 && this._celebHour !== hourKey) { this._celebHour = hourKey; const P = this.celebratable(); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[T.h % P.length], until: now + 14000 } }); }
+      // A personal celebration every half hour (:00 and :30), cycling through the people panel.
+      const slotKey = T.day + T.h + ':' + T.m;
+      if (!ov && (T.m === 0 || T.m === 30) && T.s < 5 && this._celebSlot !== slotKey) { this._celebSlot = slotKey; const P = this.celebratable(); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[(T.h * 2 + (T.m ? 1 : 0)) % P.length], until: now + 14000 } }); }
     }
     overlay() {
       const ov = this.state.ov, toast = this.state.toast;
@@ -125,7 +163,8 @@
       let el = null;
       if (ov && ov.kind === 'launch') el = h(O.LaunchMode, { key: k, launch: ov.launch });
       if (ov && ov.kind === 'celebrate') el = h(O.Celebration, { key: k, person: ov.person });
-      if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: k, src: (this.D && this.D.promoVideo) || '/assets/promo.mp4', logo: '/assets/logo-mark.png', onDone: () => this.setState({ ov: null }) });
+      if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: k, src: (this.D && this.D.promoVideo) || '/assets/promo.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.setState({ ov: null }) });
+      if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: k, event: ov.event });
       return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
     }
 
@@ -252,7 +291,7 @@
       const D = this.D, now = this.state.now, t = now - (this.t0 || now), nd = new Date(now);
       const stage = (children) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
         h('div', { dir: 'rtl', style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } }, children));
-      if (!D) return stage([this.ambient(), h('div', { key: 'e', style: { gridRow: '1 / -1', display: 'flex' } }, this.emblem())]);
+      if (!D) return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), h('div', { key: 'e', style: { gridRow: '1 / -1', display: 'flex' } }, this.emblem()), this.liveLayers()]);
 
       const fsec = CFG.featureSeconds, fIdx = D.featured.length ? Math.floor(t / (fsec * 1000)) % D.featured.length : 0;
       const pIdx = D.people.length ? Math.floor(t / 7000) % D.people.length : 0, focusIdx = Math.floor(t / 9000) % 4;
@@ -328,7 +367,14 @@
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, 'שיגורים קרובים'), h('span', { style: { fontSize: 12, color: MUTED } }, 'שעון ישראל · Launch Library')),
         launches);
 
-      return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer, h(React.Fragment, { key: 'ov' }, this.overlay())]);
+      return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer, h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()]);
+    }
+    /** From the remote: the urgent banner on top, and brightness as a dimming layer over everything. */
+    liveLayers() {
+      const L = this.state.live, b = L ? Math.max(10, Math.min(100, Number(L.brightness) || 100)) : 100;
+      return h(React.Fragment, { key: 'live' },
+        L && L.urgent ? h('div', { key: 'urgent', style: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 70, padding: '19px 38px', background: '#b3261e', color: '#fff', fontSize: 36, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, boxShadow: '0 10px 40px rgba(0,0,0,.45)' } }, L.urgent) : null,
+        b < 100 ? h('div', { key: 'dim', style: { position: 'absolute', inset: 0, zIndex: 80, background: '#000', opacity: (1 - b / 100).toFixed(2), pointerEvents: 'none', transition: 'opacity .6s ease' } }) : null);
     }
   }
 

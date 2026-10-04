@@ -4,7 +4,10 @@ The 1920×1080 lobby wall, ported from the Claude Design file "Space Wall v4". S
 React 18 (vendored UMD), three.js for the emblem, all fonts, textures, images and the 12:00 promo video
 are local, so the page works offline once loaded. The stage scales to any screen.
 
-Content comes from `/api/feed` and is polled every minute. If the API is unreachable on the first load, the
+Content comes from `/api/feed` and is polled every minute. The live part, set from the remote control
+(`app/remote/`), comes from `/api/live` every 5 seconds: the stored design, brightness, the urgent banner and
+the full-screen moment (one started from the remote, an important event while it runs, or the 12:00 show unless
+it was skipped today). If `/api/live` is unreachable the wall falls back to its own 12:00 show. If the API is unreachable on the first load, the
 bundled sample `data/feed.json` (the design's own week, 13–19.9) is shown instead.
 
 ## Screen
@@ -20,8 +23,9 @@ bundled sample `data/feed.json` (the design's own week, 13–19.9) is shown inst
 | Footer | four next launches with live countdowns, the next one highlighted | Launch Library via the runner |
 
 **Moments** take over the whole screen: launch mode for the last ten minutes before any listed launch, a
-personal celebration with fireworks every hour at :30 (cycling through the people panel), and the 12:00 show
-(a 10-second countdown around the logo, then `assets/promo.mp4` with sound).
+personal celebration with fireworks every half hour at :00 and :30 (cycling through the people panel), the 12:00 show
+(a 10-second countdown around the logo, then `assets/promo.mp4` with sound), and an important directorate event
+("עכשיו במנהלת") while it runs. Moments from the remote take precedence over launch mode.
 
 ## URL options
 
@@ -38,6 +42,11 @@ personal celebration with fireworks every hour at :30 (cycling through the peopl
 | `globeStyle` | `holo` | `real` for the photographic Earth |
 | `sway` | `1` | `0` stops the slow camera sway |
 | `refresh` | `60` | feed poll interval, seconds |
+| `livePoll` | `5` | `/api/live` poll interval, seconds |
+| `preview` | `0` | `1` when embedded in the remote: the promo plays muted and keyboard shortcuts are off |
+
+The design options (`noon` … `sway`) are normally set from the remote and stored; a URL option overrides the
+stored value on that screen.
 
 Example for the lobby: `https://space-wall.vercel.app/?fx=1&noon=1`.
 
@@ -71,7 +80,8 @@ It never shows a stock portrait next to a real name.
 index.html            page shell
 styles.css            keyframes and globals, verbatim from the design
 src/wall.js           the wall (React, no JSX)
-src/overlays.js       full-screen moments: launch mode, celebration, 12:00 show, toast
+src/overlays.js       full-screen moments: launch mode, celebration, 12:00 show, important event, toast
+remote/               the remote control (/remote): index.html, remote.js (React, no JSX), wall.webp (preview backdrop)
 src/emblem-v2.js      <space-emblem-v2>, the 3D emblem (three.js)
 data/feed.json        sample feed = the design's own week
 assets/               logo, promo video, category images, Earth textures, fonts (Heebo, Lexend, IBM Plex Mono, Open Sans)

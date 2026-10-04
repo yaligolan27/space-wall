@@ -19,7 +19,7 @@ export function ilToIso(date: string, time = '09:00'): string {
   const off = parts.find(p => p.type === 'timeZoneName')?.value.replace('GMT', '') || '+02:00';
   return `${date}T${time}:00${off === '' ? '+00:00' : off}`;
 }
-function assertRealDate(d: string) {
+export function assertRealDate(d: string) {
   const t = Date.parse(d + 'T00:00:00Z');
   if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== d) throw new Error(`תאריך לא קיים: ${d}`);
 }
@@ -28,14 +28,16 @@ const clean = <T extends Record<string, unknown>>(o: T) => Object.fromEntries(Ob
 // ---- read ---------------------------------------------------------------------------------------
 export async function overview() {
   const s = db(), today = isoDateIL(), until = addDays(today, 45);
-  const [dir, life, ind, feed] = await Promise.all([
-    s.from('directorate_events').select('id,title,type,starts_at,place,audience').gte('starts_at', today + 'T00:00:00+03:00').lte('starts_at', until + 'T23:59:59+03:00').order('starts_at'),
-    s.from('life_events').select('id,type,event_date,text_he,people(id,display_name,rank,unit)').gte('event_date', addDays(today, -3)).lte('event_date', until).order('event_date'),
+  const [dir, life, ind, feed, liveState] = await Promise.all([
+    s.from('directorate_events').select('id,title,type,starts_at,ends_at,place,audience,takeover').gte('starts_at', today + 'T00:00:00+03:00').lte('starts_at', until + 'T23:59:59+03:00').order('starts_at'),
+    s.from('life_events').select('id,type,label,event_date,text_he,people(id,display_name,rank,unit)').gte('event_date', addDays(today, -3)).lte('event_date', until).order('event_date'),
     s.from('industry_events').select('id,name,kind,starts_on,ends_on,place_he,url').gte('starts_on', addDays(today, -30)).order('starts_on').limit(60),
     buildFeed(),
+    import('./remote-ops.js').then(m => m.live()),   // lazy: remote-ops imports this module
   ]);
   return {
     today,
+    live_controls: { fullscreen_now: liveState.takeover, urgent_message: liveState.urgent, brightness: liveState.brightness, design: liveState.design, noon_show_today: liveState.design.noon && liveState.noonToday },
     on_screen_now: { directorate: feed.directorate, people: feed.people, ticker_count: feed.ticker.length, newsletter: feed.issue, launches: feed.launches.map((l: any) => `${l.mission} · ${l.at}`) },
     upcoming_directorate_events: must(dir, 'dir'),
     upcoming_life_events: must(life, 'life'),
