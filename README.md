@@ -9,13 +9,14 @@ app/              the display (static; served by Vercel, polls /api/feed every m
 api/feed.ts       Vercel function: builds the feed JSON from Supabase (cached 60 s)
 api/mcp.ts        Vercel function: the "צג חלל" MCP connector for operators
 api/cron.ts       Vercel cron: daily launches + space weather
+api/survey.ts     the staff survey: /join (form) and /join/review (the office approves submissions)
 api/telegram.ts   optional Telegram intake (queues messages; the local runner parses them)
 lib/              shared: db client, feed builder, wall operations (wall-ops.ts), zod contracts, dates
 agent/src/        the local runner: collection, enrichment, launches, weather, numbers, intake
 agent/src/cc.ts   the bridge to the Claude Code CLI (task.json in, validated result.json out)
 agent/test/       bridge tests against stub CLI binaries (npm test)
 supabase/         schema migrations (already applied to project rrbivwhratkmzcfxqjih)
-docs/             operator-guide.md (Hebrew, for the office) · local-runner.md · telegram-setup.md
+docs/             operator-guide.md (Hebrew, for the office) · people-survey.md · local-runner.md · telegram-setup.md
 project/, chats/  the original Claude Design handoff bundle
 ```
 
@@ -29,7 +30,10 @@ project/, chats/  the original Claude Design handoff bundle
    A daily Vercel cron (`api/cron.ts`) refreshes launches and space weather; neither needs a model.
 3. **The weekly newsletter** is imported into `newsletter_issues` through the same connector
    (`import_newsletter_issue`); until the first import the display shows the design's sample week.
-4. **Optional:** the Telegram bot and the local Claude Code runner (`agent/`) still work for free-text intake
+4. **People** come from the staff survey: everyone fills `/join` (photo included), the office approves at
+   `/join/review` or through the connector, and each approval creates or updates a row in `people`.
+   Guide: `docs/people-survey.md`.
+5. **Optional:** the Telegram bot and the local Claude Code runner (`agent/`) still work for free-text intake
    and RSS enrichment, but nothing on the wall depends on them any more.
 
 ## Setup
@@ -43,6 +47,7 @@ project/, chats/  the original Claude Design handoff bundle
 | `MCP_TOKEN` | a random string of at least 32 characters; it is the connector's password |
 | `CRON_SECRET` | a random string; Vercel sends it to the cron endpoint |
 | `DISPLAY_KEY` | optional; when set, the wall must open `/?key=<DISPLAY_KEY>` |
+| `FORM_KEY` | optional; when set, the survey link is `/join?k=<FORM_KEY>` and a link without it is refused |
 
 Also turn off Settings → Deployment Protection → Vercel Authentication so the lobby screen can load the page.
 
