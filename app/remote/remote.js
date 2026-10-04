@@ -23,13 +23,22 @@
   const ICE = '#9fdcff', LIME = '#d4f25c', WARM = '#e9b872', RED = '#ff7a6b', OFF = 'rgba(150,190,240,.2)';
   const PALETTE = ['#9fdcff', '#e9b872', '#d4f25c', '#c9a7ff', '#7fe0c4', '#f4b6c8'];
   const DOWS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+  const MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+  const BDAY_DAYS = 30;   // birthdays in the upcoming list
   const pad = (n) => String(n).padStart(2, '0');
   const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const mmss = (sec) => pad(Math.floor(sec / 60)) + ':' + pad(Math.floor(sec % 60));
   const iso = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   const parse = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const leap = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  /** month-day of a date; 29 February is celebrated on the 28th in a common year. */
   const mdOf = (d) => pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  const bdayOn = (bday, y) => (bday === '02-29' && !leap(y) ? '02-28' : bday);
+  const nextBday = (bday, now) => {
+    for (const y of [now.getFullYear(), now.getFullYear() + 1]) { const md = bdayOn(bday, y), d = new Date(y, +md.slice(0, 2) - 1, +md.slice(3)); if (iso(d) >= iso(now)) return d; }
+    return now;
+  };
   const dm = (s) => { const d = parse(s); return d.getDate() + '.' + (d.getMonth() + 1); };
   const toMin = (t) => { const [hh, mm] = (t || '0:0').split(':').map(Number); return hh * 60 + (mm || 0); };
   const initials = (n) => String(n || '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('');
@@ -52,13 +61,15 @@
   ];
   const LABEL = Object.fromEntries(SPEC.flatMap((s) => s.controls).map((c) => [c.key, c.label]));
   const TYPE_CHIPS = ['חתונה', 'לידה', 'העלאה בדרגה', 'סיום תואר', 'שחרור', 'קליטה', 'אבל'];
-  const SUGGESTIONS = ['מה מוצג עכשיו בצג?', 'לעומר לוי נולד בן, תציג ברכה', 'תעביר את התדריך של היום לשעה 16:00', 'תהפוך את הגלובוס לריאליסטי'];
+  const SUGGESTIONS = ['מה מוצג עכשיו בצג?', 'תוסיף/י לרשימת האנשים את מי שבקובץ המצורף', 'תעביר/י את האירוע של היום לשעה 16:00', 'תהפוך/י את הגלובוס לריאליסטי'];
   const CLAUDE_NEW = 'https://claude.ai/new';
   const CONNECTOR = 'צג חלל';
 
+  // Mourning words as whole words, so "חתימות" isn't read as "מות" (the server's classifyLife uses the same list).
+  const SAD = /(^|[\s,.;:()"'־-])[ובהל]?(אבל|אבלות|צער|נפטר|נפטרה|פטירה|פטירת|מות|לוויה|הלוויה|ז"ל|ז״ל)(?=$|[\s,.;:()"'־-])/;
   function tpl(type) {
     const t = type || '';
-    if (/אבל|צער|נפטר|נפטרה|מות/.test(t)) return { quiet: true, color: '#8b9dbd', head: 'משתתפים בצער' };
+    if (SAD.test(t)) return { quiet: true, color: '#8b9dbd', head: 'משתתפים בצער' };
     if (/הולדת/.test(t)) return { color: WARM, head: 'יום הולדת שמח' };
     if (/חתונ|נישוא|אירוס/.test(t)) return { color: '#f4b6c8', head: 'מזל טוב לרגל החתונה' };
     if (/לידה|נולד/.test(t)) return { color: ICE, head: 'מזל טוב על הלידה' };
@@ -68,7 +79,9 @@
     return { color: '#c9a7ff', head: t ? 'מזל טוב · ' + t : 'מזל טוב' };
   }
   const dn = (p) => (p.rank ? p.rank + ' ' : '') + p.name;
+  const onWall = (p) => p.active !== false && p.onWall !== false;   // left the directorate, or asked to stay off the wall
   const pline = (p) => [p.role, p.unit].filter(Boolean).join(' · ');
+  const kindLabel = (k) => (KINDS.find(([x]) => x === k) || KINDS[0])[1];
   const colorFor = (p) => PALETTE[hash(p.id) % PALETTE.length];
   const imgEl = (src, style) => h('img', { src, alt: '', style });
   const COVER = { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' };
@@ -101,6 +114,111 @@
     return { text, rows };
   }
 
+  // ---- people: import from Excel/CSV (or the survey form's response sheet) and export ---------------
+  const KINDS = [['civilian', 'אזרח/ית'], ['soldier', 'חובה / קבע'], ['officer', 'קצין/ה'], ['reservist', 'מילואים']];
+  const PROFILE_LABELS = { upcoming: 'שמחה בדרך', expertise: 'תחומי מומחיות', hobbies: 'תחביבים', fun_fact: 'משהו שלא יודעים', space_q: 'לוקח/ת לחלל', office_note: 'ללשכה', photo_link: 'תמונה מהטופס' };
+  // Header → field. The first rule a header matches wins, and each field takes its first column.
+  const COLS = [
+    ['first', /^(שם פרטי|first ?name|first|given name)$/], ['last', /^(שם משפחה|last ?name|last|surname|family name)$/],
+    ['full', /^(שם|שם מלא|full ?name|name|שם ושם משפחה)$/],
+    ['showBday', /(לחגוג|יום הולדת בצג|יום ההולדת בצג)/], ['onWall', /(מסכים|הסכמה|consent|מופיע בצג|מופיע\/ה בצג)/],
+    ['birthday', /(תאריך לידה|יום הולדת|birth ?day|date of birth|dob)/], ['kind', /^(מעמד|סוג|kind|status)$/], ['rank', /^(דרגה|rank)$/],
+    ['joined', /(הצטרפ|תאריך גיוס|joined|start date)/], ['leaves', /(שחרור|סיום|leaves|end date)/],
+    ['unit', /(אגף|ענף|צוות|יחידה|מחלקה|unit|department|team)/], ['role', /^(תפקיד|role|title|job)/],
+    ['email', /(מייל|אימייל|דוא"?ל|e-?mail)/], ['phone', /(טלפון|נייד|phone|mobile)/],
+    ['office_note', /עוד משהו ללשכה/], ['notes', /^(הערות|הערה|notes)$/],
+    ['expertise', /מומחיות/], ['hobbies', /תחביב/], ['fun_fact', /לא יודעים עליי/], ['space_q', /לחלל/], ['upcoming', /^(מה ומתי|שמחה|שמחות)/],
+    ['photo_link', /(תמונ|photo)/], ['active', /^(פעיל|פעיל\/ה|active)$/],
+  ];
+  const PROFILE_FIELDS = ['expertise', 'hobbies', 'fun_fact', 'space_q', 'upcoming', 'photo_link', 'office_note'];
+  const FIELD_LABELS = { first: 'שם פרטי', last: 'שם משפחה', full: 'שם מלא', showBday: 'לחגוג יום הולדת', onWall: 'הסכמה להופיע בצג', birthday: 'תאריך לידה', kind: 'מעמד', rank: 'דרגה',
+    joined: 'הצטרפות', leaves: 'שחרור', unit: 'אגף / ענף', role: 'תפקיד', email: 'מייל', phone: 'טלפון', notes: 'הערות', active: 'פעיל/ה', ...PROFILE_LABELS };
+  const normHeader = (s) => String(s == null ? '' : s).replace(/[\u{1F300}-\u{1FAFF}☀-➿️]/gu, '').replace(/[?:*.]+\s*$/, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const isoOf = (y, m, d) => { const s = y + '-' + pad(m) + '-' + pad(d), t = new Date(Date.UTC(y, m - 1, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d ? s : null; };
+  /** A date cell: an Excel date, an Excel serial number, or text like 15.3.1990, 15/03/90, 1990-03-15 (day first, as in Israel). */
+  function cellDate(v) {
+    if (v == null || v === '') return { v: undefined };
+    if (v instanceof Date) { const d = new Date(v.getTime() + 12 * 3600e3); return { v: isNaN(d) ? null : isoOf(d.getFullYear(), d.getMonth() + 1, d.getDate()) }; }
+    if (typeof v === 'number' && v > 3000 && v < 80000) { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5); return { v: isoOf(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()) }; }
+    const s = String(v).trim();
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return { v: isoOf(+m[1], +m[2], +m[3]) };
+    m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4})$/);
+    if (m) {
+      let a = +m[1], b = +m[2], y = +m[3];
+      if (y < 100) y += y > (new Date().getFullYear() % 100) ? 1900 : 2000;
+      if (a <= 12 && b > 12) [a, b] = [b, a];   // month first (an American export)
+      return { v: isoOf(y, b, a) };
+    }
+    return { v: null };
+  }
+  const cellBool = (v) => { const s = String(v == null ? '' : v).trim().toLowerCase(); if (!s) return undefined; if (/^(כן|yes|true|1|v|✓|x|מסכים)/.test(s)) return true; if (/^(לא|no|false|0)/.test(s)) return false; return undefined; };
+  const cellKind = (v) => { const s = String(v == null ? '' : v); if (!s.trim()) return undefined; if (/מילואים|reserv/i.test(s)) return 'reservist'; if (/קצינ|קצין|officer/i.test(s)) return 'officer'; if (/חובה|קבע|חייל|סדיר|soldier/i.test(s)) return 'soldier'; if (/אזרח|civil/i.test(s)) return 'civilian'; return undefined; };
+  const cellText = (v) => (v instanceof Date ? iso(v) : String(v == null ? '' : v)).replace(/\s+/g, ' ').trim();
+  const personKey = (first, last) => [first, last].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  /** Reads a people file into rows the server's importPeople takes, with what was understood and what wasn't. */
+  async function readPeopleFile(file, people) {
+    await loadXlsx();
+    const csv = /\.(csv|txt)$/i.test(file.name), buf = await file.arrayBuffer();
+    // Excel's plain "CSV" in Hebrew Windows is windows-1255, not UTF-8.
+    const text = () => { try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (e) { return new TextDecoder('windows-1255').decode(buf); } };
+    const wb = csv ? window.XLSX.read(text(), { type: 'string', raw: true }) : window.XLSX.read(buf, { cellDates: true });
+    const grids = wb.SheetNames.map((n) => window.XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '', blankrows: false }));
+    const grid = grids.find((g) => g.length > 1) || grids[0] || [];
+    const hi = grid.findIndex((r) => r.filter((c) => String(c).trim()).length >= 2);
+    if (hi < 0) throw new Error('הקובץ ריק, או שאין בו שורת כותרות');
+    const headers = grid[hi].map((c) => String(c == null ? '' : c).trim());
+    const col = {}, used = [], unused = [];
+    headers.forEach((hd, i) => {
+      const n = normHeader(hd); if (!n) return;
+      const rule = COLS.find(([f, re]) => col[f] == null && re.test(n));
+      if (rule) { col[rule[0]] = i; used.push(FIELD_LABELS[rule[0]]); } else unused.push(hd);
+    });
+    if (col.first == null && col.full == null) throw new Error('לא מצאתי עמודת שם. בשורה הראשונה צריכות להיות כותרות כמו "שם פרטי" ו"שם משפחה", או "שם מלא".');
+    const known = new Map(people.map((p) => [personKey(p.first, p.last), p]));
+    const seen = new Set(), rows = [];
+    grid.slice(hi + 1).forEach((r, idx) => {
+      const get = (f) => (col[f] == null ? undefined : r[col[f]]);
+      let first = cellText(get('first')), last = cellText(get('last'));
+      if (!first && col.full != null) { const w = cellText(get('full')).split(' '); first = w.shift() || ''; last = last || w.join(' '); }
+      if (!first && !last && !r.some((c) => String(c).trim())) return;   // an empty line
+      const row = { n: hi + idx + 2, problems: [] }, f = { first: first || last, last: first ? last : '' };
+      if (!f.first) { row.problems.push('אין שם'); rows.push(Object.assign(row, { f, name: '(בלי שם)' })); return; }
+      for (const k of ['birthday', 'joined', 'leaves']) {
+        const d = cellDate(get(k));
+        if (d.v === null) row.problems.push(FIELD_LABELS[k] + ' לא מובן: ' + cellText(get(k)));
+        else if (d.v) f[k] = d.v;
+      }
+      if (f.birthday && f.birthday > iso(new Date())) { row.problems.push('תאריך לידה בעתיד'); delete f.birthday; }
+      for (const k of ['rank', 'role', 'unit', 'email', 'phone', 'notes']) { const t = cellText(get(k)); if (t) f[k] = t.slice(0, k === 'notes' ? 500 : k === 'email' ? 120 : 80); }
+      const kind = cellKind(get('kind')); if (kind) f.kind = kind;
+      for (const k of ['showBday', 'onWall', 'active']) { const b = cellBool(get(k)); if (b !== undefined) f[k] = b; }
+      const profile = {};
+      for (const k of PROFILE_FIELDS) { const t = cellText(get(k)); if (t) profile[k] = t.slice(0, 1000); }
+      if (Object.keys(profile).length) f.profile = profile;
+      const key = personKey(f.first, f.last);
+      Object.assign(row, { f, name: [f.rank, f.first, f.last].filter(Boolean).join(' '), exists: known.has(key), again: seen.has(key) });
+      seen.add(key);
+      rows.push(row);
+    });
+    return { file: file.name, headers, used, unused, rows };
+  }
+
+  /** The whole list as an Excel file, in the columns the import reads back. */
+  async function exportPeople(people) {
+    await loadXlsx();
+    const d = (s) => (s ? s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4) : '');
+    const yn = (b) => (b ? 'כן' : 'לא');
+    const rows = people.map((p) => ({ 'שם פרטי': p.first, 'שם משפחה': p.last, 'דרגה': p.rank, 'תפקיד': p.role, 'אגף / ענף / צוות': p.unit,
+      'מעמד': (KINDS.find(([k]) => k === p.kind) || KINDS[0])[1], 'תאריך לידה': d(p.birthday), 'לחגוג יום הולדת בצג': yn(p.showBday), 'מופיע/ה בצג': yn(p.onWall),
+      'תאריך הצטרפות': d(p.joined), 'תאריך שחרור': d(p.leaves), 'מייל': p.email, 'טלפון': p.phone, 'הערות': p.notes, 'פעיל/ה': yn(p.active) }));
+    const ws = window.XLSX.utils.json_to_sheet(rows), wb = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb, ws, 'אנשים');
+    wb.Workbook = { Views: [{ RTL: true }] };
+    window.XLSX.writeFile(wb, 'אנשי המנהלת ' + iso(new Date()) + '.xlsx');
+  }
+
   // ---- access: the private link /remote/?t=<REMOTE_TOKEN>, kept in this browser --------------------
   const store = {
     get: (k) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
@@ -112,13 +230,16 @@
   })();
 
   async function api(method, body) {
-    const res = await fetch('/api/remote', {
-      method, cache: 'no-store',
-      headers: Object.assign({ 'x-remote-token': store.get('sw-remote-token'), 'x-remote-who': encodeURIComponent(store.get('sw-remote-who')) }, body ? { 'content-type': 'application/json' } : {}),
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let res;
+    try {
+      res = await fetch('/api/remote', {
+        method, cache: 'no-store',
+        headers: Object.assign({ 'x-remote-token': store.get('sw-remote-token'), 'x-remote-who': encodeURIComponent(store.get('sw-remote-who')) }, body ? { 'content-type': 'application/json' } : {}),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) { throw new Error('אין חיבור לשרת. בדקו את האינטרנט ונסו שוב.'); }
     const j = await res.json().catch(() => ({}));
-    if (res.status === 401) { const e = new Error('unauthorized'); e.auth = true; throw e; }
+    if (res.status === 401) { const e = new Error('קוד הגישה לשלט לא תקף. פתחו שוב את הקישור הפרטי.'); e.auth = true; throw e; }
     if (!res.ok) throw new Error(j.error || 'הפעולה נכשלה');
     return j;
   }
@@ -133,12 +254,14 @@
         data: null, loadErr: '', auth: !!store.get('sw-remote-token'), who, whoDraft: '', tokenDraft: '',
         design: null, brightness: null,   // optimistic local values while a slider is being dragged
         demo: 'off',
-        tab: 'today', studio: false, sheet: null, toast: null, nlBusy: false, photoBusy: false, busyAct: false,
+        tab: 'today', studio: false, sheet: null, toast: null, nlBusy: false, photoBusy: false, busyAct: false, impBusy: false,
+        pq: '', showInactive: false, gateErr: '',
         wallSrc: '',
         chatOpen: false, chatInput: '', attach: [], dragging: false,
         messages: [{ id: 1, role: 'bot', text: 'שלום' + (who ? ' ' + who : '') + '! כתבו כאן מה לשנות בצג, ואפתח את Claude עם הבקשה. Claude מחובר לצג דרך המחבר "' + CONNECTOR + '" ויכול להוסיף, לערוך ולמחוק כל דבר. אפשר לצרף אקסל ו-CSV; תמונות מצרפים שוב בחלון של Claude.', actions: [] }],
       };
       this.fileRef = React.createRef(); this.photoRef = React.createRef(); this.scrollRef = React.createRef(); this.previewRef = React.createRef();
+      this.personPhotoRef = React.createRef(); this.importRef = React.createRef(); this.panelRef = React.createRef();
       this.timers = {};
     }
 
@@ -179,19 +302,21 @@
     // ---- server ----------------------------------------------------------------------------------
     async refresh() {
       try { const data = await api('GET'); this.setState({ data, loadErr: '' }); }
-      catch (e) { if (e.auth) this.setState({ auth: false, data: null }); else this.setState({ loadErr: e.message || 'אין חיבור' }); }
+      catch (e) { if (e.auth) this.setState({ auth: false, data: null, gateErr: 'קוד הגישה לא נכון, או שהקישור הוחלף. בקשו את הקישור העדכני.' }); else this.setState({ loadErr: e.message || 'אין חיבור' }); }
     }
-    /** Run an action; toast its label with an undo button. */
+    /** Run an action; toast its label (or label(result)) with an undo button when the action made a new history entry. */
     async run(action, args, label, opts = {}) {
       this.setState({ busyAct: true });
+      const before = this.D && this.D.history[0] ? this.D.history[0].id : 0;
       try {
         const j = await api('POST', Object.assign({ action }, args || {}));
-        const top = j.state.history[0];
+        const top = j.state.history[0], fresh = top && top.id > before && top.canRestore;
         this.setState({ data: j.state, loadErr: '' });
-        if (!opts.quiet && label) this.toast(label, top && top.canRestore ? top.id : null);
+        const text = typeof label === 'function' ? label(j.result) : label;
+        if (!opts.quiet && text) this.toast(text, fresh ? top.id : null);
         return j.result;
       } catch (e) {
-        if (e.auth) this.setState({ auth: false, data: null });
+        if (e.auth) this.setState({ auth: false, data: null, gateErr: e.message });
         this.toast(e.message || 'הפעולה נכשלה');
         throw e;
       } finally { this.setState({ busyAct: false }); }
@@ -200,6 +325,12 @@
     burst(key, fn) { const t = this.timers[key] || (this.timers[key] = {}); clearTimeout(t.t); t.t = setTimeout(() => { delete this.timers[key]; fn(); }, 900); }
     toast(text, undoId) { clearTimeout(this.tt); this.setState({ toast: { text, undoId } }); this.tt = setTimeout(() => this.setState({ toast: null }), 4500); }
     async restore(id) {
+      const H = this.D ? this.D.history : [], later = H.filter((x) => x.id > id), me = this.state.who;
+      const target = H.find((x) => x.id === id), others = [target, ...later].filter((x) => x && x.who !== me);
+      if (later.length || others.length) {
+        const lines = [target, ...later].filter(Boolean).reverse().map((x) => '· ' + x.text + ' (' + x.who + ')').slice(0, 8).join('\n');
+        if (!window.confirm((later.length ? 'הביטול יחזיר אחורה ' + (later.length + 1) + ' שינויים, כולל מה שנעשה אחרי:' : 'הביטול יחזיר אחורה שינוי של ' + target.who + ':') + '\n' + lines + '\n\nלהמשיך?')) return;
+      }
       const r = await this.run('restore', { id }, null, { quiet: true }).catch(() => null);
       if (r) this.toast('בוטל: ' + r.label);
     }
@@ -222,12 +353,17 @@
     }
     celebs() {
       const D = this.D; if (!D) return [];
-      const ti = iso(this.state.now), md0 = mdOf(this.state.now);
-      const b = D.people.filter((p) => p.bday === md0).map((p) => ({ key: 'b' + p.id, person: p, type: 'יום הולדת', note: '', photoSrc: null, tpl: tpl('יום הולדת') }));
+      // Greetings go full screen on the day and up to two days after (a Friday birthday is celebrated on Sunday);
+      // mourning only shows quietly in the people panel, for its whole window.
+      const ti = iso(this.state.now), back = [0, 1, 2].map((k) => addDays(this.state.now, -k));
+      const b = [];
+      D.people.forEach((p) => { if (!p.bday || !onWall(p) || !p.showBday) return; const k = back.findIndex((d) => bdayOn(p.bday, d.getFullYear()) === mdOf(d));
+        if (k >= 0) b.push({ key: 'b' + p.id, person: p, type: 'יום הולדת' + (k ? (k === 1 ? ' · אתמול' : ' · שלשום') : ''), note: '', photoSrc: null, tpl: tpl('יום הולדת') }); });
       const bdayToday = new Set(b.map((x) => x.person.id));
-      const l = D.life.filter((x) => ti >= x.showFrom && ti <= x.showUntil && !(x.kind === 'birthday' && bdayToday.has(x.personId)))
+      const greetDays = (x) => x.date <= ti && ti <= iso(addDays(parse(x.date), 2));
+      const l = D.life.filter((x) => (x.kind === 'bereavement' ? ti >= x.showFrom && ti <= x.showUntil : greetDays(x)) && !(x.kind === 'birthday' && bdayToday.has(x.personId)))
         .map((x) => ({ key: x.id, lifeId: x.id, person: this.P(x.personId), type: x.type, note: x.note, photoSrc: x.photo === 'upload' ? x.photoSrc : null, noPhoto: x.photo === 'none', tpl: x.kind === 'bereavement' ? tpl('אבל') : tpl(x.type) }))
-        .filter((x) => x.person);
+        .filter((x) => x.person && onWall(x.person));
       return [...b, ...l];
     }
     takeover() { const tk = this.D && this.D.takeover; return tk && Date.parse(tk.until) > this.state.now.getTime() ? tk : null; }
@@ -243,10 +379,10 @@
     closeSheet() { this.setState({ sheet: null }); }
     setFV(obj) { this.setState((s) => (s.sheet ? { sheet: Object.assign({}, s.sheet, { f: Object.assign({}, s.sheet.f, obj) }) } : null)); }
     fv(k) { return (e) => this.setFV({ [k]: e.target.value }); }
-    openLife(l) {
+    openLife(l, pre) {
       const ti = iso(this.state.now);
       if (l) this.openSheet('life', Object.assign({}, l, { q: '' }), 'edit');
-      else this.openSheet('life', { personId: '', q: '', type: '', date: ti, showFrom: ti, photo: 'crm', photoSrc: null, note: '' });
+      else this.openSheet('life', Object.assign({ personId: '', q: '', type: '', date: ti, showFrom: ti, photo: 'crm', photoSrc: null, note: '' }, pre || {}));
     }
     openEvent(e) {
       if (e) this.openSheet('event', Object.assign({}, e), 'edit');
@@ -281,6 +417,95 @@
     }
     delLife(l) { const p = this.P(l.personId); this.run('deleteLife', { id: l.id }, 'נמחק: ' + l.type + (p ? ' · ' + dn(p) : '')).catch(() => {}); }
     delEvent(e) { return this.run('deleteEvent', { id: e.id }, 'נמחק אירוע: ' + e.title).catch(() => {}); }
+
+    // ---- people ----
+    /** back: the sheet to return to after saving a new person (the life sheet's "add new person"), with the new id. */
+    openPerson(p, prefill, back) {
+      if (p) this.openSheet('person', Object.assign({}, p), 'edit');
+      else this.openSheet('person', Object.assign({ first: '', last: '', rank: '', role: '', unit: '', kind: 'civilian', birthday: '', showBday: true, onWall: true, joined: '', leaves: '', email: '', phone: '', notes: '', photo: null, active: true, profile: {}, back: back || null }, prefill || {}), 'add');
+    }
+    async savePerson() {
+      const sh = this.state.sheet, f = sh.f, edit = sh.mode === 'edit';
+      if (!(f.first || '').trim()) return this.toast('כתבו שם פרטי');
+      if (f.birthday && f.birthday > iso(this.state.now)) return this.toast('תאריך הלידה בעתיד');
+      const body = { id: edit ? f.id : undefined, first: f.first.trim(), last: (f.last || '').trim(), rank: (f.rank || '').trim(), role: (f.role || '').trim(), unit: (f.unit || '').trim(),
+        kind: f.kind || 'civilian', birthday: f.birthday || null, showBday: !!f.showBday, onWall: !!f.onWall, joined: f.joined || null, leaves: f.leaves || null,
+        email: (f.email || '').trim(), phone: (f.phone || '').trim(), notes: (f.notes || '').trim(), photo: f.photo || null, active: f.active !== false };
+      const name = [body.rank, body.first, body.last].filter(Boolean).join(' ');
+      try {
+        const r = await this.run('savePerson', body, (edit ? 'עודכן: ' : 'נוסף/ה לרשימה: ') + name);
+        if (f.back) this.setState({ sheet: Object.assign({}, f.back, { f: Object.assign({}, f.back.f, { personId: r.id, q: '' }) }) });
+        else this.closeSheet();
+      } catch (e) { /* toasted */ }
+    }
+    delPerson(f) { this.run('deletePerson', { id: f.id }, 'נמחק/ה מהרשימה: ' + dn(f)).then(() => this.closeSheet(), () => {}); }
+    async onPersonPhoto(e) {
+      const fl = e.target.files[0]; e.target.value = ''; if (!fl) return;
+      this.setState({ photoBusy: true });
+      try { const dataUrl = await shrinkImage(fl, 640); const r = await api('POST', { action: 'photo', dataUrl, folder: 'people' }); this.setFV({ photo: r.result.url }); }
+      catch (er) { this.toast(er.message && er.message !== 'unauthorized' ? er.message : 'לא הצלחתי להעלות את התמונה'); }
+      finally { this.setState({ photoBusy: false }); }
+    }
+    async onImportFile(e) {
+      const fl = e.target.files[0]; e.target.value = ''; if (!fl) return;
+      this.setState({ impBusy: true });
+      try { const imp = await readPeopleFile(fl, this.D ? this.D.people : []); this.openSheet('import', { imp }); }
+      catch (er) { this.toast(er.message || 'לא הצלחתי לקרוא את הקובץ'); }
+      finally { this.setState({ impBusy: false }); }
+    }
+    async doImport() {
+      const imp = this.state.sheet && this.state.sheet.f.imp; if (!imp) return;
+      const rows = imp.rows.filter((r) => r.f.first && !r.problems.includes('אין שם')).map((r) => r.f);
+      if (!rows.length) return this.toast('אין בקובץ שורות עם שם');
+      this.setState({ impBusy: true });
+      try {
+        await this.run('importPeople', { rows, file: imp.file.slice(0, 120) }, (r) => {
+          const parts = [r.added ? r.added + ' חדשים' : '', r.updated ? r.updated + ' עודכנו' : '', r.same ? r.same + ' בלי שינוי' : ''].filter(Boolean);
+          return 'ייבוא: ' + (parts.join(', ') || 'לא היה מה לעדכן') + (r.skipped && r.skipped.length ? ' · ' + r.skipped.length + ' שורות דולגו' : '');
+        });
+        this.setState({ tab: 'people' });
+        this.closeSheet();
+      } catch (e) { /* toasted */ }
+      finally { this.setState({ impBusy: false }); }
+    }
+    importVals(imp) {
+      const dmy = (x) => dm(x) + '.' + x.slice(0, 4);
+      let add = 0, upd = 0, again = 0, skip = 0;
+      const rows = imp.rows.map((r) => {
+        const noName = r.problems.includes('אין שם');
+        if (noName) skip++; else if (r.again) again++; else if (r.exists) upd++; else add++;
+        return { key: r.n, n: r.n, name: r.name, off: r.f.onWall === false,
+          line: [r.f.birthday ? 'נולד/ה ' + dmy(r.f.birthday) : 'בלי תאריך לידה', r.f.unit, r.f.role].filter(Boolean).join(' · '),
+          tag: noName ? { t: 'לא ייובא', c: RED } : r.again ? { t: 'שורה חוזרת', c: '#8b9dbd' } : r.exists ? { t: 'קיים · יעודכן', c: ICE } : { t: 'חדש', c: LIME },
+          warn: r.problems.filter((x) => x !== 'אין שם').join(' · ') };
+      });
+      return { impFile: imp.file, impUsed: imp.used.join(', '), impUnused: imp.unused.filter(Boolean).join(', '),
+        impRows: rows.slice(0, 300), impMore: Math.max(0, rows.length - 300), impCan: add + upd > 0,
+        impSummary: [add ? add + ' חדשים' : '', upd ? upd + ' כבר ברשימה ויעודכנו' : '', again ? again + ' שורות חוזרות (השורה האחרונה קובעת)' : '', skip ? skip + ' בלי שם ולא ייובאו' : ''].filter(Boolean).join(' · ') || 'אין שורות לייבוא',
+        impLabel: 'ייבוא ' + (add + upd) + ' אנשים' };
+    }
+    openTicker(t) {
+      if (t) this.openSheet('ticker', Object.assign({}, t, { end: t.end || '' }), 'edit');
+      else this.openSheet('ticker', { name: '', kind: 'אירוע', start: iso(this.state.now), end: '', place: '', url: '' });
+    }
+    async saveTicker() {
+      const sh = this.state.sheet, f = sh.f, edit = sh.mode === 'edit';
+      if ((f.name || '').trim().length < 2) return this.toast('כתבו שם');
+      if (!f.start) return this.toast('בחרו תאריך');
+      if (f.end && f.end < f.start) return this.toast('תאריך הסיום לפני תאריך ההתחלה');
+      const url = (f.url || '').trim();
+      if (url && !/^https?:\/\/\S+\.\S+/.test(url)) return this.toast('הקישור צריך להתחיל ב-https://');
+      try {
+        await this.run('saveTicker', { id: edit ? f.id : undefined, name: f.name.trim(), kind: f.kind || 'אירוע', start: f.start, end: f.end || null, place: (f.place || '').trim(), url },
+          (edit ? 'עודכן: ' : 'נוסף לרצועת האירועים: ') + f.name.trim());
+        this.closeSheet();
+      } catch (e) { /* toasted */ }
+    }
+    delTicker(t) { this.run('deleteTicker', { id: t.id }, 'נמחק מרצועת האירועים: ' + t.name).then(() => { if (this.state.sheet && this.state.sheet.kind === 'ticker') this.closeSheet(); }, () => {}); }
+    goPeople() { this.setState({ tab: 'people', studio: false, sheet: null }, () => { const e = this.panelRef.current; if (e) e.scrollIntoView({ behavior: 'smooth', block: 'start' }); }); }
+    async exportPeople() {
+      try { await exportPeople(this.D ? this.D.people : []); } catch (e) { this.toast('הייצוא נכשל: ' + (e.message || e)); }
+    }
     async importNl() {
       const url = ((this.state.sheet.f.url) || '').trim();
       if (!/^https?:\/\/\S+\.\S+/.test(url)) return this.toast('הדביקו קישור מלא, שמתחיל ב-https://');
@@ -328,21 +553,29 @@
       let prompt = 'דרך המחבר "' + CONNECTOR + '" (התחל/י ב-wall_overview): ' + (text || 'עבד/י את הקבצים המצורפים ועדכן/י את הצג בהתאם.');
       const actions = ['נפתח ב-Claude עם המחבר "' + CONNECTOR + '"'];
       att.forEach((a) => {
-        if (a.kind === 'sheet') { prompt += '\n\n[קובץ מצורף: ' + a.name + ' — ' + a.rows + ' שורות]\n' + a.text.slice(0, 15000); actions.push('הקובץ ' + a.name + ' צורף לבקשה כטקסט'); }
+        if (a.kind === 'sheet') {
+          const cut = a.text.length > 15000;
+          prompt += '\n\n[קובץ מצורף: ' + a.name + ' — ' + a.rows + ' שורות' + (cut ? ', נחתך: רק ההתחלה מופיעה כאן' : '') + ']\n' + a.text.slice(0, 15000);
+          actions.push(cut ? 'הקובץ ' + a.name + ' ארוך, אז רק ההתחלה צורפה. רשימת אנשים מלאה עדיף לייבא במסך "אנשים"' : 'הקובץ ' + a.name + ' צורף לבקשה כטקסט');
+        }
         if (a.kind === 'image') { prompt += '\n[תמונה: ' + a.name + ' — מצורפת בנפרד]'; actions.push('צרפו את התמונה ' + a.name + ' בחלון של Claude'); }
       });
-      let url = CLAUDE_NEW + '?q=' + encodeURIComponent(prompt), copied = false;
-      if (url.length > 7500) {   // too long for a link: copy it and open an empty chat
-        try { navigator.clipboard.writeText(prompt); copied = true; } catch (e) { /* no clipboard */ }
-        url = CLAUDE_NEW;
-        actions.push(copied ? 'הבקשה ארוכה, אז העתקתי אותה: הדביקו בחלון של Claude' : 'הבקשה ארוכה מדי לקישור: קצרו אותה או צרפו את הקובץ ב-Claude');
-      }
-      const win = window.open(url, '_blank', 'noopener');
+      let url = CLAUDE_NEW + '?q=' + encodeURIComponent(prompt);
+      const long = url.length > 7500;   // too long for a link: copy it and open an empty chat
+      if (long) url = CLAUDE_NEW;
+      const copying = long && navigator.clipboard ? navigator.clipboard.writeText(prompt).then(() => true, () => false) : Promise.resolve(false);
+      // No 'noopener' feature: with it window.open returns null even when the tab opened, which read as "blocked".
+      const win = window.open(url, '_blank');
+      if (win) { try { win.opener = null; } catch (e) { /* already cross-origin */ } }
       const userMsg = { id: Date.now(), role: 'user', text, files: att.map((a) => ({ name: a.name, kind: a.kind, src: a.src, info: a.info })) };
-      const reply = win === null && !copied
-        ? { id: Date.now() + 1, role: 'bot', err: true, text: 'הדפדפן חסם את החלון. אפשרו חלונות קופצים לאתר הזה ונסו שוב.', actions: [] }
-        : { id: Date.now() + 1, role: 'bot', text: 'פתחתי את Claude עם הבקשה. כשהשינוי יישמר שם, הוא יופיע כאן ובצג תוך דקה.', actions };
+      const rid = Date.now() + 1;
+      const reply = !win
+        ? { id: rid, role: 'bot', err: true, text: 'הדפדפן חסם את החלון. אפשרו חלונות קופצים לאתר הזה ונסו שוב.', actions: [] }
+        : { id: rid, role: 'bot', text: 'פתחתי את Claude עם הבקשה. כשהשינוי יישמר שם, הוא יופיע כאן ובצג תוך דקה.', actions };
       this.setState({ messages: [...s.messages, userMsg, reply], chatInput: '', attach: [] });
+      if (long && win) copying.then((ok) => this.setState((st) => ({ messages: st.messages.map((m) => (m.id === rid ? Object.assign({}, m, { actions: m.actions.concat(ok
+        ? 'הבקשה ארוכה, אז העתקתי אותה: הדביקו בחלון של Claude'
+        : 'הבקשה ארוכה מדי לקישור ולא הצלחתי להעתיק אותה: קצרו אותה, או צרפו את הקובץ ישירות ב-Claude') }) : m)) })));
     }
 
     // ---- view values (as in the design) ------------------------------------------------------------
@@ -369,7 +602,7 @@
         const past = toMin(e.end) <= nm, live = tk && tk.eventId === e.id;
         return { key: e.id, m: toMin(e.start), time: e.start + '–' + e.end, title: e.title, op: past ? 0.45 : 1,
           sub: [e.place, past ? 'הסתיים' : (toMin(e.start) <= nm ? 'מתקיים עכשיו' : ''), e.big && !past ? 'יעלה לבד על כל המסך' : ''].filter(Boolean).join(' · '),
-          hasBtn: !past, btn: live ? 'מוצג עכשיו' : 'על כל המסך', action: () => (live ? null : this.showEvent(e)), hasToggle: false };
+          hasBtn: !past, btn: live ? 'מוצג עכשיו' : toMin(e.start) - nm > 30 ? 'הצצה ל-10 דק׳' : 'על כל המסך', action: () => (live ? null : this.showEvent(e)), hasToggle: false };
       });
       const noonPast = nm >= 735, noonOn = design.noon && noonToday;
       rows.push(Object.assign({ key: 'noon', m: 720, time: '12:00', title: 'מופע הצהריים · סרטון התדמית', op: noonPast ? 0.45 : 1,
@@ -378,14 +611,35 @@
         toggle: () => this.run('noonToday', { on: !noonToday }, noonToday ? 'דילוג על מופע הצהריים היום' : 'מופע הצהריים יעלה היום').catch(() => {}) }));
       rows.sort((a, b) => a.m - b.m);
 
-      const lim = iso(addDays(now, 21)), soon = [];
-      events.filter((e) => e.date >= ti && e.date <= lim).forEach((e) => soon.push({ key: e.id, date: e.date, title: e.title, sub: e.start + '–' + e.end + (e.place ? ' · ' + e.place : '') + (e.big ? ' · חשוב' : ''), tag: 'אירוע מנהלת', tagColor: ICE, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
+      // Everything ahead: directorate events (a year), personal moments still to show, birthdays in the next 30 days.
+      const soon = [], bLim = iso(addDays(now, BDAY_DAYS));
+      events.filter((e) => e.date >= ti).forEach((e) => soon.push({ key: e.id, date: e.date, title: e.title, sub: e.start + '–' + e.end + (e.place ? ' · ' + e.place : '') + (e.big ? ' · חשוב' : ''), tag: 'אירוע מנהלת', tagColor: ICE, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
       life.filter((l) => l.showUntil >= ti).forEach((l) => { const pp = this.P(l.personId); if (!pp) return; const tp = l.kind === 'bereavement' ? tpl('אבל') : tpl(l.type);
-        soon.push({ key: l.id, date: l.date, title: dn(pp), sub: (l.note ? l.note + ' · ' : '') + (l.showFrom > ti ? 'יוצג החל מ-' + dm(l.showFrom) : (tp.quiet ? 'מוצג בשקט' : 'מוצג עכשיו')), tag: l.type, tagColor: tp.color, editable: true, edit: () => this.openLife(l), del: () => this.delLife(l) }); });
-      people.forEach((pp) => { if (!pp.bday) return; let d = new Date(now.getFullYear(), +pp.bday.slice(0, 2) - 1, +pp.bday.slice(3)); if (iso(d) < ti) d = new Date(now.getFullYear() + 1, d.getMonth(), d.getDate());
-        if (iso(d) <= iso(addDays(now, 14))) soon.push({ key: 'b' + pp.id, date: iso(d), title: dn(pp), sub: 'אוטומטי מרשימת האנשים', tag: 'יום הולדת', tagColor: WARM, editable: false }); });
+        soon.push({ key: l.id, date: l.date, title: dn(pp), sub: (l.note ? l.note + ' · ' : '') + (!onWall(pp) ? 'לא מוצג: ' + (pp.active ? 'ביקש/ה לא להופיע בצג' : 'כבר לא במנהלת') : l.showFrom > ti ? 'יוצג החל מ-' + dm(l.showFrom) : (tp.quiet ? 'מוצג בשקט' : 'מוצג עכשיו')), tag: l.type, tagColor: tp.color, editable: true, edit: () => this.openLife(l), del: () => this.delLife(l) }); });
+      (D && D.ticker ? D.ticker : []).forEach((t) => soon.push({ key: t.id, date: t.start < ti ? ti : t.start, title: t.name,
+        sub: [t.end ? (t.start < ti ? 'עד ' : dm(t.start) + '–') + dm(t.end) : '', t.place, 'ברצועת האירועים בצג'].filter(Boolean).join(' · '),
+        tag: t.kind === 'הזדמנות' ? 'הזדמנות' : 'אירוע בתעשייה', tagColor: '#7fe0c4', editable: true, edit: () => this.openTicker(t), del: () => this.delTicker(t) }));
+      people.forEach((pp) => { if (!pp.bday || !onWall(pp) || !pp.showBday) return; const d = nextBday(pp.bday, now);
+        if (iso(d) <= bLim) soon.push({ key: 'b' + pp.id, date: iso(d), title: dn(pp), sub: 'מחושב לבד מתאריך הלידה', tag: 'יום הולדת', tagColor: WARM, editable: false, open: () => this.openPerson(pp) }); });
       soon.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-      const soonRows = soon.map((r) => { const d = parse(r.date); return Object.assign({}, r, { day: d.getDate(), dow: r.date === ti ? 'היום' : DOWS[d.getDay()] }); });
+      let lastMonth = iso(now).slice(0, 7);
+      const soonRows = soon.map((r) => { const d = parse(r.date), mk = r.date.slice(0, 7), head = mk !== lastMonth ? MONTHS[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') : '';
+        lastMonth = mk; return Object.assign({}, r, { day: d.getDate(), dow: r.date === ti ? 'היום' : DOWS[d.getDay()], head }); });
+
+      // ---- people screen
+      const pq = s.pq.trim().toLowerCase();
+      const pMatch = (pp) => !pq || [pp.name, pp.rank, pp.role, pp.unit, pp.email, pp.phone].join(' ').toLowerCase().includes(pq);
+      const activeP = people.filter((pp) => pp.active), inactiveP = people.filter((pp) => !pp.active);
+      const pRow = (pp) => {
+        const tags = [];
+        if (!pp.onWall) tags.push({ t: 'לא מופיע/ה בצג', c: '#8b9dbd' });
+        else if (pp.birthday && !pp.showBday) tags.push({ t: 'בלי יום הולדת בצג', c: '#8b9dbd' });
+        if (pp.active && !pp.birthday) tags.push({ t: 'חסר תאריך לידה', c: WARM });
+        if (pp.profile && pp.profile.upcoming) tags.push({ t: 'שמחה בדרך', c: '#f4b6c8' });
+        return { key: pp.id, name: dn(pp), line: pline(pp) || kindLabel(pp.kind), bday: pp.birthday ? dm(pp.birthday) : '', av: this.avatar(pp), tags, open: () => this.openPerson(pp) };
+      };
+      const thisMonth = pad(now.getMonth() + 1), noBirthday = activeP.filter((pp) => !pp.birthday).length;
+      const bdaysMonth = activeP.filter((pp) => pp.bday && pp.bday.slice(0, 2) === thisMonth && pp.onWall && pp.showBday).length;
 
       const nextEv = todayEvents.find((e) => toMin(e.end) > nm);
       const nl = D && D.newsletter;
@@ -397,7 +651,8 @@
         { title: 'להוסיף לצג', items: [
           { label: 'שמחה או אירוע אישי', sub: 'חתונה, לידה, דרגה או כל דבר אחר', dot: '#f4b6c8', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openLife() },
           { label: 'אירוע מנהלת', sub: 'נכנס ללוח האירועים בצג', dot: ICE, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openEvent() },
-          { label: 'ניוזלטר השבוע', sub: nl && nl.range ? 'בצג: ' + nl.range : 'עדיין לא יובא גיליון', dot: LIME, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('newsletter', { url: '' }) }] },
+          { label: 'ניוזלטר השבוע', sub: nl && nl.range ? 'בצג: ' + nl.range : 'עדיין לא יובא גיליון', dot: LIME, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('newsletter', { url: '' }) },
+          { label: 'אנשי המנהלת', sub: activeP.length ? activeP.length + ' ברשימה · הוספה, עריכה וייבוא' : 'הרשימה ריקה · הוספה או ייבוא מאקסל', dot: WARM, bg: 'rgba(14,28,58,.55)', border: activeP.length ? 'rgba(150,190,240,.16)' : 'rgba(233,184,114,.45)', go: () => this.goPeople() }] },
         { title: 'עוד', items: [
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
           { label: 'עיצוב הצג', sub: 'גלובוס ' + (design.globeStyle === 'real' ? 'ריאליסטי' : 'הולוגרפי') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
@@ -407,9 +662,10 @@
       const lfSrc = f.photo === 'upload' ? f.photoSrc : null;
       const lfAvBase = lfP ? this.avatar(lfP, lfSrc) : { bg: 'rgba(150,190,240,.25)', ini: '?', photoEl: lfSrc ? imgEl(lfSrc, COVER) : null };
       const lfAv = f.photo === 'none' ? Object.assign({}, lfAvBase, { photoEl: null }) : lfAvBase;
-      const lfW = f.date ? { from: f.showFrom || f.date, until: iso(addDays(parse(f.date), 10)) } : null;
+      const lfW = f.date ? { from: f.showFrom || f.date, until: iso(addDays(parse(f.date), 10)), greetUntil: iso(addDays(parse(f.date), 2)) } : null;
 
       const evShowList = events.filter((e) => e.date > ti || (e.date === ti && toMin(e.end) > nm)).sort((a, b) => ((a.date + a.start) < (b.date + b.start) ? -1 : 1)).slice(0, 6);
+      const soonish = (e) => e.date === ti && toMin(e.start) - nm <= 30;   // running or starting within half an hour: stays until it ends
       const last = history.find((x) => x.canRestore);
       const ago = (at) => { const d = new Date(at); return iso(d) === ti ? hhmm(d) : iso(d) === iso(addDays(now, -1)) ? 'אתמול' : d.getDate() + '.' + (d.getMonth() + 1); };
       const nlAt = (at) => { const d = new Date(at); return iso(d) === ti ? 'היום ב-' + hhmm(d) : iso(d) === iso(addDays(now, -1)) ? 'אתמול' : 'ב-' + d.getDate() + '.' + (d.getMonth() + 1); };
@@ -441,11 +697,20 @@
         brightness, setBrightness: (e) => { const v = +e.target.value; this.setState({ brightness: v }); this.burst('br', () => this.run('brightness', { value: v }, null, { quiet: true }).catch(() => {}).finally(() => this.setState({ brightness: null }))); },
 
         showToday: !s.studio,
-        tabs: [['today', 'היום'], ['soon', 'אירועים קרובים']].map(([id, label]) => Object.assign({ id, label }, seg(s.tab === id), { pick: () => this.setState({ tab: id }) })),
-        tabToday: s.tab === 'today', tabSoon: s.tab === 'soon',
+        tabs: [['today', 'היום'], ['soon', 'אירועים קרובים'], ['people', 'אנשים']].map(([id, label]) => Object.assign({ id, label }, seg(s.tab === id), { pick: () => this.setState({ tab: id }) })),
+        tabToday: s.tab === 'today', tabSoon: s.tab === 'soon', tabPeople: s.tab === 'people',
+        addEvent: () => this.openEvent(), addLife: () => this.openLife(), addTicker: () => this.openTicker(), toPeople: () => this.setState({ tab: 'people' }),
+
+        // people screen
+        pq: s.pq, setPq: (e) => this.setState({ pq: e.target.value }), hasPeople: people.length > 0,
+        pSummary: activeP.length ? activeP.length + ' אנשים' + (bdaysMonth ? ' · ' + bdaysMonth + ' ימי הולדת החודש' : '') + (noBirthday ? ' · ל-' + noBirthday + ' חסר תאריך לידה' : '') : '',
+        pRows: activeP.filter(pMatch).map(pRow), pNoMatch: !!pq && activeP.length > 0 && !activeP.some(pMatch),
+        pInactive: inactiveP.filter(pMatch).map(pRow), showInactive: s.showInactive, toggleInactive: () => this.setState({ showInactive: !s.showInactive }),
+        addPerson: () => this.openPerson(), pickImport: () => this.importRef.current && this.importRef.current.click(), onImportFile: (e) => this.onImportFile(e),
+        impBtn: s.impBusy ? 'קורא את הקובץ…' : 'ייבוא מאקסל', exportPeople: () => this.exportPeople(),
         celebs: cel.map(celRow), hasCelebs: cel.length > 0, noCelebs: cel.length === 0,
         hasQuiet: quiet.length > 0, quietNames: quiet.map((x) => dn(x.person)).join(', '),
-        todayRows: rows, soonRows, sheetUrl: D && D.config ? D.config.sheetUrl : '',
+        todayRows: rows, soonRows,
 
         showActions: !s.studio, actGroups, studio: s.studio,
         closeStudio: () => this.setState({ studio: false, demo: 'off' }),
@@ -484,17 +749,22 @@
 
         sheetOn: !!sh, closeSheet: () => this.closeSheet(), sheetBackdrop: (e) => { if (e.target === e.currentTarget) this.closeSheet(); },
         sheetAlign: small ? 'flex-end' : 'center', sheetPad: small ? '0' : '24px', sheetRadius: small ? '20px 20px 0 0' : '20px', sheetMaxH: small ? '92vh' : '88vh',
-        sheetTitle: { celebrate: 'ברכה על כל המסך', eventShow: 'אירוע חשוב על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכת שמחה / אירוע אישי' : 'שמחה או אירוע אישי', event: sh && sh.mode === 'edit' ? 'עריכת אירוע מנהלת' : 'אירוע מנהלת חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', history: 'היסטוריית שינויים' }[kind] || '',
+        sheetTitle: { celebrate: 'ברכה על כל המסך', eventShow: 'אירוע חשוב על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכת שמחה / אירוע אישי' : 'שמחה או אירוע אישי', event: sh && sh.mode === 'edit' ? 'עריכת אירוע מנהלת' : 'אירוע מנהלת חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', history: 'היסטוריית שינויים',
+          person: sh && sh.mode === 'edit' ? 'פרטי ' + [f.first, f.last].filter(Boolean).join(' ') : 'אדם חדש ברשימה', import: 'ייבוא אנשים מקובץ', ticker: sh && sh.mode === 'edit' ? 'עריכה ברצועת האירועים' : 'אירוע או הזדמנות לרצועה' }[kind] || '',
         shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shHistory: kind === 'history',
+        shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker',
         openLifeNew: () => this.openLife(), openEventNew: () => this.openEvent(),
         showEvents: evShowList.map((e) => { const live = tk && tk.eventId === e.id; const d = parse(e.date);
-          return { key: e.id, title: e.title, when: (e.date === ti ? 'היום' : 'יום ' + DOWS[d.getDay()] + ' ' + dm(e.date)) + ' · ' + e.start + '–' + e.end + (e.place ? ' · ' + e.place : ''), btn: live ? 'מוצג עכשיו' : 'הצגה עכשיו', show: () => { if (!live) this.showEvent(e); this.closeSheet(); } }; }),
+          return { key: e.id, title: e.title, when: (e.date === ti ? 'היום' : 'יום ' + DOWS[d.getDay()] + ' ' + dm(e.date)) + ' · ' + e.start + '–' + e.end + (e.place ? ' · ' + e.place : ''), btn: live ? 'מוצג עכשיו' : soonish(e) ? 'הצגה עכשיו' : 'הצצה ל-10 דק׳', show: () => { if (!live) this.showEvent(e); this.closeSheet(); } }; }),
         noShowEvents: evShowList.length === 0,
 
         lfHasPerson: !!lfP, lfNoPerson: !lfP, lfName: lfP ? dn(lfP) : '', lfLine: lfP ? pline(lfP) : '', lfPersonAv: lfP ? this.avatar(lfP) : null,
         lfClearPerson: () => this.setFV({ personId: '' }),
         lfQ: f.q || '', setLfQ: this.fv('q'),
-        lfMatches: people.filter((pp) => !q || [pp.name, pp.rank, pp.role, pp.unit].join(' ').includes(q)).slice(0, 6).map((pp) => ({ key: pp.id, name: dn(pp), line: pline(pp), av: this.avatar(pp), pick: () => this.setFV({ personId: pp.id, q: '' }) })),
+        lfMatches: people.filter((pp) => pp.active && (!q || [pp.name, pp.rank, pp.role, pp.unit].join(' ').includes(q))).slice(0, 6).map((pp) => ({ key: pp.id, name: dn(pp), line: pp.onWall ? pline(pp) : 'ביקש/ה לא להופיע בצג', av: this.avatar(pp), pick: () => this.setFV({ personId: pp.id, q: '' }) })),
+        lfNoPeople: !people.some((pp) => pp.active), lfNoMatch: !!q && people.some((pp) => pp.active) && !people.some((pp) => pp.active && [pp.name, pp.rank, pp.role, pp.unit].join(' ').includes(q)),
+        lfAddPerson: () => { const w = q.split(/\s+/).filter(Boolean); this.openPerson(null, { first: w[0] || '', last: w.slice(1).join(' ') }, sh); },
+        lfAddLabel: q ? '+ הוספת "' + q + '" לרשימת האנשים' : '+ הוספת אדם לרשימה',
         lfType: f.type || '', setLfType: this.fv('type'),
         typeChips: TYPE_CHIPS.map((t) => ({ label: t, border: f.type === t ? LIME : 'rgba(150,190,240,.22)', pick: () => this.setFV({ type: t }) })),
         lfDate: f.date || '', setLfDate: (e) => { const v = e.target.value; this.setFV(sh && sh.mode !== 'edit' && f.showFrom === f.date ? { date: v, showFrom: v < ti ? ti : v } : { date: v }); },
@@ -517,7 +787,7 @@
         lfPMsg: f.note || (lfT.quiet ? 'משפחת מנהלת החלל משתתפת בצערך' : 'מאחלים המון אושר והצלחה — ממשפחת מנהלת החלל'),
         lfPrevBg: lfT.quiet ? '#0b1120' : 'radial-gradient(circle at 50% 40%, #1b2f5c 0%, #040914 75%)',
         lfQuiet: !!lfT.quiet, lfNotQuiet: !lfT.quiet,
-        lfWindow: lfW ? 'מוצג בפאנל האנשים מ-' + dm(lfW.from) + ' עד ' + dm(lfW.until) + ', ועולה על כל המסך כל חצי שעה' : '',
+        lfWindow: lfW ? 'מוצג בפאנל האנשים מ-' + dm(lfW.from) + ' עד ' + dm(lfW.until) + ', ועולה על כל המסך כל חצי שעה מ-' + dm(f.date) + ' עד ' + dm(lfW.greetUntil) : '',
         lfSaveLabel: sh && sh.mode === 'edit' ? 'שמירת שינויים' : 'שמירה',
         saveLife: () => this.saveLife(false), saveLifeShow: () => this.saveLife(true),
 
@@ -530,6 +800,34 @@
 
         nlHas: !!(nl && nl.range), nlRange: nl ? nl.range : '', nlCount: nl ? nl.count : 0, nlAt: nl ? nlAt(nl.at) : '', nlUrl: nl ? nl.url : '',
         nlInput: f.url || '', setNlInput: this.fv('url'), importNl: () => !s.nlBusy && this.importNl(), nlBtn: s.nlBusy ? 'מייבא…' : 'ייבוא לצג',
+
+        // person sheet
+        psEdit: kind === 'person' && sh.mode === 'edit',
+        psAv: kind === 'person' ? this.avatar({ id: f.id || 'new', name: [f.first, f.last].filter(Boolean).join(' ') || '?' }, f.photo) : null,
+        psFirst: f.first || '', setPsFirst: this.fv('first'), psLast: f.last || '', setPsLast: this.fv('last'),
+        psRank: f.rank || '', setPsRank: this.fv('rank'), psRole: f.role || '', setPsRole: this.fv('role'), psUnit: f.unit || '', setPsUnit: this.fv('unit'),
+        psKinds: KINDS.map(([k, label]) => Object.assign({ v: k, label }, seg((f.kind || 'civilian') === k), { pick: () => this.setFV({ kind: k }) })),
+        psBirthday: f.birthday || '', setPsBirthday: this.fv('birthday'), psJoined: f.joined || '', setPsJoined: this.fv('joined'), psLeaves: f.leaves || '', setPsLeaves: this.fv('leaves'),
+        psEmail: f.email || '', setPsEmail: this.fv('email'), psPhone: f.phone || '', setPsPhone: this.fv('phone'), psNotes: f.notes || '', setPsNotes: this.fv('notes'),
+        psOnWall: sw(f.onWall !== false), togglePsOnWall: () => this.setFV({ onWall: f.onWall === false }),
+        psShowBday: sw(f.onWall !== false && f.showBday !== false), psBdayOff: f.onWall === false, togglePsShowBday: () => { if (f.onWall !== false) this.setFV({ showBday: f.showBday === false }); },
+        psActive: sw(f.active !== false), togglePsActive: () => this.setFV({ active: f.active === false }),
+        psProfile: Object.keys(PROFILE_LABELS).filter((k) => f.profile && f.profile[k]).map((k) => ({ key: k, label: PROFILE_LABELS[k], text: f.profile[k], link: k === 'photo_link' && /^https?:\/\//.test(f.profile[k]) })),
+        psAddMoment: kind === 'person' && sh.mode === 'edit' && f.active !== false && f.onWall !== false ? () => this.openLife(null, { personId: f.id }) : null,
+        psPhotoBtn: s.photoBusy ? 'מעלה…' : f.photo ? 'החלפת תמונה' : 'העלאת תמונה', psHasPhoto: !!f.photo,
+        pickPsPhoto: () => { if (!s.photoBusy && this.personPhotoRef.current) this.personPhotoRef.current.click(); }, clearPsPhoto: () => this.setFV({ photo: null }),
+        onPersonPhoto: (e) => this.onPersonPhoto(e),
+        savePerson: () => this.savePerson(), deletePerson: () => this.delPerson(f), psSaveLabel: sh && sh.mode === 'edit' ? 'שמירת שינויים' : 'הוספה לרשימה',
+
+        // import sheet
+        ...(kind === 'import' ? this.importVals(f.imp) : {}),
+        doImport: () => { if (!s.impBusy) this.doImport(); }, impGo: s.impBusy ? 'מייבא…' : null,
+
+        // ticker sheet
+        tiName: f.name || '', setTiName: this.fv('name'), tiStart: f.start || '', setTiStart: this.fv('start'), tiEnd: f.end || '', setTiEnd: this.fv('end'),
+        tiPlace: f.place || '', setTiPlace: this.fv('place'), tiUrl: f.url || '', setTiUrl: this.fv('url'),
+        tiKinds: [['אירוע', 'אירוע'], ['הזדמנות', 'הזדמנות (מועד אחרון)']].map(([k, label]) => Object.assign({ v: k, label }, seg((f.kind || 'אירוע') === k), { pick: () => this.setFV({ kind: k }) })),
+        tiEdit: kind === 'ticker' && sh.mode === 'edit', saveTicker: () => this.saveTicker(), deleteTicker: () => this.delTicker(f),
 
         urInput: f.text || '', setUrInput: this.fv('text'),
         sendUr: () => { const t = (f.text || '').trim(); if (!t) return this.toast('כתבו את ההודעה'); this.run('urgent', { text: t }, 'שודרה הודעה דחופה').catch(() => {}); this.closeSheet(); },
@@ -547,7 +845,7 @@
       const s = this.state, needToken = !s.auth;
       const input = (value, onChange, placeholder, extra) => el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:16px', Object.assign({ value, onChange, placeholder }, extra));
       const submit = () => {
-        if (needToken) { const t = s.tokenDraft.trim(); if (!t) return; store.set('sw-remote-token', t); this.setState({ auth: true, tokenDraft: '' }, () => this.refresh()); }
+        if (needToken) { const t = s.tokenDraft.trim(); if (!t) return this.setState({ gateErr: 'הדביקו את קוד הגישה' }); store.set('sw-remote-token', t); this.setState({ auth: true, tokenDraft: '', gateErr: '' }, () => this.refresh()); }
         const w = s.whoDraft.trim();
         if (!s.who && w) { store.set('sw-remote-who', w); this.setState((st) => ({ who: w, messages: st.messages.map((m, i) => (i === 0 ? Object.assign({}, m, { text: m.text.replace(/^שלום!?/, 'שלום ' + w + '!') }) : m)) })); }
       };
@@ -558,6 +856,7 @@
             el('h1', 'margin:0;font-size:20px;font-weight:800', null, 'שלט צג החלל')),
           needToken ? el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'פתחו את השלט מהקישור הפרטי שקיבלתם, או הדביקו כאן את קוד הגישה.') : null,
           needToken ? input(s.tokenDraft, (e) => this.setState({ tokenDraft: e.target.value }), 'קוד גישה', { dir: 'ltr', autoComplete: 'off' }) : null,
+          s.gateErr ? el('span', 'font-size:14px;color:#ffb4a8;text-wrap:pretty', { role: 'alert' }, s.gateErr) : null,
           !s.who ? el('span', 'font-size:14px;color:#8b9dbd', null, 'איך לקרוא לך? השם מופיע בהיסטוריית השינויים.') : null,
           !s.who ? input(s.whoDraft, (e) => this.setState({ whoDraft: e.target.value }), 'השם שלך', { maxLength: 40 }) : null,
           el('button', 'min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { type: 'submit' }, 'כניסה')));
@@ -574,6 +873,25 @@
       const dateField = 'min-height:44px;box-sizing:border-box;padding:0 10px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;color-scheme:dark';
       const segWrap = (cols, kids) => el('div', `display:grid;grid-template-columns:repeat(${cols},minmax(0,1fr));gap:4px;padding:4px;border-radius:12px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.1)`, null, kids);
       const section = (style, ...kids) => el('section', 'border-radius:20px;border:1px solid rgba(150,190,240,.14);background:rgba(14,28,58,.55);' + style, null, ...kids);
+      const smallBtn = (label, onClick, extra) => el('button', 'min-height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:14px;cursor:pointer;white-space:nowrap' + (extra || ''), { onClick }, label);
+      const linkBtn = (label, onClick) => el('button', 'padding:0;border:none;background:none;color:#9fdcff;font-size:inherit;cursor:pointer;text-decoration:underline', { onClick }, label);
+      const dashedBtn = (label, onClick) => el('button', 'min-height:44px;border-radius:12px;border:1px dashed rgba(159,220,255,.35);background:transparent;color:#9fdcff;font-size:15px;cursor:pointer', { onClick }, label);
+      const lbl = (text, child, grow) => el('label', `flex:${grow || 1};min-width:140px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd`, null, text, child);
+      const row2 = (...kids) => el('div', 'display:flex;gap:10px;flex-wrap:wrap', null, ...kids);
+      const textIn = (value, onChange, extra) => el('input', field, Object.assign({ value, onChange }, extra));
+      const dateIn = (value, onChange) => el('input', dateField, { type: 'date', value, onChange });
+      const toggleRow = (title, sub, sw, onClick) => el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
+        el('div', 'display:flex;flex-direction:column;gap:2px;min-width:0', null, el('span', 'font-size:15px;font-weight:600', null, title), el('span', 'font-size:12.5px;color:#8b9dbd;text-wrap:pretty', null, sub)),
+        toggleBtn(true, sw.j, sw.tbg, onClick, title));
+      const saveBtn = (label, onClick, disabled) => el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick, disabled }, label);
+      const delBtn = (label, onClick) => el('button', 'min-height:48px;padding:0 18px;border-radius:12px;border:1px solid rgba(255,122,107,.5);background:transparent;color:#ff7a6b;font-size:15px;cursor:pointer', { onClick }, label);
+      const personRow = (r) => el('button', 'display:flex;align-items:center;gap:12px;width:100%;padding:8px 4px;border:none;border-bottom:1px solid rgba(150,190,240,.08);background:transparent;color:#e6f1ff;cursor:pointer;text-align:right', { key: r.key, onClick: r.open, className: 'sw-hover' },
+        avatarDiv(40, 14, r.av),
+        el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:2px', null,
+          el('span', 'font-size:15px;font-weight:600', null, r.name),
+          el('span', 'font-size:12px;color:#8b9dbd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', null, r.line),
+          r.tags.length ? el('div', 'display:flex;gap:6px;flex-wrap:wrap;padding-top:2px', null, r.tags.map((t) => el('span', `font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid ${t.c};color:${t.c}`, { key: t.t }, t.t))) : null),
+        r.bday ? el('span', "flex:none;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#e9b872;direction:ltr", null, r.bday + ' 🎂') : null);
 
       // ---- header + banners
       const header = el('header', 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap', null,
@@ -628,8 +946,8 @@
           el('span', "font-family:'IBM Plex Mono',monospace;font-size:14px;width:44px;text-align:left;flex:none", null, v.brightness + '%')));
 
       // ---- today / upcoming
-      const todayPanel = v.showToday ? section('padding:14px 16px;display:flex;flex-direction:column;gap:14px',
-        segWrap(2, v.tabs.map((t) => el('button', `min-height:40px;border-radius:9px;border:none;background:${t.bg};color:${t.fg};font-size:15px;font-weight:700;cursor:pointer`, { key: t.id, onClick: t.pick }, t.label))),
+      const todayPanel = v.showToday ? el('section', 'border-radius:20px;border:1px solid rgba(150,190,240,.14);background:rgba(14,28,58,.55);padding:14px 16px;display:flex;flex-direction:column;gap:14px;scroll-margin-top:12px', { ref: this.panelRef },
+        segWrap(3, v.tabs.map((t) => el('button', `min-height:40px;border-radius:9px;border:none;background:${t.bg};color:${t.fg};font-size:15px;font-weight:700;cursor:pointer`, { key: t.id, onClick: t.pick }, t.label))),
         v.tabToday ? h(React.Fragment, null,
           el('div', 'display:flex;flex-direction:column;gap:10px', null,
             el('div', 'display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap', null,
@@ -639,7 +957,7 @@
               el('button', 'display:flex;align-items:center;gap:8px;padding:5px 5px 5px 14px;border-radius:999px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.5);color:#e6f1ff;cursor:pointer;text-align:right', { key: c.key, onClick: c.show },
                 avatarDiv(34, 13, c.av),
                 el('div', 'display:flex;flex-direction:column;gap:0', null, el('span', 'font-size:14px;font-weight:600', null, c.name), el('span', `font-size:12px;color:${c.color}`, null, c.type))))) : null,
-            v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין ברכות היום') : null,
+            v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין ברכות היום', v.hasPeople ? null : h(React.Fragment, null, ' · רשימת האנשים עדיין ריקה: ', linkBtn('להוספת אנשים', v.toPeople))) : null,
             v.hasQuiet ? el('span', 'font-size:13px;color:#8b9dbd', null, 'מוצג בשקט בפאנל האנשים: ' + v.quietNames) : null),
           el('div', 'display:flex;flex-direction:column', null,
             el('span', 'font-size:15px;font-weight:700;padding-bottom:6px', null, 'לוח הזמנים היום'),
@@ -649,20 +967,39 @@
               r.hasBtn ? el('button', 'flex:none;min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(159,220,255,.4);background:transparent;color:#9fdcff;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap', { onClick: r.action }, r.btn) : null,
               r.hasToggle ? toggleBtn(true, r.j, r.tbg, r.toggle, r.title) : null)))) : null,
         v.tabSoon ? el('div', 'display:flex;flex-direction:column', null,
-          v.soonRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:10px 0', null, 'אין אירועים בשלושת השבועות הקרובים'),
-          v.soonRows.map((r) => el('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(150,190,240,.08)', { key: r.key },
-            el('div', 'flex:none;width:44px;height:44px;border-radius:10px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.14);display:flex;flex-direction:column;align-items:center;justify-content:center', null,
-              el('span', 'font-size:16px;font-weight:800;line-height:1', null, r.day), el('span', 'font-size:11px;color:#8b9dbd', null, r.dow)),
-            el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null,
-              el('span', 'font-size:15px;font-weight:600;text-wrap:pretty', null, r.title),
-              el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap', null,
-                el('span', `font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid ${r.tagColor};color:${r.tagColor}`, null, r.tag),
-                el('span', 'font-size:12px;color:#8b9dbd', null, r.sub))),
-            r.editable ? el('div', 'flex:none;display:flex;gap:6px', null,
-              el('button', 'min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:13px;cursor:pointer', { onClick: r.edit }, 'עריכה'),
-              el('button', 'width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,122,107,.35);background:transparent;color:#ff7a6b;font-size:14px;cursor:pointer', { onClick: r.del, 'aria-label': 'מחיקה' }, '✕')) : null)),
-          el('span', 'padding-top:12px;font-size:12px;color:#8b9dbd', null, 'ימי ההולדת והתמונות מגיעים מרשימת אנשי המנהלת. לשינוי פרטים של אדם, כתבו לסוכן.',
-            v.sheetUrl ? h(React.Fragment, null, ' ', el('a', null, { href: v.sheetUrl, target: '_blank', rel: 'noopener' }, 'פתיחת הגיליון ↗')) : null)) : null) : null;
+          el('div', 'display:flex;gap:6px;flex-wrap:wrap;padding-bottom:4px', null,
+            smallBtn('+ אירוע מנהלת', v.addEvent), smallBtn('+ שמחה או אירוע אישי', v.addLife), smallBtn('+ לרצועת האירועים', v.addTicker)),
+          v.soonRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:10px 0;text-wrap:pretty', null, 'עוד אין אירועים קרובים. הוסיפו אירוע מנהלת, שמחה או פריט לרצועת האירועים בכפתורים למעלה.'),
+          v.soonRows.map((r) => h(React.Fragment, { key: r.key },
+            r.head ? el('span', 'padding:14px 0 2px;font-size:13px;font-weight:700;color:#9fdcff', null, r.head) : null,
+            el('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(150,190,240,.08)', null,
+              el('div', 'flex:none;width:44px;height:44px;border-radius:10px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.14);display:flex;flex-direction:column;align-items:center;justify-content:center', null,
+                el('span', 'font-size:16px;font-weight:800;line-height:1', null, r.day), el('span', 'font-size:11px;color:#8b9dbd', null, r.dow)),
+              el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null,
+                el('span', 'font-size:15px;font-weight:600;text-wrap:pretty', null, r.title),
+                el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap', null,
+                  el('span', `font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid ${r.tagColor};color:${r.tagColor}`, null, r.tag),
+                  el('span', 'font-size:12px;color:#8b9dbd', null, r.sub))),
+              r.editable ? el('div', 'flex:none;display:flex;gap:6px', null,
+                el('button', 'min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:13px;cursor:pointer', { onClick: r.edit }, 'עריכה'),
+                el('button', 'width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,122,107,.35);background:transparent;color:#ff7a6b;font-size:14px;cursor:pointer', { onClick: r.del, 'aria-label': 'מחיקה' }, '✕')) : null,
+              r.open ? el('button', 'flex:none;min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:13px;cursor:pointer', { onClick: r.open }, 'פרטים') : null))),
+          el('span', 'padding-top:12px;font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'ימי ההולדת מחושבים לבד מתאריכי הלידה ברשימת האנשים, 30 יום קדימה. ברצועת האירועים בצג מופיעים גם האירועים מהניוזלטר השבועי. ',
+            linkBtn('לרשימת האנשים', v.toPeople))) : null,
+        v.tabPeople ? el('div', 'display:flex;flex-direction:column;gap:10px', null,
+          el('div', 'display:flex;gap:6px;flex-wrap:wrap', null,
+            el('button', 'min-height:38px;padding:0 14px;border-radius:10px;border:none;background:#d4f25c;color:#0b1400;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap', { onClick: v.addPerson }, '+ הוספת אדם'),
+            smallBtn(v.impBtn, v.pickImport), v.hasPeople ? smallBtn('ייצוא לאקסל', v.exportPeople) : null),
+          v.hasPeople ? el('input', field, { value: v.pq, onChange: v.setPq, placeholder: 'חיפוש לפי שם, ענף, תפקיד או טלפון', type: 'search' }) : null,
+          v.pSummary ? el('span', 'font-size:12px;color:#8b9dbd', null, v.pSummary) : null,
+          v.hasPeople ? null : el('div', 'display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:14px;border:1px dashed rgba(159,220,255,.3);background:rgba(4,9,20,.4)', null,
+            el('span', 'font-size:15px;font-weight:700', null, 'עוד אין אנשים ברשימה'),
+            el('span', 'font-size:13px;color:#8b9dbd;line-height:1.55;text-wrap:pretty', null, 'מהרשימה הזאת הצג יודע מתי יש ימי הולדת ולמי לשייך שמחות. אפשר להוסיף אחד-אחד, או לייבא בבת אחת קובץ אקסל, כולל גיליון התשובות של טופס ההיכרות (בגוגל שיטס: קובץ ← הורדה ← Microsoft Excel).')),
+          v.pNoMatch ? el('span', 'font-size:14px;color:#8b9dbd;padding:4px 0', null, 'אין התאמות לחיפוש') : null,
+          el('div', 'display:flex;flex-direction:column', null, v.pRows.map(personRow)),
+          v.pInactive.length ? h(React.Fragment, null,
+            el('button', 'align-self:flex-start;padding:4px 0;border:none;background:none;color:#8b9dbd;font-size:13px;cursor:pointer', { onClick: v.toggleInactive }, (v.showInactive ? '▾ ' : '◂ ') + 'כבר לא במנהלת (' + v.pInactive.length + ')'),
+            v.showInactive ? el('div', 'display:flex;flex-direction:column;opacity:.75', null, v.pInactive.map(personRow)) : null) : null) : null) : null;
 
       // ---- actions / studio
       const actions = v.showActions ? v.actGroups.map((g) => el('div', 'display:flex;flex-direction:column;gap:8px', { key: g.title },
@@ -758,7 +1095,10 @@
                 el('div', 'display:flex;flex-direction:column;gap:4px', null, v.lfMatches.map((m) =>
                   el('button', 'display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:10px;border:none;background:transparent;color:#e6f1ff;cursor:pointer;text-align:right', { key: m.key, onClick: m.pick, className: 'sw-hover' },
                     avatarDiv(34, 12, m.av),
-                    el('div', 'display:flex;flex-direction:column;gap:0;min-width:0', null, el('span', 'font-size:15px;font-weight:600', null, m.name), el('span', 'font-size:12px;color:#8b9dbd', null, m.line)))))) : null),
+                    el('div', 'display:flex;flex-direction:column;gap:0;min-width:0', null, el('span', 'font-size:15px;font-weight:600', null, m.name), el('span', 'font-size:12px;color:#8b9dbd', null, m.line))))),
+                v.lfNoPeople ? el('span', 'font-size:13px;color:#ffb4a8;text-wrap:pretty', null, 'רשימת האנשים עדיין ריקה, אז אין את מי לבחור. הוסיפו קודם את האדם, ותחזרו לכאן לבד:') : null,
+                v.lfNoMatch ? el('span', 'font-size:13px;color:#8b9dbd', null, 'לא נמצא ברשימת האנשים.') : null,
+                v.lfNoPeople || v.lfNoMatch ? dashedBtn(v.lfAddLabel, v.lfAddPerson) : null) : null),
             el('div', 'display:flex;flex-direction:column;gap:8px', null,
               el('span', 'font-size:13px;color:#8b9dbd', null, 'מה קרה?'),
               el('input', field, { value: v.lfType, onChange: v.setLfType, placeholder: 'כתבו בחופשיות, למשל: נולד בן', maxLength: 40 }),
@@ -818,6 +1158,63 @@
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
               el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:none;background:#ff7a6b;color:#1a0406;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.sendUr }, 'שידור לצג'),
               v.urgentOn ? el('button', 'min-height:48px;padding:0 18px;border-radius:12px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:15px;cursor:pointer', { onClick: v.clearUrClose }, 'הסרת ההודעה הנוכחית') : null)) : null,
+          v.shPerson ? h(React.Fragment, null,
+            el('div', 'display:flex;align-items:center;gap:14px', null,
+              avatarDiv(72, 24, v.psAv),
+              el('div', 'display:flex;flex-direction:column;gap:6px;align-items:flex-start', null,
+                el('button', 'min-height:38px;padding:0 14px;border-radius:10px;border:1px dashed rgba(159,220,255,.4);background:transparent;color:#9fdcff;font-size:14px;cursor:pointer', { onClick: v.pickPsPhoto }, v.psPhotoBtn),
+                v.psHasPhoto ? linkBtn('הסרת התמונה', v.clearPsPhoto) : el('span', 'font-size:12px;color:#8b9dbd', null, 'בלי תמונה יוצגו ראשי תיבות'))),
+            row2(lbl('שם פרטי', textIn(v.psFirst, v.setPsFirst, { maxLength: 40, autoFocus: !v.psEdit })), lbl('שם משפחה', textIn(v.psLast, v.setPsLast, { maxLength: 40 }))),
+            row2(lbl('דרגה', textIn(v.psRank, v.setPsRank, { maxLength: 30, placeholder: 'למשל: סרן, רס״ן' })), lbl('תפקיד', textIn(v.psRole, v.setPsRole, { maxLength: 80 }))),
+            lbl('אגף / ענף / צוות', textIn(v.psUnit, v.setPsUnit, { maxLength: 80 })),
+            el('div', 'display:flex;flex-direction:column;gap:6px', null, el('span', 'font-size:13px;color:#8b9dbd', null, 'מעמד'),
+              segWrap(v.psKinds.length === 4 && s.vw < 520 ? 2 : 4, v.psKinds.map((o) => el('button', `min-height:40px;border-radius:9px;border:none;background:${o.bg};color:${o.fg};font-size:14px;font-weight:600;cursor:pointer`, { key: o.v, onClick: o.pick }, o.label)))),
+            row2(lbl('תאריך לידה', dateIn(v.psBirthday, v.setPsBirthday)), el('div', 'flex:1;min-width:140px')),
+            toggleRow('מופיע/ה בצג', 'בלי הסכמה הפרטים נשמרים ברשימה בלבד: בלי יום הולדת, שמחות או תמונה בצג', v.psOnWall, v.togglePsOnWall),
+            toggleRow('לחגוג יום הולדת בצג', v.psBdayOff ? 'כבוי, כי האדם לא מופיע בצג' : 'ברכה על כל המסך ביום ההולדת (השנה לא מוצגת)', v.psShowBday, v.togglePsShowBday),
+            row2(lbl('תאריך הצטרפות', dateIn(v.psJoined, v.setPsJoined)), lbl('תאריך שחרור / סיום', dateIn(v.psLeaves, v.setPsLeaves))),
+            row2(lbl('מייל', textIn(v.psEmail, v.setPsEmail, { type: 'email', dir: 'ltr', maxLength: 120 })), lbl('טלפון', textIn(v.psPhone, v.setPsPhone, { type: 'tel', dir: 'ltr', maxLength: 40 }))),
+            lbl('הערות ללשכה', el('textarea', 'resize:vertical;box-sizing:border-box;width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;line-height:1.5', { value: v.psNotes, onChange: v.setPsNotes, rows: 2, maxLength: 500 })),
+            el('span', 'font-size:12px;color:#8b9dbd;margin-top:-6px', null, 'פרטי הקשר וההערות נשמרים ללשכה בלבד ולא מוצגים בצג.'),
+            v.psProfile.length ? el('div', 'display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
+              el('span', 'font-size:12px;color:#9fdcff;font-weight:600', null, 'מטופס ההיכרות'),
+              v.psProfile.map((pf) => el('div', 'display:flex;gap:8px;font-size:13px;line-height:1.45', { key: pf.key },
+                el('span', 'flex:none;color:#8b9dbd;min-width:96px', null, pf.label),
+                pf.link ? el('a', null, { href: pf.text, target: '_blank', rel: 'noopener' }, 'פתיחה ↗') : el('span', 'color:#e6f1ff;text-wrap:pretty;white-space:pre-wrap', null, pf.text)))) : null,
+            v.psAddMoment ? dashedBtn('+ שמחה או אירוע אישי לאדם הזה', v.psAddMoment) : null,
+            v.psEdit ? toggleRow('עדיין במנהלת', 'מי שעזב/ה: כבו כאן. נשמר ברשימה ולא מוצג יותר בצג', v.psActive, v.togglePsActive) : null,
+            el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
+              saveBtn(v.psSaveLabel, v.savePerson, s.busyAct || s.photoBusy),
+              v.psEdit ? delBtn('מחיקה', v.deletePerson) : null)) : null,
+          v.shImport ? h(React.Fragment, null,
+            el('div', 'display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
+              el('span', 'font-size:15px;font-weight:700;overflow-wrap:anywhere', null, v.impFile),
+              el('span', 'font-size:14px;color:#cfe0f7;text-wrap:pretty', null, v.impSummary),
+              el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'עמודות שזוהו: ' + v.impUsed),
+              v.impUnused ? el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'לא בשימוש: ' + v.impUnused) : null),
+            el('div', 'display:flex;flex-direction:column;max-height:44vh;overflow-y:auto', null, v.impRows.map((r) =>
+              el('div', 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(150,190,240,.08)', { key: r.key },
+                el('span', "flex:none;width:28px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5d6f8f", null, r.n),
+                el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:1px', null,
+                  el('span', 'font-size:14px;font-weight:600', null, r.name),
+                  el('span', 'font-size:12px;color:#8b9dbd', null, r.line + (r.off ? ' · לא מופיע/ה בצג' : '')),
+                  r.warn ? el('span', 'font-size:12px;color:#ffb4a8', null, r.warn) : null),
+                el('span', `flex:none;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid ${r.tag.c};color:${r.tag.c}`, null, r.tag.t)))),
+            v.impMore ? el('span', 'font-size:12px;color:#8b9dbd', null, 'ועוד ' + v.impMore + ' שורות') : null,
+            el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'מי שכבר ברשימה (לפי שם מלא) מתעדכן רק בפרטים שיש בקובץ, ושום פרט קיים לא נמחק. אחרי הייבוא אפשר לבטל הכל בלחיצה אחת.'),
+            el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
+              saveBtn(v.impGo || v.impLabel, v.doImport, !v.impCan || s.impBusy),
+              el('button', 'min-height:48px;padding:0 18px;border-radius:12px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:15px;cursor:pointer', { onClick: v.pickImport }, 'קובץ אחר'))) : null,
+          v.shTicker ? h(React.Fragment, null,
+            el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:16px', { value: v.tiName, onChange: v.setTiName, placeholder: 'שם, למשל: כנס החלל הבינלאומי', maxLength: 120, autoFocus: !v.tiEdit }),
+            segWrap(2, v.tiKinds.map((o) => el('button', `min-height:40px;border-radius:9px;border:none;background:${o.bg};color:${o.fg};font-size:14px;font-weight:600;cursor:pointer`, { key: o.v, onClick: o.pick }, o.label))),
+            row2(lbl('תאריך', dateIn(v.tiStart, v.setTiStart)), lbl('עד (לא חובה)', dateIn(v.tiEnd, v.setTiEnd))),
+            textIn(v.tiPlace, v.setTiPlace, { placeholder: 'מקום, למשל: תל אביב (לא חובה)', maxLength: 80 }),
+            textIn(v.tiUrl, v.setTiUrl, { placeholder: 'קישור, https://… (לא חובה)', dir: 'ltr', type: 'url' }),
+            el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'מופיע ברצועת "אירועים והזדמנויות" בתחתית הצג, עד שהתאריך עובר.'),
+            el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
+              saveBtn(v.tiEdit ? 'שמירת שינויים' : 'שמירה', v.saveTicker, s.busyAct),
+              v.tiEdit ? delBtn('מחיקה', v.deleteTicker) : null)) : null,
           v.shHistory ? h(React.Fragment, null,
             el('span', 'font-size:13px;color:#8b9dbd;text-wrap:pretty', null, 'שחזור מבטל את הפעולה ואת כל מה שנעשה אחריה.'),
             el('div', 'display:flex;flex-direction:column', null,
@@ -838,6 +1235,8 @@
       return h(React.Fragment, null,
         el('input', 'display:none', { type: 'file', ref: this.fileRef, multiple: true, accept: '.xlsx,.xls,.csv,.txt,image/*', onChange: v.onChatFiles }),
         el('input', 'display:none', { type: 'file', ref: this.photoRef, accept: 'image/*', onChange: v.onPhotoFile }),
+        el('input', 'display:none', { type: 'file', ref: this.personPhotoRef, accept: 'image/*', onChange: v.onPersonPhoto }),
+        el('input', 'display:none', { type: 'file', ref: this.importRef, accept: '.xlsx,.xls,.csv,.txt', onChange: v.onImportFile }),
         el('div', { minHeight: '100vh', display: 'grid', gridTemplateColumns: v.rootCols, background: 'radial-gradient(1200px 600px at 60% -10%, #0c1c3a 0%, #040914 60%)' }, { dir: 'rtl' },
           el('main', { minWidth: 0, padding: v.mainPad, display: 'flex', flexDirection: 'column', gap: 16 }, null,
             header, tkBanner, urBanner,
