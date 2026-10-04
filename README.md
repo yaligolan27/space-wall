@@ -8,7 +8,7 @@ machine**: operators update it by chatting with Claude through a dedicated MCP c
 app/              the display (static; served by Vercel, polls /api/feed every minute)
 api/feed.ts       Vercel function: builds the feed JSON from Supabase (cached 60 s)
 api/mcp.ts        Vercel function: the "צג חלל" MCP connector for operators
-api/cron.ts       Vercel cron: daily launches + space weather
+api/cron.ts       Vercel cron: daily launches + space weather + the weekly newsletter import
 api/telegram.ts   optional Telegram intake (queues messages; the local runner parses them)
 lib/              shared: db client, feed builder, wall operations (wall-ops.ts), zod contracts, dates
 agent/src/        the local runner: collection, enrichment, launches, weather, numbers, intake
@@ -27,8 +27,11 @@ project/, chats/  the original Claude Design handoff bundle
    import a newsletter issue; there is no raw SQL and people are soft-deleted. Guide: `docs/operator-guide.md`.
 2. **Vercel** serves the display (`app/`) and `/api/feed`, which assembles the v4 feed from Supabase.
    A daily Vercel cron (`api/cron.ts`) refreshes launches and space weather; neither needs a model.
-3. **The weekly newsletter** is imported into `newsletter_issues` through the same connector
-   (`import_newsletter_issue`); until the first import the display shows the design's sample week.
+3. **The weekly newsletter** is imported automatically: the daily cron checks the archive page of
+   https://rakia-weekly.vercel.app, and when a new issue is listed it parses that issue's page
+   (`lib/newsletter.ts`) into `newsletter_issues`: news, featured stories, and upcoming events and
+   opportunities for the ticker. Nothing to upload by hand. To re-import the current issue on demand:
+   `FORCE=1 npm run agent -- newsletter`. The connector's `import_newsletter_issue` still works for corrections.
 4. **Optional:** the Telegram bot and the local Claude Code runner (`agent/`) still work for free-text intake
    and RSS enrichment, but nothing on the wall depends on them any more.
 
@@ -55,7 +58,7 @@ Settings → Connectors → Add custom connector. To revoke access, change `MCP_
 | --- | --- |
 | `npm run runner` | the always-on loop (this is the one you leave running) |
 | `npm run doctor` | checks the CLI, the model, the keys and the queue depths |
-| `npm run agent -- collect enrich launches weather numbers intake` | run tasks once, by name |
+| `npm run agent -- collect enrich launches weather numbers newsletter intake` | run tasks once, by name |
 | `npm run feed:preview` | prints the JSON the display will receive |
 | `npm test` | bridge tests against stub CLI binaries; no network or subscription needed |
 | `npm run typecheck` | TypeScript, no emit |
