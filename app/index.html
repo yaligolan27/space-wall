@@ -5,11 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>צג חלל · מנהלת החלל</title>
 <link rel="icon" href="/assets/logo-mark.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="stylesheet" href="/assets/fonts/v4/fonts.css">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div id="root"></div>
+<script>
+// Watchdog: if the wall has not rendered after a minute (a script failed to load, say during a reload), reload, but only
+// when the page answers and at most every five minutes (the mark wall.js keeps for its own reloads).
+setTimeout(function check() {
+  if (document.getElementById('root').hasChildNodes()) return;
+  var last = 0; try { last = Number(sessionStorage.getItem('wall:reloadAt')) || 0; } catch (e) {}
+  if (Date.now() - last < 300000) return void setTimeout(check, 60000);
+  fetch(location.href, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined }).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    try { sessionStorage.setItem('wall:reloadAt', String(Date.now())); } catch (e) {}
+    location.reload();
+  }).catch(function () { setTimeout(check, 60000); });
+}, 60000);
+</script>
 <script src="/vendor/react.production.min.js"></script>
 <script src="/vendor/react-dom.production.min.js"></script>
 <script src="/vendor/qrcode.js"></script>

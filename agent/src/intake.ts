@@ -4,7 +4,8 @@
 import { db, must } from '../../lib/db.js';
 import { DIRECTORATE_PROFILE } from '../../lib/profile.js';
 import { IntakeResult, type IntakeAction } from '../../lib/schemas.js';
-import { isoDateIL } from '../../lib/dates.js';
+import { isoDateIL, shortDate, timeIL } from '../../lib/dates.js';
+import { eventClock } from '../../lib/intake-apply.js';
 import { esc, sendMessage } from '../../lib/telegram.js';
 import { runClaudeTask } from './cc.js';
 
@@ -22,10 +23,11 @@ function instructions(today: string, people: string, events: string): string {
 
 כללים:
 - אירוע אישי (יום הולדת, חתונה, לידה, אבל, עלייה בדרגה, שחרור, קליטה) הוא add_life_event עם person_name ועם life_event_type ו-event_date בפורמט YYYY-MM-DD. אם האדם אינו קיים, הוסף add_person לפניו עם מה שידוע.
+- person_name של אדם קיים: השם המלא כפי שהוא ברשימה. שם שמתאים לכמה אנשים לא יעודכן.
 - "יום הולדת ל-X ב-3.4" ללא שנה: זה תאריך האירוע השנה (או בשנה הבאה אם התאריך עבר), ולא תאריך לידה. שנת לידה מפורשת נכנסת ל-birthday ב-add_person.
-- אירוע של המנהלת (הרמת כוסית, טקס, כנס פנימי, תערוכה, יום כיף, ביקור משלחת, מפגש) הוא add_directorate_event עם starts_at מלא בפורמט ISO עם אזור זמן ישראל, למשל 2026-09-15T12:00:00+03:00. בלי שעה, השתמש ב-09:00.
+- אירוע של המנהלת (הרמת כוסית, טקס, כנס פנימי, תערוכה, יום כיף, ביקור משלחת, מפגש) הוא add_directorate_event עם event_date בפורמט YYYY-MM-DD, ו-starts_at (ו-ends_at אם ידוע) כשעה בשעון ישראל בפורמט HH:MM בלבד, למשל event_date "2026-09-15", starts_at "12:00", ends_at "13:00". בלי אזור זמן: המערכת מחשבת שעון קיץ וחורף. בלי שעה, השתמש ב-09:00.
 - כנס או תערוכה חיצוניים בתעשייה הם add_industry_event עם starts_on ו-ends_on בפורמט YYYY-MM-DD ו-event_kind "אירוע". קול קורא, מענק, מלגה או מועד הגשה הם add_industry_event עם event_kind "הזדמנות" ו-starts_on כתאריך היעד.
-- בקשה למחוק או לבטל היא remove_event עם match, ואם ידוע גם remove_kind.
+- בקשה למחוק או לבטל היא remove_event עם match, ואם ידוע גם remove_kind ו-event_date. מוסרת רשומה אחת בלבד: אם כמה מתאימות, לא יוסר דבר.
 - עדכון שורת הנתונים בצג (מספר עצמים במעקב, מזג אוויר חללי) הוא set_setting עם setting_key ו-line1 או line2.
 - text_he הוא טקסט תצוגה קצר בסגנון "יום הולדת · שם · אגף". השאר null אם המשתמש לא ניסח משהו מיוחד; המערכת תרכיב אותו.
 - אם חסר פרט מהותי (מי, מתי) ואי אפשר להסיק בסבירות גבוהה: needs_clarification=true, שאלה אחת קצרה ב-clarification_he, ו-actions מערך ריק.
@@ -41,7 +43,7 @@ function describe(a: IntakeAction): string {
     case 'add_person': return `👤 אדם חדש: ${a.person_name || [a.first_name, a.last_name].filter(Boolean).join(' ')}${a.unit ? ' · ' + a.unit : ''}${a.birthday ? ' · נולד/ה ' + a.birthday : ''}`;
     case 'update_person': return `✏️ עדכון פרטים: ${a.person_name || a.match}`;
     case 'add_life_event': return `🎉 ${a.life_event_type} · ${a.person_name} · ${a.event_date || 'היום'}`;
-    case 'add_directorate_event': return `📅 ${a.title} · ${a.starts_at}${a.place ? ' · ' + a.place : ''}`;
+    case 'add_directorate_event': { const c = eventClock(a); return `📅 ${a.title} · ${shortDate(c.date)} ${c.time}${c.end ? '–' + c.end : ''}${a.place ? ' · ' + a.place : ''}`; }
     case 'add_industry_event': return `${a.event_kind === 'הזדמנות' ? '💡' : '🏛'} ${a.title} · ${a.starts_on}${a.place ? ' · ' + a.place : ''}`;
     case 'remove_event': return `🗑 הסרה: ${a.match || a.title || a.person_name}`;
     case 'set_setting': return `⚙️ ${a.setting_key}: ${[a.line1, a.line2].filter(Boolean).join(' / ')}`;
@@ -64,7 +66,8 @@ export async function processIntake(): Promise<number> {
   const eventRows = must(await s.from('directorate_events').select('title,starts_at,place')
     .gte('starts_at', new Date().toISOString()).order('starts_at').limit(30), 'events') as any[];
   const people = peopleRows.map(p => [p.display_name, p.unit, p.role, p.rank].filter(Boolean).join(' / ')).join('; ');
-  const events = eventRows.map(e => `${e.title} (${e.starts_at}${e.place ? ', ' + e.place : ''})`).join('; ');
+  // Israel date and time, as the operators write them (starts_at itself is UTC).
+  const events = eventRows.map(e => { const d = new Date(e.starts_at); return `${e.title} (${isoDateIL(d)} ${timeIL(d)}${e.place ? ', ' + e.place : ''})`; }).join('; ');
   const today = isoDateIL();
 
   let handled = 0;

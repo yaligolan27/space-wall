@@ -15,7 +15,7 @@
       "maxDuration": 60
     },
     "api/remote.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/live.ts": {
       "maxDuration": 10

@@ -8,7 +8,8 @@
 // positional argument, which the variadic tool flags silently swallowed.
 import { readFileSync } from 'node:fs';
 import { runClaudeTask, claudeAvailable, UsageLimitError, ClaudeCodeError } from '../src/cc.js';
-import { EnrichResult, IntakeResult } from '../../lib/schemas.js';
+import { EnrichResult, IntakeAction, IntakeResult } from '../../lib/schemas.js';
+import { eventClock } from '../../lib/intake-apply.js';
 
 const DIR = process.env.STUB_DIR || new URL('stubs', import.meta.url).pathname;
 let failures = 0;
@@ -63,6 +64,13 @@ const lean = IntakeResult.safeParse({
 });
 check('intake schema accepts sparse actions', lean.success, lean.success ? '' : JSON.stringify(lean.error.issues[0]));
 check('intake schema nulls omitted fields', lean.success && lean.data.actions[0].place === null);
+
+// A directorate event arrives as a date plus Israel wall-clock times; an old-style timestamp is read as wall-clock,
+// so a hardcoded +03:00 can't move a winter event by an hour.
+const clock = (a: object) => JSON.stringify(eventClock(IntakeAction.parse({ type: 'add_directorate_event', ...a })));
+check('intake event: date + HH:MM', clock({ event_date: '2026-10-27', starts_at: '12:00', ends_at: '13:00' }) === '{"date":"2026-10-27","time":"12:00","end":"13:00"}');
+check('intake event: +03:00 timestamp read as wall-clock', clock({ starts_at: '2026-10-27T12:00:00+03:00' }) === '{"date":"2026-10-27","time":"12:00","end":null}');
+check('intake event without a time starts 09:00', clock({ event_date: '2026-10-27' }).includes('"time":"09:00"'));
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall green');
 process.exit(failures ? 1 : 0);
