@@ -284,8 +284,9 @@
     async importNl() {
       const url = ((this.state.sheet.f.url) || '').trim();
       if (!/^https?:\/\/\S+\.\S+/.test(url)) return this.toast('הדביקו קישור מלא, שמתחיל ב-https://');
-      // Open the Claude tab now, inside the click, so the browser doesn't block it; close it if the import worked here.
-      const tab = window.open('about:blank', '_blank');
+      // Links to the newsletter site import here. For any other link, open the Claude tab now, inside the click,
+      // so the browser doesn't block it; close it if the import worked here after all.
+      const tab = /^https?:\/\/rakia-weekly\.vercel\.app(\/|$)/.test(url) ? null : window.open('about:blank', '_blank');
       this.setState({ nlBusy: true });
       try {
         const r = await this.run('newsletter', { url }, 'יובא גיליון הניוזלטר');
@@ -809,7 +810,7 @@
             el('div', 'display:flex;flex-direction:column;gap:6px', null,
               el('span', 'font-size:13px;color:#8b9dbd', null, 'קישור לגיליון החדש'),
               el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;text-align:left', { value: v.nlInput, onChange: v.setNlInput, placeholder: 'https://…', dir: 'ltr', type: 'url' }),
-              el('span', 'font-size:12px;color:#8b9dbd', null, 'הכתבות, התמונות וקודי ה-QR נשאבים מהדף. אם הדף לא נקרא כאן, Claude ייפתח וישלים את הייבוא.')),
+              el('span', 'font-size:12px;color:#8b9dbd', null, 'הכתבות, האירועים וקודי ה-QR נשאבים מהדף. גיליון חדש מיובא גם לבד כל בוקר.')),
             el('button', 'min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.importNl }, v.nlBtn)) : null,
           v.shUrgent ? h(React.Fragment, null,
             el('span', 'font-size:14px;color:#8b9dbd', null, 'פס אדום בראש הצג, עד שמסירים אותו.'),

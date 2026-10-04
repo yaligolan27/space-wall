@@ -7,6 +7,13 @@ import { db, must } from './db.js';
 import { addDays, isoDateIL, timeIL } from './dates.js';
 import { birthdayCard, displayName, lifeCard } from './feed.js';
 import { DATE, TIME, NewsletterContent, assertRealDate, ilToIso, importNewsletter } from './wall-ops.js';
+import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from './newsletter.js';
+
+async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { accept: 'text/html', 'user-agent': 'space-wall-remote/1.0' }, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`דף הניוזלטר לא נטען (HTTP ${res.status})`);
+  return res.text();
+}
 
 // ---- design (the wall's URL options, now stored) ----------------------------------------------------
 export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true };
@@ -243,23 +250,34 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     undo.push({ op: 'put', table: 'directorate_events', row: prev });
     await record(who, 'נמחק אירוע: ' + prev.title, undo);
   },
-  /** Imports directly when the link serves the newsletter as JSON; otherwise the remote hands the link to Claude. */
+  /** Imports an issue of the Rakia newsletter site directly (the home or archive page means its newest issue),
+   *  or a link that serves the newsletter as JSON; any other link is handed to Claude by the remote. */
   async newsletter(a, who) {
     const { url } = z.object({ url: z.string().url().regex(/^https?:\/\//) }).parse(a);
-    let content: z.infer<typeof NewsletterContent> | null = null;
-    try {
-      const res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
-      if (res.ok && /json/.test(res.headers.get('content-type') || '')) {
-        const parsed = NewsletterContent.safeParse(await res.json());
-        if (parsed.success) content = parsed.data;
+    let content: z.infer<typeof NewsletterContent> | null = null, issueDate = isoDateIL(), sourceUrl = url;
+    const u = new URL(url), site = new URL(NEWSLETTER_SITE);
+    if (u.hostname === site.hostname) {
+      let page = u.pathname.match(/^\/(\d{4}-\d{2}-\d{2})\/?/)?.[1];
+      if (!page) {
+        page = latestFromArchive(await fetchText(`${NEWSLETTER_SITE}/archive/`)) || undefined;
+        if (!page) throw new Error('לא נמצא גיליון באתר הניוזלטר');
       }
-    } catch { /* not reachable or not JSON: hand off */ }
+      const parsed = parseIssue(await fetchText(`${NEWSLETTER_SITE}/${page}/`), isoDateIL());
+      content = NewsletterContent.parse(parsed.content); issueDate = parsed.issue_date; sourceUrl = parsed.source_url;
+    } else {
+      try {
+        const res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+        if (res.ok && /json/.test(res.headers.get('content-type') || '')) {
+          const parsed = NewsletterContent.safeParse(await res.json());
+          if (parsed.success) content = parsed.data;
+        }
+      } catch { /* not reachable or not JSON: hand off */ }
+    }
     if (!content) return { handoff: true };
-    const issueDate = isoDateIL();
     const prev = must(await db().from('newsletter_issues').select('*').eq('issue_date', issueDate).maybeSingle(), 'prev issue') as Row | null;
-    const saved = await importNewsletter(issueDate, url, content) as unknown as Row;
+    const saved = await importNewsletter(issueDate, sourceUrl, content) as unknown as Row;
     await record(who, 'יובא גיליון הניוזלטר ' + content.issue.range, [prev ? { op: 'put', table: 'newsletter_issues', row: prev } : { op: 'del', table: 'newsletter_issues', id: saved.id }]);
-    return { handoff: false };
+    return { handoff: false, range: content.issue.range, count: content.news.length };
   },
   async urgent(a, who) {
     const { text } = z.object({ text: z.string().trim().max(200) }).parse(a);
