@@ -47,11 +47,11 @@
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 
   const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he' };
-  const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'ברכה'], ['noon', 'מופע צהריים'], ['launch', 'שיגור']];
+  const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
   const SPEC = [
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
     { title: 'שפה', controls: [{ key: 'lang', label: 'שפת הצג (השלט נשאר בעברית)', kind: 'seg', options: [['he', 'עברית'], ['en', 'English']] }] },
-    { title: 'רגעים', controls: [{ key: 'noon', label: 'מופע צהריים אוטומטי ב-12:00', kind: 'toggle' }] },
+    { title: 'רגעים', controls: [{ key: 'noon', label: 'סרטון תדמית אוטומטי ב-12:00', kind: 'toggle' }] },
     { title: 'תוכן', controls: [{ key: 'qr', label: 'קודי QR לכתבות', kind: 'toggle' }] },
     { title: 'תנועה', controls: [
       { key: 'feature', label: 'זמן לכתבה מרכזית', kind: 'slider', min: 6, max: 30, unit: 's' },
@@ -423,7 +423,7 @@
     takeover() { const tk = this.D && this.D.takeover; return tk && Date.parse(tk.until) > this.state.now.getTime() ? tk : null; }
     tkTitle(tk) {
       if (!tk) return '';
-      if (tk.kind === 'noon') return 'מופע הצהריים';
+      if (tk.kind === 'noon') return 'סרטון תדמית';
       if (tk.kind === 'welcome') return 'ברוכים הבאים' + (tk.guest ? ' · ' + tk.guest : '');
       if (tk.kind === 'event') return tk.title;
       return tpl(tk.type || (tk.person && tk.person.type)).head + (tk.person ? ' · ' + tk.person.name : '');
@@ -446,8 +446,8 @@
       if (e) this.openSheet('event', Object.assign({}, e), 'edit');
       else this.openSheet('event', { title: '', date: iso(this.state.now), start: '10:00', end: '11:00', place: '', big: false });
     }
-    showNoon() { this.run('noon', {}, 'הופעל מופע הצהריים').catch(() => {}); }
-    showCeleb(x) { this.run('celebrate', { personId: x.person.free ? null : x.person.id, lifeId: x.lifeId }, 'ברכה על כל המסך: ' + dn(x.person)).catch(() => {}); }
+    showNoon() { this.run('noon', {}, 'הופעל סרטון התדמית').catch(() => {}); }
+    showCeleb(x) { this.run('celebrate', { personId: x.person.free ? null : x.person.id, lifeId: x.lifeId }, 'מודעה אישית על כל המסך: ' + dn(x.person)).catch(() => {}); }
     showEvent(e) { this.run('showEvent', { eventId: e.id }, 'על כל המסך: ' + e.title).catch(() => {}); }
     endTk() { const w = (this.takeover() || {}).kind === 'welcome'; this.run('endTakeover', {}, w ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה').catch(() => {}); }
     showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
@@ -475,7 +475,7 @@
       const edit = sh.mode === 'edit';
       try {
         await this.run('saveEvent', { id: edit ? f.id : undefined, title: f.title.trim(), date: f.date, start: f.start, end: f.end, place: (f.place || '').trim(), big: !!f.big },
-          (edit ? 'עודכן אירוע: ' : 'נוסף אירוע מנהלת: ') + f.title.trim());
+          (edit ? 'עודכן אירוע: ' : 'נוסף אירוע: ') + f.title.trim());
         this.closeSheet();
       } catch (e) { /* toasted */ }
     }
@@ -701,15 +701,15 @@
           hasBtn: !past, btn: live ? 'מוצג עכשיו' : toMin(e.start) - nm > 30 ? 'הצצה ל-10 דק׳' : 'על כל המסך', action: () => (live ? null : this.showEvent(e)), hasToggle: false };
       });
       const noonPast = nm >= 735, noonOn = design.noon && noonToday;
-      rows.push(Object.assign({ key: 'noon', m: 720, time: '12:00', title: 'מופע הצהריים · סרטון התדמית', op: noonPast ? 0.45 : 1,
+      rows.push(Object.assign({ key: 'noon', m: 720, time: '12:00', title: 'סרטון תדמית', op: noonPast ? 0.45 : 1,
         sub: !design.noon ? 'כבוי בהגדרות העיצוב' : noonPast ? 'הסתיים להיום' : (noonToday ? 'יעלה לבד' : 'דילוג היום'),
         hasBtn: false, hasToggle: design.noon && !noonPast }, sw(noonOn), {
-        toggle: () => this.run('noonToday', { on: !noonToday }, noonToday ? 'דילוג על מופע הצהריים היום' : 'מופע הצהריים יעלה היום').catch(() => {}) }));
+        toggle: () => this.run('noonToday', { on: !noonToday }, noonToday ? 'דילוג על סרטון התדמית היום' : 'סרטון התדמית יעלה היום').catch(() => {}) }));
       rows.sort((a, b) => a.m - b.m);
 
       // Everything ahead: directorate events (a year), personal moments still to show, birthdays in the next 30 days.
       const soon = [], bLim = iso(addDays(now, BDAY_DAYS));
-      events.filter((e) => e.date >= ti).forEach((e) => soon.push({ key: e.id, date: e.date, title: e.title, sub: e.start + '–' + e.end + (e.place ? ' · ' + e.place : '') + (e.big ? ' · חשוב' : ''), tag: 'אירוע מנהלת', tagColor: ICE, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
+      events.filter((e) => e.date >= ti).forEach((e) => soon.push({ key: e.id, date: e.date, title: e.title, sub: e.start + '–' + e.end + (e.place ? ' · ' + e.place : '') + (e.big ? ' · מודעה מנהלת' : ''), tag: 'אירועים', tagColor: ICE, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
       life.filter((l) => l.showUntil >= ti).forEach((l) => { const pp = this.lifeP(l), tp = l.kind === 'bereavement' ? tpl('אבל') : tpl(l.type);
         soon.push({ key: l.id, date: l.date, title: dn(pp), sub: (l.note ? l.note + ' · ' : '') + (!onWall(pp) ? 'לא מוצג: ' + (pp.active ? 'ביקש/ה לא להופיע בצג' : 'כבר לא במנהלת') : l.showFrom > ti ? 'יוצג החל מ-' + dm(l.showFrom) : (tp.quiet ? 'מוצג בשקט' : 'מוצג עכשיו')), tag: l.type, tagColor: tp.color, editable: true, edit: () => this.openLife(l), del: () => this.delLife(l) }); });
       (D && D.ticker ? D.ticker : []).forEach((t) => soon.push({ key: t.id, date: t.start < ti ? ti : t.start, title: t.name,
@@ -743,14 +743,14 @@
       const actGroups = [
         { title: 'להציג עכשיו על כל המסך', items: [
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
-          { label: tkK === 'noon' ? 'עצירת המופע' : 'מופע הצהריים', sub: tkK === 'noon' ? 'מוצג עכשיו' : 'סרטון התדמית · עולה לבד ב-12:00', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
-          { label: 'ברכה', sub: cel.length ? 'היום: ' + dn(cel[0].person) + (cel.length > 1 ? ' ועוד ' + (cel.length - 1) : '') : 'אין ברכות היום', dot: WARM, bg: 'rgba(233,184,114,.09)', border: 'rgba(233,184,114,.4)', go: () => this.openSheet('celebrate') },
-          { label: 'אירוע חשוב', sub: nextEv ? nextEv.title : 'בחירה מלוח האירועים', dot: ICE, bg: 'rgba(159,220,255,.09)', border: 'rgba(159,220,255,.4)', go: () => this.openSheet('eventShow') }] },
+          { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : 'עולה לבד ב-12:00', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
+          { label: 'מודעה אישית', sub: cel.length ? 'היום: ' + dn(cel[0].person) + (cel.length > 1 ? ' ועוד ' + (cel.length - 1) : '') : 'אין מודעות אישיות היום', dot: WARM, bg: 'rgba(233,184,114,.09)', border: 'rgba(233,184,114,.4)', go: () => this.openSheet('celebrate') },
+          { label: 'מודעה מנהלת', sub: nextEv ? nextEv.title : 'בחירה מלוח האירועים', dot: ICE, bg: 'rgba(159,220,255,.09)', border: 'rgba(159,220,255,.4)', go: () => this.openSheet('eventShow') }] },
         { title: 'להוסיף לצג', items: [
-          { label: 'שמחה או אירוע אישי', sub: 'חתונה, לידה, דרגה או כל דבר אחר', dot: '#f4b6c8', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openLife() },
-          { label: 'אירוע מנהלת', sub: 'נכנס ללוח האירועים בצג', dot: ICE, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openEvent() },
+          { label: 'אנשי המנהלת', sub: 'חתונה, לידה, דרגה או כל דבר אחר', dot: '#f4b6c8', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openLife() },
+          { label: 'אירועים', sub: 'נכנס ללוח האירועים בצג', dot: ICE, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openEvent() },
           { label: 'ניוזלטר השבוע', sub: nl && nl.range ? 'בצג: ' + nl.range : 'עדיין לא יובא גיליון', dot: LIME, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('newsletter', { url: '' }) },
-          { label: 'אנשי המנהלת', sub: activeP.length ? activeP.length + ' ברשימה · הוספה, עריכה וייבוא' : 'הרשימה ריקה · הוספה או ייבוא מאקסל', dot: WARM, bg: 'rgba(14,28,58,.55)', border: activeP.length ? 'rgba(150,190,240,.16)' : 'rgba(233,184,114,.45)', go: () => this.goPeople() }] },
+          { label: 'רשימת האנשים', sub: activeP.length ? activeP.length + ' ברשימה · הוספה, עריכה וייבוא' : 'הרשימה ריקה · הוספה או ייבוא מאקסל', dot: WARM, bg: 'rgba(14,28,58,.55)', border: activeP.length ? 'rgba(150,190,240,.16)' : 'rgba(233,184,114,.45)', go: () => this.goPeople() }] },
         { title: 'עוד', items: [
           { label: design.lang === 'en' ? 'חזרה לעברית' : 'הצג באנגלית', sub: s.langBusy ? 'מתרגם את הצג…' : design.lang === 'en' ? 'הצג מוצג עכשיו באנגלית' : 'כל הצג באנגלית, למשלחות מחו״ל', dot: '#7fe0c4', bg: design.lang === 'en' ? 'rgba(127,224,196,.09)' : 'rgba(14,28,58,.55)', border: design.lang === 'en' ? 'rgba(127,224,196,.45)' : 'rgba(150,190,240,.16)', go: () => this.setLang(design.lang === 'en' ? 'he' : 'en') },
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
@@ -862,7 +862,7 @@
 
         sheetOn: !!sh, closeSheet: () => this.closeSheet(), sheetBackdrop: (e) => { if (e.target === e.currentTarget) this.closeSheet(); },
         sheetAlign: small ? 'flex-end' : 'center', sheetPad: small ? '0' : '24px', sheetRadius: small ? '20px 20px 0 0' : '20px', sheetMaxH: small ? '92vh' : '88vh',
-        sheetTitle: { celebrate: 'ברכה על כל המסך', eventShow: 'אירוע חשוב על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכת שמחה / אירוע אישי' : 'שמחה או אירוע אישי', event: sh && sh.mode === 'edit' ? 'עריכת אירוע מנהלת' : 'אירוע מנהלת חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', welcome: 'מסך ברוכים הבאים', history: 'היסטוריית שינויים',
+        sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', welcome: 'מסך ברוכים הבאים', history: 'היסטוריית שינויים',
           person: sh && sh.mode === 'edit' ? 'פרטי ' + [f.first, f.last].filter(Boolean).join(' ') : 'אדם חדש ברשימה', import: 'ייבוא אנשים מקובץ', ticker: sh && sh.mode === 'edit' ? 'עריכה ברצועת האירועים' : 'אירוע או הזדמנות לרצועה' }[kind] || '',
         shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shWelcome: kind === 'welcome', shHistory: kind === 'history',
         shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker',
@@ -888,7 +888,7 @@
         setLfType: (e) => { const v = e.target.value; this.setFV(Object.assign({ type: v }, /הולדת/.test(v) && !/הולדת/.test(f.type || '') && lfP && lfP.bday ? this.bdayDates(lfP.bday, f) : {})); },
         typeChips: TYPE_CHIPS.map((t) => ({ label: t, border: f.type === t ? LIME : 'rgba(150,190,240,.22)',
           pick: () => this.setFV(Object.assign({ type: t }, /הולדת/.test(t) && lfP && lfP.bday ? this.bdayDates(lfP.bday, f) : {})) })),
-        lfBdayHint: lfFix ? 'זה נראה כמו תאריך לידה, אז הברכה תעלה ביום ההולדת הקרוב: ' + dm(lfFix) + '.' + lfFix.slice(0, 4) : '',
+        lfBdayHint: lfFix ? 'זה נראה כמו תאריך לידה, אז המודעה האישית תעלה ביום ההולדת הקרוב: ' + dm(lfFix) + '.' + lfFix.slice(0, 4) : '',
         lfDate: f.date || '', setLfDate: (e) => { const v = e.target.value; this.setFV(sh && sh.mode !== 'edit' && f.showFrom === f.date ? { date: v, showFrom: v < ti ? ti : v } : { date: v }); },
         lfShowFrom: f.showFrom || '', setLfShowFrom: this.fv('showFrom'),
         lfPhotoOpts: [['crm', lfP ? 'מהרשימה' : 'ראשי תיבות'], ['upload', 'העלאה'], ['none', 'בלי תמונה']].map(([v, label]) => Object.assign({ v, label }, seg(f.photo === v), { pick: () => { this.setFV({ photo: v }); if (v === 'upload' && !f.photoSrc && this.photoRef.current) this.photoRef.current.click(); } })),
@@ -1051,7 +1051,7 @@
             v.livePreview ? el('iframe', { position: 'absolute', top: 0, left: 0, width: 1920, height: 1080, border: 0, transform: v.previewTransform, transformOrigin: '0 0', pointerEvents: 'none' }, { src: v.wallSrc, title: 'צג החלל — תצוגה חיה', tabIndex: -1 }) : null,
             v.tkNoon ? el('div', 'position:absolute;inset:0;direction:rtl;background:#010307;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1cqw', null,
               el('span', "font-family:'IBM Plex Mono',monospace;font-size:2cqw;color:#d4f25c;letter-spacing:.12em", null, '12:00'),
-              el('span', 'font-size:5.4cqw;font-weight:800', null, 'מופע הצהריים'),
+              el('span', 'font-size:5.4cqw;font-weight:800', null, 'סרטון תדמית'),
               el('span', 'font-size:1.7cqw;color:#8b9dbd', null, 'סרטון התדמית · מנהלת החלל'),
               el('div', 'position:absolute;left:6cqw;right:6cqw;bottom:5cqw;height:.45cqw;border-radius:1cqw;background:rgba(150,190,240,.2);overflow:hidden', null, el('div', { height: '100%', width: v.tkPct, background: '#d4f25c' }))) : null,
             v.tkWelcome ? el('div', 'position:absolute;inset:0;direction:ltr;background:radial-gradient(ellipse at 50% 40%, #142a55 0%, #020611 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.6cqw;text-align:center', null,
@@ -1083,13 +1083,13 @@
         v.tabToday ? h(React.Fragment, null,
           el('div', 'display:flex;flex-direction:column;gap:10px', null,
             el('div', 'display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap', null,
-              el('span', 'font-size:15px;font-weight:700', null, 'ברכות היום'),
+              el('span', 'font-size:15px;font-weight:700', null, 'מודעות אישיות היום'),
               el('span', 'font-size:12px;color:#8b9dbd', null, 'עולות לבד על כל המסך כל :00 ו-:30 · לחיצה מציגה עכשיו')),
             v.hasCelebs ? el('div', 'display:flex;flex-wrap:wrap;gap:8px', null, v.celebs.map((c) =>
               el('button', 'display:flex;align-items:center;gap:8px;padding:5px 5px 5px 14px;border-radius:999px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.5);color:#e6f1ff;cursor:pointer;text-align:right', { key: c.key, onClick: c.show },
                 avatarDiv(34, 13, c.av),
                 el('div', 'display:flex;flex-direction:column;gap:0', null, el('span', 'font-size:14px;font-weight:600', null, c.name), el('span', `font-size:12px;color:${c.color}`, null, c.type))))) : null,
-            v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין ברכות היום', v.hasPeople ? null : h(React.Fragment, null, ' · רשימת האנשים עדיין ריקה: ', linkBtn('להוספת אנשים', v.toPeople))) : null,
+            v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין מודעות אישיות היום', v.hasPeople ? null : h(React.Fragment, null, ' · רשימת האנשים עדיין ריקה: ', linkBtn('להוספת אנשים', v.toPeople))) : null,
             v.hasQuiet ? el('span', 'font-size:13px;color:#8b9dbd', null, 'מוצג בשקט בפאנל האנשים: ' + v.quietNames) : null),
           el('div', 'display:flex;flex-direction:column', null,
             el('span', 'font-size:15px;font-weight:700;padding-bottom:6px', null, 'לוח הזמנים היום'),
@@ -1100,8 +1100,8 @@
               r.hasToggle ? toggleBtn(true, r.j, r.tbg, r.toggle, r.title) : null)))) : null,
         v.tabSoon ? el('div', 'display:flex;flex-direction:column', null,
           el('div', 'display:flex;gap:6px;flex-wrap:wrap;padding-bottom:4px', null,
-            smallBtn('+ אירוע מנהלת', v.addEvent), smallBtn('+ שמחה או אירוע אישי', v.addLife), smallBtn('+ לרצועת האירועים', v.addTicker)),
-          v.soonRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:10px 0;text-wrap:pretty', null, 'עוד אין אירועים קרובים. הוסיפו אירוע מנהלת, שמחה או פריט לרצועת האירועים בכפתורים למעלה.'),
+            smallBtn('+ לאירועים', v.addEvent), smallBtn('+ לאנשי המנהלת', v.addLife), smallBtn('+ לרצועת האירועים', v.addTicker)),
+          v.soonRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:10px 0;text-wrap:pretty', null, 'עוד אין אירועים קרובים. אפשר להוסיף לאירועים, לאנשי המנהלת או לרצועת האירועים בכפתורים למעלה.'),
           v.soonRows.map((r) => h(React.Fragment, { key: r.key },
             r.head ? el('span', 'padding:14px 0 2px;font-size:13px;font-weight:700;color:#9fdcff', null, r.head) : null,
             el('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(150,190,240,.08)', null,
@@ -1228,14 +1228,14 @@
             el('h2', 'margin:0;font-size:19px;font-weight:800', null, v.sheetTitle),
             el('button', 'flex:none;width:40px;height:40px;border-radius:10px;border:none;background:rgba(150,190,240,.08);color:#8b9dbd;font-size:16px;cursor:pointer', { onClick: v.closeSheet, 'aria-label': 'סגירה' }, '✕')),
           v.shCeleb ? h(React.Fragment, null,
-            el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'הברכה עולה על כל המסך לדקה, ואז הצג חוזר לתצוגה הרגילה.'),
+            el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'המודעה האישית עולה על כל המסך לדקה, ואז הצג חוזר לתצוגה הרגילה.'),
             el('div', 'display:flex;flex-direction:column;gap:8px', null, v.celebs.map((c) =>
               el('button', 'display:flex;align-items:center;gap:12px;padding:10px;border-radius:14px;border:1px solid rgba(150,190,240,.14);background:rgba(4,9,20,.5);color:#e6f1ff;cursor:pointer;text-align:right', { key: c.key, onClick: c.showClose },
                 avatarDiv(46, 16, c.av),
                 el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:2px', null, el('span', 'font-size:16px;font-weight:600', null, c.name), el('span', `font-size:13px;color:${c.color}`, null, c.type)),
                 el('span', 'flex:none;font-size:14px;font-weight:700;color:#d4f25c', null, 'הצגה')))),
-            v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין ברכות פעילות היום.') : null,
-            el('button', 'min-height:44px;border-radius:12px;border:1px dashed rgba(159,220,255,.35);background:transparent;color:#9fdcff;font-size:15px;cursor:pointer', { onClick: v.openLifeNew }, '+ אירוע אישי חדש')) : null,
+            v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין מודעות אישיות היום.') : null,
+            el('button', 'min-height:44px;border-radius:12px;border:1px dashed rgba(159,220,255,.35);background:transparent;color:#9fdcff;font-size:15px;cursor:pointer', { onClick: v.openLifeNew }, '+ הוספה לאנשי המנהלת')) : null,
           v.shEvShow ? h(React.Fragment, null,
             el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'האירוע עולה על כל המסך ויורד לבד כשהוא מסתיים לפי היומן.'),
             el('div', 'display:flex;flex-direction:column;gap:8px', null, v.showEvents.map((e) =>
@@ -1243,7 +1243,7 @@
                 el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null, el('span', 'font-size:16px;font-weight:600;text-wrap:pretty', null, e.title), el('span', 'font-size:13px;color:#8b9dbd', null, e.when)),
                 el('button', 'flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:none;background:#9fdcff;color:#040914;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap', { onClick: e.show }, e.btn)))),
             v.noShowEvents ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין אירועים קרובים ביומן.') : null,
-            el('button', 'min-height:44px;border-radius:12px;border:1px dashed rgba(159,220,255,.35);background:transparent;color:#9fdcff;font-size:15px;cursor:pointer', { onClick: v.openEventNew }, '+ אירוע מנהלת חדש')) : null,
+            el('button', 'min-height:44px;border-radius:12px;border:1px dashed rgba(159,220,255,.35);background:transparent;color:#9fdcff;font-size:15px;cursor:pointer', { onClick: v.openEventNew }, '+ אירוע חדש')) : null,
           v.shLife ? h(React.Fragment, null,
             el('div', 'display:flex;flex-direction:column;gap:6px', null,
               el('span', 'font-size:13px;color:#8b9dbd', null, 'מי?'),
@@ -1277,7 +1277,7 @@
                 v.lfHasSrc ? el('div', 'flex:none;width:56px;height:56px;border-radius:10px;overflow:hidden;position:relative;background:#000', null, v.lfThumbEl) : null,
                 el('button', 'min-height:40px;padding:0 14px;border-radius:10px;border:1px dashed rgba(159,220,255,.4);background:transparent;color:#9fdcff;font-size:14px;cursor:pointer', { onClick: v.pickPhoto }, v.lfPhotoBtn)) : null,
               v.lfIsCrm ? el('span', 'font-size:12px;color:#8b9dbd', null, v.lfCrmHint) : null),
-            el('input', field, { value: v.lfNote, onChange: v.setLfNote, placeholder: 'ברכה אישית (לא חובה)', maxLength: 120 }),
+            el('input', field, { value: v.lfNote, onChange: v.setLfNote, placeholder: 'נוסח אישי (לא חובה)', maxLength: 120 }),
             el('div', 'display:flex;flex-direction:column;gap:6px', null,
               el('span', 'font-size:13px;color:#8b9dbd', null, 'כך זה ייראה בצג'),
               el('div', { position: 'relative', width: '100%', aspectRatio: '16/9', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(150,190,240,.14)', containerType: 'inline-size', background: v.lfPrevBg }, null,
@@ -1300,8 +1300,8 @@
               el('label', 'flex:1;min-width:100px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'עד', el('input', dateField, { type: 'time', value: v.evEnd, onChange: v.setEvEnd }))),
             el('input', field, { value: v.evPlace, onChange: v.setEvPlace, placeholder: 'מקום, למשל: אולם א׳', maxLength: 60 }),
             el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
-              el('div', 'display:flex;flex-direction:column;gap:2px', null, el('span', 'font-size:15px;font-weight:600', null, 'אירוע חשוב'), el('span', 'font-size:13px;color:#8b9dbd;text-wrap:pretty', null, 'עולה לבד על כל המסך כשהוא מתחיל, ויורד כשהוא נגמר')),
-              toggleBtn(true, v.evBigJ, v.evBigBg, v.toggleEvBig, 'אירוע חשוב')),
+              el('div', 'display:flex;flex-direction:column;gap:2px', null, el('span', 'font-size:15px;font-weight:600', null, 'מודעה מנהלת'), el('span', 'font-size:13px;color:#8b9dbd;text-wrap:pretty', null, 'האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד כשהוא נגמר')),
+              toggleBtn(true, v.evBigJ, v.evBigBg, v.toggleEvBig, 'מודעה מנהלת')),
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
               el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.saveEvent, disabled: s.busyAct }, v.evSaveLabel),
               v.evIsEdit ? el('button', 'min-height:48px;padding:0 18px;border-radius:12px;border:1px solid rgba(255,122,107,.5);background:transparent;color:#ff7a6b;font-size:15px;cursor:pointer', { onClick: v.deleteEvent }, 'מחיקה') : null)) : null,
@@ -1340,7 +1340,7 @@
               segWrap(v.psKinds.length === 4 && s.vw < 520 ? 2 : 4, v.psKinds.map((o) => el('button', `min-height:40px;border-radius:9px;border:none;background:${o.bg};color:${o.fg};font-size:14px;font-weight:600;cursor:pointer`, { key: o.v, onClick: o.pick }, o.label)))),
             row2(lbl('תאריך לידה', dateIn(v.psBirthday, v.setPsBirthday)), el('div', 'flex:1;min-width:140px')),
             toggleRow('מופיע/ה בצג', 'בלי הסכמה הפרטים נשמרים ברשימה בלבד: בלי יום הולדת, שמחות או תמונה בצג', v.psOnWall, v.togglePsOnWall),
-            toggleRow('לחגוג יום הולדת בצג', v.psBdayOff ? 'כבוי, כי האדם לא מופיע בצג' : 'ברכה על כל המסך ביום ההולדת (השנה לא מוצגת)', v.psShowBday, v.togglePsShowBday),
+            toggleRow('לחגוג יום הולדת בצג', v.psBdayOff ? 'כבוי, כי האדם לא מופיע בצג' : 'מודעה אישית על כל המסך ביום ההולדת (השנה לא מוצגת)', v.psShowBday, v.togglePsShowBday),
             row2(lbl('תאריך הצטרפות', dateIn(v.psJoined, v.setPsJoined)), lbl('תאריך שחרור / סיום', dateIn(v.psLeaves, v.setPsLeaves))),
             row2(lbl('מייל', textIn(v.psEmail, v.setPsEmail, { type: 'email', dir: 'ltr', maxLength: 120 })), lbl('טלפון', textIn(v.psPhone, v.setPsPhone, { type: 'tel', dir: 'ltr', maxLength: 40 }))),
             lbl('הערות ללשכה', el('textarea', 'resize:vertical;box-sizing:border-box;width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;line-height:1.5', { value: v.psNotes, onChange: v.setPsNotes, rows: 2, maxLength: 500 })),
@@ -1350,7 +1350,7 @@
               v.psProfile.map((pf) => el('div', 'display:flex;gap:8px;font-size:13px;line-height:1.45', { key: pf.key },
                 el('span', 'flex:none;color:#8b9dbd;min-width:96px', null, pf.label),
                 pf.link ? el('a', null, { href: pf.text, target: '_blank', rel: 'noopener' }, 'פתיחה ↗') : el('span', 'color:#e6f1ff;text-wrap:pretty;white-space:pre-wrap', null, pf.text)))) : null,
-            v.psAddMoment ? dashedBtn('+ שמחה או אירוע אישי לאדם הזה', v.psAddMoment) : null,
+            v.psAddMoment ? dashedBtn('+ אירוע אישי לאדם הזה', v.psAddMoment) : null,
             v.psEdit ? toggleRow('עדיין במנהלת', 'מי שעזב/ה: כבו כאן. נשמר ברשימה ולא מוצג יותר בצג', v.psActive, v.togglePsActive) : null,
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
               saveBtn(v.psSaveLabel, v.savePerson, s.busyAct || s.photoBusy),

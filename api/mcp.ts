@@ -17,6 +17,7 @@ import { isoDateIL } from '../lib/dates.js';
 import { setting } from '../lib/settings.js';
 
 const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המסך בלובי של מנהלת החלל. דרך הכלים האלה מעדכנים את מה שמוצג: אנשים, אירועים אישיים, אירועי מנהלת, ורצועת האירועים וההזדמנויות.
+בצג ובשלט קוראים להם כך: "אירועים" (אירועי המנהלת), "אנשי המנהלת" (ימי הולדת ושמחות אישיות), ועל כל המסך: "סרטון תדמית", "מודעה אישית" ו"מודעה מנהלת" (אירוע שעולה לבד כשהוא מתחיל). בשמות האלה משתמשים בתשובות.
 
 כללי עבודה:
 - התחל/י כל שיחה ב-wall_overview כדי לדעת מה כבר קיים ומה התאריך היום.
@@ -27,7 +28,7 @@ const INSTRUCTIONS = `אתה עוזר/ת התפעול של "צג חלל", המס
 - יום הולדת: עדיף לשמור תאריך לידה באדם (birthday) ואז הוא יופיע אוטומטית כל שנה; אירוע birthday נפרד רק כשאין תאריך לידה.
 - מחיקה בלתי הפיכה: delete_event דורש אישור מפורש. remove_person רק מסתיר את האדם.
 - אם משהו לא ברור (איזה "דני"? איזה תאריך?), שאל/י שאלה אחת קצרה במקום לנחש.
-- שליטה חיה (מסך מלא, הודעה דחופה, בהירות, עיצוב, דילוג על מופע הצהריים) עולה לצג תוך שניות ונרשמת בהיסטוריה של השלט, שם אפשר לבטל. אין צורך לבקש אישור לפני שינוי כזה, רק לפני מחיקה.
+- שליטה חיה (מסך מלא, הודעה דחופה, בהירות, עיצוב, דילוג על סרטון התדמית) עולה לצג תוך שניות ונרשמת בהיסטוריה של השלט, שם אפשר לבטל. אין צורך לבקש אישור לפני שינוי כזה, רק לפני מחיקה.
 - הודעת אבל לא עולה על כל המסך.
 - ענה/י בעברית, קצר.`;
 
@@ -87,8 +88,8 @@ function buildServer(): McpServer {
   }, guard(async (a: any) => ops.addLifeEvent(a)));
 
   server.registerTool('add_directorate_event', {
-    title: 'אירוע מנהלת',
-    description: 'אירוע פנימי: toast (הרמת כוסית), ceremony (טקס), conference (כנס), exhibition (תערוכה), fun_day (יום כיף), visit (ביקור משלחת), meeting (מפגש), other. מופיע בבלוק "אירועים במנהלת" בשבוע שלפניו.',
+    title: 'אירוע בלוח האירועים',
+    description: 'אירוע פנימי: toast (הרמת כוסית), ceremony (טקס), conference (כנס), exhibition (תערוכה), fun_day (יום כיף), visit (ביקור משלחת), meeting (מפגש), other. מופיע בבלוק "אירועים" בשבוע שלפניו.',
     inputSchema: {
       title: z.string().min(2).max(80), type: z.enum(ops.DIR_TYPES).optional(),
       date: ops.DATE, time: ops.TIME.optional(), end_time: ops.TIME.optional(),
@@ -130,7 +131,7 @@ function buildServer(): McpServer {
 
   server.registerTool('show_fullscreen', {
     title: 'הצגה על כל המסך',
-    description: 'מציג עכשיו על כל המסך: welcome (מסך WELCOME TO THE ISRAELI SPACE PROGRAM OFFICE לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה; guest: שורה אופציונלית מתחת לכותרת), noon (מופע הצהריים, סרטון התדמית), celebration (ברכה: life_event_id של אירוע אישי, גם של מי שלא ברשימה; או person_id לבד, וזו ברכת יום הולדת), event (אירוע מנהלת: event_id; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
+    description: 'מציג עכשיו על כל המסך: welcome (מסך WELCOME TO THE ISRAELI SPACE PROGRAM OFFICE לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה; guest: שורה אופציונלית מתחת לכותרת), noon (סרטון התדמית), celebration (מודעה אישית: life_event_id של אירוע אישי, גם של מי שלא ברשימה; או person_id לבד, וזו מודעת יום הולדת), event (מודעה מנהלת: event_id של אירוע; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
     inputSchema: { what: z.enum(['welcome', 'noon', 'celebration', 'event', 'end']), guest: z.string().max(80).optional(), person_id: idOf.optional(), life_event_id: idOf.optional(), event_id: idOf.optional() },
   }, guard(async (a: { what: string; guest?: string; person_id?: string; life_event_id?: string; event_id?: string }) => {
     if (a.what === 'welcome') return ACTIONS.welcome({ guest: a.guest }, WHO).then(() => 'בוצע');
@@ -141,14 +142,14 @@ function buildServer(): McpServer {
   }));
 
   server.registerTool('set_noon_show_today', {
-    title: 'מופע הצהריים היום',
-    description: 'on=false מדלג על מופע הצהריים האוטומטי של היום (12:00); on=true מחזיר אותו.',
+    title: 'סרטון התדמית היום',
+    description: 'on=false מדלג על סרטון התדמית האוטומטי של היום (12:00); on=true מחזיר אותו.',
     inputSchema: { on: z.boolean() },
   }, live('noonToday'));
 
   server.registerTool('set_wall_design', {
     title: 'עיצוב הצג',
-    description: 'שינוי עיצוב הצג. noon (מופע צהריים אוטומטי), qr (קודי QR), fx (אפקטי רקע), sway (תנועת מצלמה): true/false. feature: שניות לכתבה מרכזית (6–30). list: שניות לכל ידיעה (2–10). globe: שניות לסיבוב הגלובוס (20–240). globeStyle: "holo" (הולוגרפי) או "real" (ריאליסטי).',
+    description: 'שינוי עיצוב הצג. noon (סרטון תדמית אוטומטי), qr (קודי QR), fx (אפקטי רקע), sway (תנועת מצלמה): true/false. feature: שניות לכתבה מרכזית (6–30). list: שניות לכל ידיעה (2–10). globe: שניות לסיבוב הגלובוס (20–240). globeStyle: "holo" (הולוגרפי) או "real" (ריאליסטי).',
     inputSchema: { changes: DesignPatch, label: z.string().max(80).describe('תיאור קצר בעברית להיסטוריה, למשל "סגנון הגלובוס: ריאליסטי"') },
   }, guard(async (a: { changes: unknown; label: string }) => (await ACTIONS.design({ patch: a.changes, label: a.label }, WHO), 'בוצע')));
 
@@ -165,8 +166,8 @@ function buildServer(): McpServer {
   }, live('urgent'));
 
   server.registerTool('set_event_important', {
-    title: 'אירוע חשוב',
-    description: 'אירוע מנהלת חשוב (important=true) עולה לבד על כל המסך כשהוא מתחיל, ויורד כשהוא נגמר.',
+    title: 'מודעה מנהלת',
+    description: 'מודעה מנהלת (important=true): האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד כשהוא נגמר.',
     inputSchema: { id: idOf, important: z.boolean() },
   }, live('eventImportant'));
 
