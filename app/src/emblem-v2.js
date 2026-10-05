@@ -307,7 +307,8 @@
         const dp = (p, eps) => { if (p.length < 3) return p; const [ax, ay] = p[0], [bx, by] = p[p.length - 1]; const Ln = Math.hypot(bx - ax, by - ay) || 1e-9; let md = 0, mi = 0; for (let i = 1; i < p.length - 1; i++) { const q = Math.abs((bx - ax) * (ay - p[i][1]) - (ax - p[i][0]) * (by - ay)) / Ln; if (q > md) { md = q; mi = i; } } return md > eps ? dp(p.slice(0, mi + 1), eps).slice(0, -1).concat(dp(p.slice(mi), eps)) : [p[0], p[p.length - 1]]; };
         const simp = loops.map((loop) => { let far = 0, fd = 0; for (let i = 1; i < loop.length; i++) { const q = Math.hypot(loop[i][0] - loop[0][0], loop[i][1] - loop[0][1]); if (q > fd) { fd = q; far = i; } } return dp(loop.slice(0, far + 1), 0.6).slice(0, -1).concat(dp(loop.slice(far).concat([loop[0]]), 0.6).slice(0, -1)); });
         let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const l of simp) for (const [x, y] of l) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-        if (!BW) BW = Math.min(2.4, BH * (x1 - x0) / (y1 - y0));   // another text (the English wall's): its own width at the logo's height
+        // Another text (the English wall's): its own proportions, at the logo's height, or narrower and lower when long.
+        if (!BW) { const asp = (x1 - x0) / (y1 - y0); BW = Math.min(2.4, BH * asp); BH = BW / asp; }
         const kx = BW / (x1 - x0), ky = BH / (y1 - y0), mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
         const polys = simp.map((l) => l.map(([x, y]) => [(x - mx) * kx, -(y - my) * ky]));
         const inside = (q, poly) => { let c2 = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > q[1]) !== (yj > q[1]) && q[0] < (xj - xi) * (q[1] - yi) / (yj - yi) + xi) c2 = !c2; } return c2; };

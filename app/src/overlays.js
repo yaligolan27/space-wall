@@ -58,7 +58,7 @@ window.makeWallOverlays = (React) => {
   // ---------- Celebration ----------
   const TITLES = { 'יום הולדת': 'יום הולדת שמח!', 'שחרור': 'בהצלחה בהמשך הדרך!', 'ברוכים הבאים': 'ברוכים הבאים למנהלת!', 'מזל טוב': 'מזל טוב!',
     // the same chips in English (lib/translate.ts FIXED)
-    Birthday: 'Happy Birthday!', Farewell: 'All the best ahead!', Welcome: 'Welcome to the Directorate!', Congratulations: 'Congratulations!' };
+    Birthday: 'Happy Birthday!', Farewell: 'All the best ahead!', Welcome: 'Welcome aboard!', Congratulations: 'Congratulations!' };
   const Celebration = ({ person }) => {
     const p = person;
     return shell([
@@ -72,7 +72,7 @@ window.makeWallOverlays = (React) => {
         h('div', { style: { fontSize: 30, fontWeight: 700, color: '#0a1224', background: p.color, padding: '8px 28px', borderRadius: 999, animation: 'rise .8s ease .6s both' } }, p.type),
         h('div', { style: { fontSize: 120, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', textShadow: `0 0 60px ${p.color}66`, animation: 'rise .9s ease .8s both' } }, TITLES[p.type] || tr('מזל טוב!', 'Congratulations!')),
         h('div', { style: { fontSize: 72, fontWeight: 700, lineHeight: 1.1, animation: 'rise .9s ease 1s both' } }, p.name),
-        h('div', { style: { fontSize: 30, color: '#b3c2dc', fontWeight: 300, animation: 'rise .9s ease 1.2s both' } }, [p.line, tr('כל המנהלת מברכת', 'Warm wishes from the whole Directorate')].filter(Boolean).join(' · ')))
+        h('div', { style: { fontSize: 30, color: '#b3c2dc', fontWeight: 300, animation: 'rise .9s ease 1.2s both' } }, [p.line, tr('כל המנהלת מברכת', 'Warm wishes from all of us at the Israel Space Program Office')].filter(Boolean).join(' · ')))
     ]);
   };
 
@@ -118,7 +118,7 @@ window.makeWallOverlays = (React) => {
           h('div', { style: { position: 'absolute', inset: 30, borderRadius: '50%', border: '1px dashed rgba(111,214,234,.35)', animation: 'spin 30s linear infinite' } }),
           h('div', { style: { position: 'absolute', inset: 110, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #fff, #dfeaf7 60%, #a9c3e2)', boxShadow: `0 0 ${60 + (10 - n) * 12}px rgba(111,214,234,.55)`, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: n === 0 ? 'scale(1.25)' : 'scale(1)', transition: 'transform .9s cubic-bezier(.3,1.4,.5,1), box-shadow .8s ease' } }, h('img', { src: logo, alt: '', style: { width: '82%', height: '82%', objectFit: 'contain' } })),
           h('div', { key: n, dir: 'ltr', style: { position: 'absolute', left: 0, right: 0, bottom: -150, textAlign: 'center', fontFamily: LEX, fontSize: 110, fontWeight: 300, color: n === 0 ? '#d4f25c' : '#fff', animation: 'countPop .9s ease both', fontVariantNumeric: 'tabular-nums' } }, n === 0 ? 'LIFTOFF' : p2(n))),
-        h('div', { style: { fontSize: 40, fontWeight: 700, letterSpacing: '.02em' } }, tr('מנהלת החלל · סרטון תדמית', 'Space Directorate · Promo video')),
+        h('div', { style: { fontSize: 40, fontWeight: 700, letterSpacing: '.02em' } }, tr('מנהלת החלל · סרטון תדמית', 'Israel Space Program Office · Promo video')),
         h('div', { style: { fontFamily: MONO, fontSize: 20, color: '#8b9dbd', letterSpacing: '.2em' } }, '12:00 · DAILY BROADCAST')) : null,
       src ? h('video', { key: 'v', ref: vid, src, preload: 'auto', playsInline: true, onEnded: () => onDone && onDone(), style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000', visibility: playing ? 'visible' : 'hidden', animation: playing ? 'ovIn 1s ease both' : 'none' } }) : null,
       n === 0 && !playing ? h('div', { key: 'fl', style: { position: 'absolute', inset: 0, background: '#fff', animation: 'flash 1.2s ease-out both', pointerEvents: 'none' } }) : null
@@ -130,7 +130,7 @@ window.makeWallOverlays = (React) => {
   const EventTakeover = ({ event, until }) => shell([
     h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'linear-gradient(160deg,#0b1d42 0%,#040914 70%)' } }),
     h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27, padding: 134, boxSizing: 'border-box' } },
-      h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, tr('עכשיו במנהלת', 'Now at the Directorate')),
+      h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, tr('עכשיו במנהלת', 'Happening now')),
       h('span', { style: { fontSize: 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
       h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, event.start + '–' + event.end + (event.place ? ' · ' + event.place : ''))),
     h('span', { key: 'end', style: { position: 'absolute', bottom: 77, [EN() ? 'left' : 'right']: 134, fontSize: 29, color: '#8b9dbd' } }, tr('יורד לבד ב-', 'Until ') + (until ? fmtHM.format(new Date(until)) : event.end))

@@ -312,7 +312,7 @@
       this._embRest = rest;
       return (this._emb = h('div', { style: { position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
         h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } }),
-        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, word: tr('מנהלת החלל', 'SPACE DIRECTORATE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
+        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, word: tr('מנהלת החלל', 'ISRAEL SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
@@ -421,7 +421,7 @@
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
           h('div', { style: { width: 52, height: 52, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
             h('img', { src: '/assets/logo-mark.png', alt: '', style: { width: 44, height: 44, objectFit: 'contain' } })),
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Israel Space Directorate')))),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Israel Space Program Office')))),
         h('div'),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, fontFamily: "'Lexend',sans-serif" } },
           ago ? h('div', { style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, ago.text)) : null,
@@ -464,7 +464,7 @@
 
       const right = h('section', { key: 'r', style: { display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 } },
         h('div', { style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }) },
-          this.sheen(1, 0), panelHead(tr('אירועים', 'Directorate events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))),
+          this.sheen(1, 0), panelHead(tr('אירועים', 'Events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))),
         h('div', { style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
           this.sheen(2, 4.5),
           panelHead(tr('אנשי המנהלת', 'Our people'), D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),
