@@ -25,7 +25,7 @@
     feed: q.get('feed') || '/api/feed',
     key: displayKey(),
     refresh: Math.max(10, num('refresh', 60)),
-    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon
+    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome
     sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
     noonShow: bool('noon', true),
     showQr: bool('qr', true),
@@ -108,6 +108,8 @@
   const PANEL = { position: 'relative', overflow: 'hidden', borderRadius: 26, background: 'linear-gradient(180deg,rgba(40,62,104,.42) 0%,rgba(12,22,44,.6) 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)', transition: 'border-color 1s ease' };
   const PILL = { borderRadius: 999, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' };
   const MUTED = '#8b9dbd';
+  // The welcome screen's way out (overlays.js Welcome): the wall wakes under the logo's white disk, then the screen fades off.
+  const WELCOME_REVEAL_MS = 2000, WELCOME_LEAVE_MS = 3400;
 
   class Wall extends React.Component {
     constructor(p) { super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false }; }
@@ -118,12 +120,15 @@
       this.fit = () => { const s = Math.min(innerWidth / 1920, innerHeight / 1080); if (s > 0) this.setState({ scale: s }); };
       this.fit(); addEventListener('resize', this.fit); this.fitRetry = setTimeout(this.fit, 800);
       this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } }, 1000);
-      this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(); if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'escape') this.setState({ ov: null }); };
+      this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(), ov = this.state.ov;
+        if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome');
+        else if ((k === 'enter' || k === ' ') && ov && ov.kind === 'welcome' && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
+        else if (k === 'escape') this.setState({ ov: null }); };
       addEventListener('keydown', this.onKey);
       this.load();
       this.loadLive(); this.livePoll = setInterval(() => this.loadLive(), CFG.livePoll * 1000);
     }
-    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); removeEventListener('resize', this.fit); }
+    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); clearTimeout(this.revealT); removeEventListener('resize', this.fit); }
     /** A full-screen moment covers the wall once it has faded in (`covered`); until it ends the wall under it rests (render). */
     componentDidUpdate(_, prev) {
       if (!this.state.ov === !prev.ov) return;
@@ -160,7 +165,7 @@
     syncTakeover() {
       const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow();
       // Forget what was shown once the server reports none, so the remote's undo of "back to normal" brings it back.
-      if (!tk) { this._tkSeen = null; if (ov && ov.live) this.setState({ ov: null }); return; }
+      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (ov.kind === 'welcome') this.leaveWelcome(); else this.setState({ ov: null }); } return; }
       if (tk.id === this._tkSeen) return;                // shown already, maybe ended here first: not again
       this._tkSeen = tk.id;
       const until = Date.parse(tk.until) || now + 60e3;
@@ -168,6 +173,16 @@
       if (tk.kind === 'noon') this.setState({ ov: { kind: 'noon', id: tk.id, live: true, until } });
       else if (tk.kind === 'celebrate' && tk.person) this.setState({ ov: { kind: 'celebrate', id: tk.id, live: true, person: tk.person, until } });
       else if (tk.kind === 'event') this.setState({ ov: { kind: 'event', id: tk.id, live: true, event: tk, until } });
+      else if (tk.kind === 'welcome') this.setState({ ov: { kind: 'welcome', id: tk.id, live: true, guest: tk.guest || '', until } });
+    }
+    /** "Enter" on the welcome screen: its way out (overlays.js Welcome), then, under the logo's white disk, the wall
+     *  wakes and makes its entrance (render: `entering`) while the welcome screen fades off it. */
+    leaveWelcome() {
+      const ov = this.state.ov;
+      if (!ov || ov.kind !== 'welcome' || ov.leaving) return;
+      this.setState({ ov: Object.assign({}, ov, { leaving: Date.now(), until: serverNow() + WELCOME_LEAVE_MS }) });
+      clearTimeout(this.revealT);
+      this.revealT = setTimeout(() => this.setState({ enterAt: Date.now() }), WELCOME_REVEAL_MS);
     }
 
     async fetchText(url, ms) {
@@ -219,6 +234,7 @@
     celebratable(today) { const D = this.D; return D ? D.people.filter((p) => p.celebrate !== false && p.on && p.on <= today && today <= addDays(p.on, 2)) : []; }
     /** A moment on request (?demo=, keys L/G/N): real content when there is some, else the sample's; it is a demo. */
     async demo(kind) {
+      if (kind === 'welcome') { const t = serverNow(); return this.setState({ ov: { kind: 'welcome', id: t, demo: true, guest: q.get('guest') || '', until: t + 3600e3 } }); }
       if (kind === 'noon') { const t = serverNow(); return this.setState({ ov: { kind: 'noon', id: t, demo: true, until: t + 15 * 60e3 } }); }
       if (kind !== 'launch' && kind !== 'greeting') return;
       const pick = (S) => (kind === 'launch' ? S.launches : S.people.filter((p) => p.celebrate !== false)) || [];
@@ -259,7 +275,7 @@
     }
     overlay() {
       const ov = this.state.ov, toast = this.state.toast;
-      const k = (ov ? ov.kind + ov.id : '') + '|' + (toast ? toast.until : '');
+      const k = (ov ? ov.kind + ov.id + (ov.leaving ? 'L' : '') : '') + '|' + (toast ? toast.until : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
       const O = this._O || (this._O = window.makeWallOverlays(React));
@@ -271,6 +287,7 @@
       // The remote covers its preview with its own card during the server's 12:00 show, so the preview skips the video.
       if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: mk, src: CFG.preview && ov.live ? '' : (this.D && this.D.promoVideo) || '/assets/promo.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.setState({ ov: null }) });
       if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: mk, event: ov.event, until: ov.until });
+      if (ov && ov.kind === 'welcome') el = h(O.Welcome, { key: mk, guest: ov.guest, leaving: ov.leaving || 0, fx: CFG.ambientFx });
       return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
     }
 
@@ -407,7 +424,11 @@
       const D = this.D, now = this.state.now, t = Date.now() - (this.t0 || Date.now()), nd = new Date(now);
       // Under a full-screen moment the wall rests: its layers are not drawn and the 3D emblem stops, so a lobby computer
       // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
-      const rest = !!this.state.ov && this.state.covered;
+      const ov = this.state.ov, enterAt = this.state.enterAt || 0;
+      const rest = !!ov && this.state.covered && !(ov.leaving && enterAt >= ov.leaving);
+      // Right after the welcome screen: the wall's entrance (each part flies in, the emblem lands with a shock ring).
+      const entering = Date.now() - enterAt < 4500;
+      const en = (name, dur, delay) => (entering ? { animation: `${name} ${dur}s cubic-bezier(.16,1,.3,1) ${delay}s both` } : {});
       const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
         h('div', { dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } },
           h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers),
@@ -417,7 +438,7 @@
       const timeBox = (big, small, extra, smallStyle) => h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },
         h('span', { style: Object.assign({ fontSize: 26, letterSpacing: '.03em' }, extra.big) }, big), h('span', { style: Object.assign({ fontSize: 12, color: MUTED }, smallStyle) }, small));
 
-      const header = h('header', { key: 'hdr', style: { display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 36px', position: 'relative', zIndex: 2 } },
+      const header = h('header', { key: 'hdr', style: Object.assign({ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 36px', position: 'relative', zIndex: 2 }, en('enDown', 1.2, 0.5)) },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
           h('div', { style: { width: 52, height: 52, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
             h('img', { src: '/assets/logo-mark.png', alt: '', style: { width: 44, height: 44, objectFit: 'contain' } })),
@@ -433,7 +454,7 @@
       if (!D) {
         const denied = this.state.feedErr === 401 || this.state.feedErr === 403;
         return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header,
-          h('div', { key: 'e', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem(rest)),
+          h('div', { key: 'e', style: Object.assign({ gridRow: '2 / 4', display: 'flex', minHeight: 0 }, en('enEmblem', 1.8, 0)) }, this.emblem(rest)),
           h('div', { key: 'w', style: { gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 } },
             h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, tr('מתחבר לנתונים…', 'Connecting…')),
             denied ? quiet(tr('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת', 'The wall has no access to its data: check the display key (key) in the address')) : null)]);
@@ -462,7 +483,7 @@
       const panelHead = (title, meta) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
         h('span', { style: { fontSize: 20, fontWeight: 700 } }, title), h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: MUTED, letterSpacing: '.08em' } }, meta));
 
-      const right = h('section', { key: 'r', style: { display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 } },
+      const right = h('section', { key: 'r', style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }, en(EN() ? 'enFromL' : 'enFromR', 1.3, 0.75)) },
         h('div', { style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }) },
           this.sheen(1, 0), panelHead(tr('אירועים', 'Directorate events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))),
         h('div', { style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
@@ -472,9 +493,10 @@
           D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null));
 
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
-        h('div', { style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest)));
+        h('div', { style: Object.assign({ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 }, en('enEmblem', 1.8, 0)) }, this.emblem(rest)),
+        entering ? h('div', { key: 'shock', style: { position: 'absolute', left: '50%', top: '47%', width: 600, height: 600, marginLeft: -300, marginTop: -300, borderRadius: '50%', border: '3px solid rgba(190,235,255,.9)', boxShadow: '0 0 60px rgba(111,214,234,.7), inset 0 0 60px rgba(111,214,234,.4)', pointerEvents: 'none', animation: 'enShock 1.6s cubic-bezier(.2,.8,.3,1) .9s both' } }) : null);
 
-      const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }) },
+      const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, en(EN() ? 'enFromR' : 'enFromL', 1.3, 0.75)) },
         this.sheen(3, 9),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, tr('ניוזלטר החלל השבועי', 'Weekly space newsletter')), h('span', { style: { fontSize: 13, color: MUTED } }, [tr('רקיע · הפורום הישראלי לחלל', 'Rakia · The Israeli Space Forum'), D.issue.range].filter(Boolean).join(' · '))),
@@ -486,7 +508,7 @@
 
       const main = h('main', { key: 'main', style: { display: 'grid', gridTemplateColumns: '470px minmax(0,1fr) 470px', gap: 26, padding: '14px 36px 16px', minHeight: 0, position: 'relative', zIndex: 2 } }, right, center, left);
 
-      const tickerBar = h('div', { key: 'tk', style: { display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' } },
+      const tickerBar = h('div', { key: 'tk', style: Object.assign({ display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' }, en('enUp', 1.2, 1.0)) },
         h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', height: '100%', [EN() ? 'borderRight' : 'borderLeft']: '1px solid rgba(150,190,240,.14)', fontSize: 15, fontWeight: 700 } }, tr('אירועים והזדמנויות', 'Events & opportunities')),
         D.ticker.length ? this.ticker(D) : quiet(tr('אין אירועים או הזדמנויות קרובים', 'No upcoming events or opportunities'), { padding: '0 26px' }));
 
@@ -499,7 +521,7 @@
           h('span', { style: { fontSize: 12, color: MUTED, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, l.vehicle + ' · ' + l.site)),
         h('div', { dir: 'ltr', style: { display: 'flex', gap: 4, flex: 'none' } }, l.segs.map((s, j) => h('div', { key: j, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 34, padding: '5px 3px', borderRadius: 10, background: 'rgba(6,12,26,.7)', border: '1px solid rgba(150,190,240,.12)' } },
           h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 17, fontWeight: 400, color: l.numColor, lineHeight: 1.1 } }, s.v), h('span', { style: { fontSize: 10, color: '#6f82a6' } }, s.u))))));
-      const footer = h('footer', { key: 'ft', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
+      const footer = h('footer', { key: 'ft', style: Object.assign({ display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 }, en('enUp', 1.2, 1.15)) },
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
         launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), { gridColumn: '2 / -1' }));
 

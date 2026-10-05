@@ -106,7 +106,7 @@ const compact = (o: Row) => Object.fromEntries(Object.entries(o).filter(([, v]) 
 export function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string): string {
   const now = new Date(s.now), byId = new Map(s.people.map(p => [p.id, p]));
   const tk = s.takeover as Row | null;
-  const tkText = !tk ? null : (tk.kind === 'noon' ? 'סרטון תדמית' : tk.kind === 'event' ? 'מודעה מנהלת: ' + tk.title : 'מודעה אישית: ' + (tk.person?.name || '') + (tk.type ? ' · ' + tk.type : ''))
+  const tkText = !tk ? null : (tk.kind === 'noon' ? 'סרטון תדמית' : tk.kind === 'welcome' ? 'מסך ברוכים הבאים, עד שלוחצים "כניסה לצג הבית" (end)' : tk.kind === 'event' ? 'מודעה מנהלת: ' + tk.title : 'מודעה אישית: ' + (tk.person?.name || '') + (tk.type ? ' · ' + tk.type : ''))
     + ' (עד ' + timeIL(new Date(tk.until)) + ')';
   const data = {
     screen: {
@@ -344,17 +344,19 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'show_fullscreen',
-    description: 'הצגה עכשיו על כל המסך. noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. end: חזרה לתצוגה הרגילה.',
+    description: 'הצגה עכשיו על כל המסך. welcome: מסך "WELCOME TO THE ISRAELI SPACE PROGRAM OFFICE" לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה (guest: שורה אופציונלית מתחת לכותרת, למשל "Delegation of Japan"). noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. end: חזרה לתצוגה הרגילה.',
     input_schema: obj({
-      what: { type: 'string', enum: ['noon', 'celebration', 'event', 'end'] },
+      what: { type: 'string', enum: ['welcome', 'noon', 'celebration', 'event', 'end'] },
+      guest: { type: 'string', description: 'למסך ברוכים הבאים: למי (לא חובה)' },
       person_id: id('למודעת יום הולדת'), life_event_id: id('למודעה על שמחה'), event_id: id('לאירוע מלוח האירועים'),
     }, ['what']),
     async run(a, ctx) {
-      if (a.what === 'noon') await ACTIONS.noon({}, ctx.who);
+      if (a.what === 'welcome') await ACTIONS.welcome({ guest: a.guest || undefined }, ctx.who);
+      else if (a.what === 'noon') await ACTIONS.noon({}, ctx.who);
       else if (a.what === 'end') await ACTIONS.endTakeover({}, ctx.who);
       else if (a.what === 'event') await ACTIONS.showEvent({ eventId: a.event_id }, ctx.who);
       else if (a.what === 'celebration') await ACTIONS.celebrate({ personId: a.person_id, lifeId: a.life_event_id }, ctx.who);
-      else throw new Error('what: noon, celebration, event או end');
+      else throw new Error('what: welcome, noon, celebration, event או end');
       return ok();
     },
   },

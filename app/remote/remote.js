@@ -424,6 +424,7 @@
     tkTitle(tk) {
       if (!tk) return '';
       if (tk.kind === 'noon') return 'סרטון תדמית';
+      if (tk.kind === 'welcome') return 'ברוכים הבאים' + (tk.guest ? ' · ' + tk.guest : '');
       if (tk.kind === 'event') return tk.title;
       return tpl(tk.type || (tk.person && tk.person.type)).head + (tk.person ? ' · ' + tk.person.name : '');
     }
@@ -448,7 +449,8 @@
     showNoon() { this.run('noon', {}, 'הופעל סרטון התדמית').catch(() => {}); }
     showCeleb(x) { this.run('celebrate', { personId: x.person.free ? null : x.person.id, lifeId: x.lifeId }, 'מודעה אישית על כל המסך: ' + dn(x.person)).catch(() => {}); }
     showEvent(e) { this.run('showEvent', { eventId: e.id }, 'על כל המסך: ' + e.title).catch(() => {}); }
-    endTk() { this.run('endTakeover', {}, 'חזרה לתצוגה רגילה').catch(() => {}); }
+    endTk() { const w = (this.takeover() || {}).kind === 'welcome'; this.run('endTakeover', {}, w ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה').catch(() => {}); }
+    showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
     async saveLife(showNow) {
       const sh = this.state.sheet, f = sh.f, per = this.P(f.personId), name = (f.name || '').replace(/\s+/g, ' ').trim();
       if (!per && name.length < 2) return this.toast('כתבו למי השמחה');
@@ -740,6 +742,7 @@
       const nl = D && D.newsletter;
       const actGroups = [
         { title: 'להציג עכשיו על כל המסך', items: [
+          { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
           { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : 'עולה לבד ב-12:00', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
           { label: 'מודעה אישית', sub: cel.length ? 'היום: ' + dn(cel[0].person) + (cel.length > 1 ? ' ועוד ' + (cel.length - 1) : '') : 'אין מודעות אישיות היום', dot: WARM, bg: 'rgba(233,184,114,.09)', border: 'rgba(233,184,114,.4)', go: () => this.openSheet('celebrate') },
           { label: 'מודעה מנהלת', sub: nextEv ? nextEv.title : 'בחירה מלוח האירועים', dot: ICE, bg: 'rgba(159,220,255,.09)', border: 'rgba(159,220,255,.4)', go: () => this.openSheet('eventShow') }] },
@@ -778,7 +781,8 @@
         opIni: (s.who || '?')[0], canUndo: !!last, lastLabel: last ? 'ביטול: ' + last.text : '', undoLast: () => last && this.restore(last.id),
         openHistory: () => this.openSheet('history'),
 
-        tkOn: !!tk, tkTitle: this.tkTitle(tk), tkRemain: tk ? 'נותרו ' + mmss(remain) : '', endTk: () => this.endTk(),
+        tkOn: !!tk, tkTitle: this.tkTitle(tk), tkRemain: tk && tkK !== 'welcome' ? 'נותרו ' + mmss(remain) : '', endTk: () => this.endTk(),
+        tkEndLabel: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'חזרה לתצוגה רגילה', tkWelcome: tkK === 'welcome', tkGuest: tkK === 'welcome' ? tk.guest || '' : '',
         tkNoon: tkK === 'noon', tkCeleb: tkK === 'celebrate', tkEvent: tkK === 'event',
         tkPct: tk ? Math.max(0, Math.min(100, (now.getTime() - t0) / (Date.parse(tk.until) - t0) * 100)).toFixed(1) + '%' : '0%',
         tkAv: tkK === 'celebrate' ? { bg: tkP ? colorFor(tkP) : OFF, ini: initials(tkP ? tkP.name : tk.person.name), photoEl: tk.person.photo ? imgEl(tk.person.photo, COVER) : null } : { bg: OFF, ini: '', photoEl: null },
@@ -858,9 +862,9 @@
 
         sheetOn: !!sh, closeSheet: () => this.closeSheet(), sheetBackdrop: (e) => { if (e.target === e.currentTarget) this.closeSheet(); },
         sheetAlign: small ? 'flex-end' : 'center', sheetPad: small ? '0' : '24px', sheetRadius: small ? '20px 20px 0 0' : '20px', sheetMaxH: small ? '92vh' : '88vh',
-        sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', history: 'היסטוריית שינויים',
+        sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', welcome: 'מסך ברוכים הבאים', history: 'היסטוריית שינויים',
           person: sh && sh.mode === 'edit' ? 'פרטי ' + [f.first, f.last].filter(Boolean).join(' ') : 'אדם חדש ברשימה', import: 'ייבוא אנשים מקובץ', ticker: sh && sh.mode === 'edit' ? 'עריכה ברצועת האירועים' : 'אירוע או הזדמנות לרצועה' }[kind] || '',
-        shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shHistory: kind === 'history',
+        shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shWelcome: kind === 'welcome', shHistory: kind === 'history',
         shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker',
         openLifeNew: () => this.openLife(), openEventNew: () => this.openEvent(),
         showEvents: evShowList.map((e) => { const live = tk && tk.eventId === e.id; const d = parse(e.date);
@@ -949,6 +953,8 @@
         tiEdit: kind === 'ticker' && sh.mode === 'edit', saveTicker: () => this.saveTicker(), deleteTicker: () => this.delTicker(f),
 
         urInput: f.text || '', setUrInput: this.fv('text'),
+        wlInput: f.guest || '', setWlInput: this.fv('guest'),
+        sendWl: () => { this.showWelcome((f.guest || '').trim()); this.closeSheet(); },
         sendUr: () => { const t = (f.text || '').trim(); if (!t) return this.toast('כתבו את ההודעה'); this.run('urgent', { text: t }, 'שודרה הודעה דחופה').catch(() => {}); this.closeSheet(); },
 
         histRows: history.map((x) => ({ key: x.id, t: ago(x.at), who: x.who, text: x.text, canRestore: x.canRestore, restore: () => { this.restore(x.id); this.closeSheet(); } })),
@@ -1028,7 +1034,8 @@
           el('span', 'width:9px;height:9px;border-radius:50%;background:#d4f25c;flex:none'),
           el('span', 'font-size:15px;font-weight:600', null, 'על כל המסך: ' + v.tkTitle),
           el('span', "font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b9dbd", null, v.tkRemain)),
-        el('button', 'flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid rgba(212,242,92,.6);background:transparent;color:#d4f25c;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap', { onClick: v.endTk }, 'חזרה לתצוגה רגילה')) : null;
+        el('button', v.tkWelcome ? 'flex:none;min-height:48px;padding:0 20px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:800;cursor:pointer;white-space:nowrap;box-shadow:0 0 24px rgba(212,242,92,.35)'
+          : 'flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid rgba(212,242,92,.6);background:transparent;color:#d4f25c;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap', { onClick: v.endTk }, v.tkEndLabel)) : null;
       const urBanner = v.urgentOn ? el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px 10px 16px;border-radius:14px;background:#3a0f14;border:1px solid #ff7a6b', null,
         el('div', 'display:flex;align-items:center;gap:10px;min-width:0', null, el('span', 'width:9px;height:9px;border-radius:50%;background:#ff7a6b;flex:none'), el('span', 'font-size:15px;font-weight:600', null, 'הודעה דחופה משודרת: ' + v.urgentText)),
         el('button', 'flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid #ff7a6b;background:transparent;color:#ffd6d0;font-size:14px;cursor:pointer;white-space:nowrap', { onClick: v.clearUr }, 'הסרה')) : null;
@@ -1047,6 +1054,11 @@
               el('span', 'font-size:5.4cqw;font-weight:800', null, 'סרטון תדמית'),
               el('span', 'font-size:1.7cqw;color:#8b9dbd', null, 'סרטון התדמית · מנהלת החלל'),
               el('div', 'position:absolute;left:6cqw;right:6cqw;bottom:5cqw;height:.45cqw;border-radius:1cqw;background:rgba(150,190,240,.2);overflow:hidden', null, el('div', { height: '100%', width: v.tkPct, background: '#d4f25c' }))) : null,
+            v.tkWelcome ? el('div', 'position:absolute;inset:0;direction:ltr;background:radial-gradient(ellipse at 50% 40%, #142a55 0%, #020611 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.6cqw;text-align:center', null,
+              el('img', 'width:9cqw;height:9cqw;border-radius:50%;background:#eef5fd;object-fit:contain;padding:.8cqw;box-sizing:border-box;box-shadow:0 0 3cqw rgba(111,214,234,.6);margin-bottom:1.4cqw', { src: '/assets/logo-mark.png', alt: '' }),
+              el('span', "font-family:'IBM Plex Mono',monospace;font-size:1.7cqw;letter-spacing:.5em;color:#9fdcff", null, 'WELCOME TO'),
+              el('span', "font-family:'Lexend',sans-serif;font-size:5cqw;font-weight:600;line-height:1.05", null, 'THE ISRAELI SPACE', el('br'), 'PROGRAM OFFICE'),
+              v.tkGuest ? el('span', "font-family:'Lexend',sans-serif;font-size:2cqw;color:#d4f25c;margin-top:.6cqw", { dir: 'auto' }, v.tkGuest) : null) : null,
             v.tkCeleb ? el('div', 'position:absolute;inset:0;direction:rtl;background:radial-gradient(circle at 50% 40%, #1b2f5c 0%, #040914 72%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.8cqw;text-align:center;padding:4cqw;box-sizing:border-box', null,
               el('div', `position:relative;width:12cqw;height:12cqw;border-radius:50%;overflow:hidden;background:${v.tkAv.bg};color:#040914;display:flex;align-items:center;justify-content:center;font-size:4.2cqw;font-weight:800;box-shadow:0 0 0 .5cqw ${v.tkColor}`, null, v.tkAv.ini, v.tkAv.photoEl),
               el('span', `margin-top:1cqw;font-size:2.2cqw;font-weight:700;letter-spacing:.06em;color:${v.tkColor}`, null, v.tkHead),
@@ -1303,6 +1315,12 @@
               el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;text-align:left', { value: v.nlInput, onChange: v.setNlInput, placeholder: 'https://…', dir: 'ltr', type: 'url' }),
               el('span', 'font-size:12px;color:#8b9dbd', null, 'הכתבות, האירועים וקודי ה-QR נשאבים מהדף. גיליון חדש מיובא גם לבד כל בוקר.')),
             el('button', 'min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.importNl }, v.nlBtn)) : null,
+          v.shWelcome ? h(React.Fragment, null,
+            el('span', 'font-size:14px;color:#8b9dbd;line-height:1.5', null, 'הצג יציג בגדול "WELCOME TO THE ISRAELI SPACE PROGRAM OFFICE" עם אנימציות, עד שלוחצים כאן בשלט "כניסה לצג הבית". אז הלוגו נכנס והצג הרגיל עולה באנימציה.'),
+            el('div', 'display:flex;flex-direction:column;gap:6px', null,
+              el('span', 'font-size:13px;color:#8b9dbd', null, 'שורה מתחת לכותרת (לא חובה)'),
+              el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px', { value: v.wlInput, onChange: v.setWlInput, maxLength: 80, placeholder: 'לדוגמה: Delegation of Japan', dir: 'auto' })),
+            el('button', 'min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.sendWl }, 'הצגה על כל המסך')) : null,
           v.shUrgent ? h(React.Fragment, null,
             el('span', 'font-size:14px;color:#8b9dbd', null, 'פס אדום בראש הצג, עד שמסירים אותו.'),
             el('textarea', 'resize:vertical;box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;line-height:1.5', { value: v.urInput, onChange: v.setUrInput, rows: 3, maxLength: 200, placeholder: 'לדוגמה: תרגיל פינוי ב-11:00, נא להתכנס ברחבה' }),
