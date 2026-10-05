@@ -163,8 +163,11 @@
       if (this.state.wl && !this.wl) { this.clearLeave(); this.setState({ wl: null }); }
       // A welcome just came up: ask the remote often from now on, so "enter" starts at once.
       if (isWelcome(ov) && !isWelcome(prev.ov) && ov.live && !CFG.preview) this.pollLive();
-      // Data held back during the entrance, once it is over (or cut short).
-      if (this._pendingData && !(isWelcome(ov) && ov.leaving)) { const d = this._pendingData; this._pendingData = null; this.resetCaches(); this.setState({ data: d }); }
+      // Design and data held back during the entrance, once it is over (or cut short); data in the old language is dropped.
+      if (!(isWelcome(ov) && ov.leaving)) {
+        if (this._pendingDesign) { const d = this._pendingDesign; this._pendingDesign = null; if (this.design(d)) this._pendingData = null; this.setState({ now: serverNow() }); }
+        if (this._pendingData) { const d = this._pendingData; this._pendingData = null; this.resetCaches(); this.setState({ data: d }); }
+      }
       if (!ov === !prev.ov && (!ov || ov.kind === prev.ov.kind)) return;
       clearTimeout(this.coverT);
       if (ov) this.coverT = setTimeout(() => this.setState({ covered: true }), isWelcome(ov) ? WL.COVER : 1200);
@@ -196,11 +199,18 @@
         // A new deployment counts once it has answered twice in a row; '' (unknown) never does.
         if (L.build && !this._build) this._build = L.build;
         this._newBuild = L.build && L.build !== this._build ? (this._newBuild || 0) + 1 : 0;
-        const lang = CFG.lang;
-        if (L.design && applyDesign(L.design)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ambFx = undefined; this._ovK = null; }
-        if (CFG.lang !== lang) { this._lastBody = null; clearTimeout(this.poll); this.poll = setTimeout(() => this.load(), 0); }
+        // Not during a welcome's entrance: its emblem lands in the slot of the layout it started with (applied after it).
+        if (L.design) { if (isWelcome(this.state.ov) && this.state.ov.leaving) this._pendingDesign = L.design; else { this._pendingDesign = null; this.design(L.design); } }
         this.setState({ live: L, now: serverNow() }, () => this.syncTakeover());
       } catch (e) { /* liveOk lapses by itself */ } finally { this._liveBusy = false; }
+    }
+    /** The remote's design (applyDesign), with what it changes drawn anew. True when the language changed. */
+    design(d) {
+      const lang = CFG.lang;
+      if (applyDesign(d)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ambFx = undefined; this._ovK = null; }
+      if (CFG.lang === lang) return false;
+      this._lastBody = null; clearTimeout(this.poll); this.poll = setTimeout(() => this.load(), 0);
+      return true;
     }
     /** A full-screen moment from the remote (or an important event / the 12:00 show, decided by the server). */
     syncTakeover() {
@@ -215,7 +225,9 @@
       if (wlUp && ov.leaving) return;                    // anything new waits (not marked seen) until the entrance is over
       if (seen === this._tkSeen) return;                 // shown already, maybe ended here first: not again
       this._tkSeen = seen;
-      if (tk.kind === 'welcome' && tk.leaving) return;   // opened mid-entrance: just the home wall
+      // Seen first on its way out (opened mid-entrance, or "enter" pressed between two looks): just the home wall, after
+      // the entrance of whatever welcome is up here.
+      if (tk.kind === 'welcome' && tk.leaving) { if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else this.setState({ ov: null }); } return; }
       const until = Date.parse(tk.until) || now + 60e3;
       if (until <= now) return;
       if (tk.kind === 'noon') this.setState({ ov: { kind: 'noon', id: tk.id, live: true, until } });
@@ -256,7 +268,14 @@
       this.clearLeave();
       const id = ov.id, at = (ms, fn) => this._wlT.push(setTimeout(() => { const o = this.state.ov; if (isWelcome(o) && o.id === id) fn(); }, Math.max(0, t0 + ms - performance.now())));
       this.setState({ ov: Object.assign({}, ov, { leaving: t0, until: serverNow() + (t0 - now) + WL.DONE + 8000 }), wl: { id, t0, mode, target } });
-      at(WL.WAKE, () => { this._wlWakeAt = Date.now(); this.setWl({ woke: true }); });
+      at(WL.WAKE, () => { this._wlWakeAt = Date.now(); this.setWl({ woke: true }, () => {
+        // The slot as the wall really lays it out (the remote's style layer may move or size the emblem): the camera
+        // move, which starts at 1 s, lands there.
+        const box = this.embBox(), wl = this.state.wl;
+        if (!box || !wl || wl.id !== id) return;
+        const t = window.wallGeo.landing(box), o = wl.target;
+        if (Math.abs(t.tx - o.tx) > 0.5 || Math.abs(t.ty - o.ty) > 0.5 || Math.abs(t.s - o.s) > 0.001) this.setWl({ target: t });
+      }); });
       // The wall's emblem shows once it has drawn a fresh frame (a slow computer may need a moment), at EMB_SHOW at the
       // earliest and EMB_SHOW_CAP after it at the latest; the welcome's hand-off starts from whenever that is.
       let fresh = false, due = false;
@@ -273,6 +292,13 @@
       at((mode === 'none' ? 3000 : WL.EMB_SHOW) + WL.EMB_SHOW_CAP, () => { fresh = true; show(); });
       at(WL.SETTLE, () => this.setWl({ settled: true }));
       at(WL.DONE, () => { this._wlDoneDue = true; this.maybeFinishWl(); });
+    }
+    /** The wall emblem's box on the stage (1920×1080 px) as laid out now, or null (not laid out). */
+    embBox() {
+      const e = this.embEl, st = e && e.closest('[data-w="stage"]');
+      if (!st) return null;
+      const a = e.getBoundingClientRect(), b = st.getBoundingClientRect(), k = b.width / 1920;
+      return a.width && a.height && k ? { x: (a.left - b.left) / k, y: (a.top - b.top) / k, w: a.width / k, h: a.height / k } : null;
     }
     maybeFinishWl() {
       const wl = this.state.wl;
@@ -398,7 +424,7 @@
     overlay() {
       const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
       const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) : '') + '|' + (toast ? toast.until : '')
-        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, CFG.ambientFx, CFG.lang].join('|') : '');
+        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
       const O = this._O || (this._O = window.makeWallOverlays(React));

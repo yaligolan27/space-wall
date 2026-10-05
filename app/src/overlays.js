@@ -338,6 +338,9 @@ window.makeWallOverlays = (React) => {
       return () => { el.removeEventListener('emblem-ready', onReady); el.removeEventListener('emblem-error', onErr); };
     }, []);
 
+    // a guest's name changed after the reveal comes in at once, whatever it is (even the first one again)
+    useEffect(() => { if (r.g0 !== undefined && guest !== r.g0) r.g0 = null; }, [guest]);
+
     // ---- the way out: every step from one start time, as compositor animations (WAAPI) on the outer wrappers
     useEffect(() => {
       if (!leaving) return;
@@ -359,12 +362,7 @@ window.makeWallOverlays = (React) => {
       run(r.caption, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-40px)' }], 500, 700, 'ease-in');
       [['eyebrowO', 600], ['line1O', 750], ['glowO', 825], ['line2O', 900], ['guestO', 1100], ['heO', 1200]].forEach(([n, T]) => run(r[n], WL_OUT, T, 2400, WL_OUT_EASE));
       run(r.ruleO, [{ transform: 'none', opacity: 1 }, { transform: 'scaleX(0)', opacity: 0 }], 1000, 900, 'cubic-bezier(.55,0,.85,.35)', 'left center');
-      // the camera move: three axes, three curves, so the path bends; it lands exactly on the wall's emblem
-      const tg = target || GEO.landing(GEO.SLOT_DATA);
       if (r.rigFloat) { const cur = getComputedStyle(r.rigFloat).transform; r.rigFloat.style.animation = 'none'; r.rigFloat.style.transform = cur === 'none' ? '' : cur; run(r.rigFloat, [{ transform: cur === 'none' ? 'none' : cur }, { transform: 'none' }], 1000, 1200, 'ease-in-out'); }
-      run(r.rigX, [{ transform: 'none' }, { transform: `translateX(${tg.tx}px)` }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');
-      run(r.rigS, [{ transform: 'none' }, { transform: `scale(${tg.s})` }], 1400, 6600, 'cubic-bezier(.5,0,.2,1)');
-      run(r.rigY, [{ transform: 'none' }, { transform: `translateY(${tg.ty}px)` }], 1600, 6400, 'cubic-bezier(.55,0,.2,1)');
       if (!skyFx) run(r.skyO, [{ transform: 'none' }, { transform: 'translateX(-120px)' }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');   // a still sky moves as one
       // English: the name that just left the screen lands in the logo (if the emblem has the English name: see wordFits)
       later(at(1600), () => { if (r.hero && EN() && A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')) r.hero.setAttribute('wordmark', 'up'); });
@@ -380,6 +378,18 @@ window.makeWallOverlays = (React) => {
       run(r.ripple, [{ opacity: 0.4, transform: 'scale(.69)' }, { opacity: 0, transform: 'none' }], 8400, 1200, 'cubic-bezier(.2,.8,.3,1)', undefined, 'forwards');
       return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
     }, [leaving]);
+    // the camera move: three axes, three curves, so the path bends; it lands exactly on the wall's emblem (the wall
+    // measures its slot once it is laid out under the welcome, before the move starts: a new target starts it over)
+    const tgKey = target ? [target.tx, target.ty, target.s].join() : '';
+    useEffect(() => {
+      if (!leaving) return;
+      const tg = target || GEO.landing(GEO.SLOT_DATA), anims = [];
+      const run = (el, kf, T, dur, easing) => { if (el) anims.push(el.animate(kf, { delay: T - (performance.now() - leaving), duration: dur, easing, fill: 'both' })); };
+      run(r.rigX, [{ transform: 'none' }, { transform: `translateX(${tg.tx}px)` }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');
+      run(r.rigS, [{ transform: 'none' }, { transform: `scale(${tg.s})` }], 1400, 6600, 'cubic-bezier(.5,0,.2,1)');
+      run(r.rigY, [{ transform: 'none' }, { transform: `translateY(${tg.ty}px)` }], 1600, 6400, 'cubic-bezier(.55,0,.2,1)');
+      return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
+    }, [leaving, tgKey]);
     // the flat disc (no hero) leaves with the words; one that came up after the way out began (the hero failed) too
     useEffect(() => {
       if (!leaving || heroOk || !r.discO || r.discO._out) return;
