@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db, must } from './db.js';
 import { addDays, isoDateIL, timeIL } from './dates.js';
-import { birthdayCard, displayName, lifeCard } from './feed.js';
+import { birthdayCard, buildFeed, displayName, lifeCard } from './feed.js';
 import { DATE, TIME, PERSON_KINDS, NewsletterContent, assertRealDate, ilToIso, importNewsletter } from './wall-ops.js';
 import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from './newsletter.js';
 import { storeNewsletterImages } from './newsletter-images.js';
@@ -17,11 +17,12 @@ async function fetchText(url: string): Promise<string> {
 }
 
 // ---- design (the wall's URL options, now stored) ----------------------------------------------------
-export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true };
+export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en' };
 export const DesignPatch = z.object({
   noon: z.boolean(), qr: z.boolean(), fx: z.boolean(), sway: z.boolean(),
   feature: z.number().int().min(6).max(30), list: z.number().int().min(2).max(10), globe: z.number().int().min(20).max(240),
   globeStyle: z.enum(['holo', 'real']),
+  lang: z.enum(['he', 'en']).describe('שפת הצג: en = כל הצג באנגלית (למשלחות), he = עברית'),
 }).partial().strict();
 
 const NOON_MS = 150e3;            // 10 s countdown + the 107 s promo, with a margin
@@ -502,9 +503,16 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     await record(who, 'בהירות ' + value + '%', [await patchState({ brightness: value }, who)]);
   },
   async design(a, who) {
-    const { patch, label } = z.object({ patch: DesignPatch, label: z.string().max(80) }).parse(a);
+    const { patch, label, warm } = z.object({ patch: DesignPatch, label: z.string().max(80), warm: z.boolean().default(true) }).parse(a);
     const cur = (await wallState()).design || {};
     await record(who, label, [await patchState({ design: { ...cur, ...patch } }, who)]);
+    // Switching to English translates what the wall shows now, so it comes up in English at once (the remote waits;
+    // the agent, with its own time limit, doesn't, and the wall translates on its next feed request).
+    if (warm && patch.lang === 'en' && cur.lang !== 'en') {
+      const { feedInEnglish } = await import('./translate.js');
+      const { translated } = await feedInEnglish(await buildFeed(), 40e3);
+      return { lang: 'en', missing: translated.missing, error: translated.error };
+    }
   },
   async resetDesign(_a, who) {
     await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: {} }, who)]);

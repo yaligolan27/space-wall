@@ -46,10 +46,11 @@
   const initials = (n) => String(n || '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('');
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 
-  const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true };
+  const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he' };
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'ברכה'], ['noon', 'מופע צהריים'], ['launch', 'שיגור']];
   const SPEC = [
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
+    { title: 'שפה', controls: [{ key: 'lang', label: 'שפת הצג (השלט נשאר בעברית)', kind: 'seg', options: [['he', 'עברית'], ['en', 'English']] }] },
     { title: 'רגעים', controls: [{ key: 'noon', label: 'מופע צהריים אוטומטי ב-12:00', kind: 'toggle' }] },
     { title: 'תוכן', controls: [{ key: 'qr', label: 'קודי QR לכתבות', kind: 'toggle' }] },
     { title: 'תנועה', controls: [
@@ -377,7 +378,7 @@
     buildSrc() {
       const D = this.D; if (!D) return '';
       const d = this.design();
-      const q = new URLSearchParams({ noon: d.noon ? '1' : '0', qr: d.qr ? '1' : '0', feature: String(d.feature), list: String(d.list), fx: d.fx ? '1' : '0', globe: String(d.globe), globeStyle: d.globeStyle, sway: d.sway ? '1' : '0', preview: '1' });
+      const q = new URLSearchParams({ noon: d.noon ? '1' : '0', qr: d.qr ? '1' : '0', feature: String(d.feature), list: String(d.list), fx: d.fx ? '1' : '0', globe: String(d.globe), globeStyle: d.globeStyle, sway: d.sway ? '1' : '0', lang: d.lang === 'en' ? 'en' : 'he', preview: '1' });
       if (this.state.studio && this.state.demo !== 'off') q.set('demo', this.state.demo);
       if (D.config && D.config.displayKey) q.set('key', D.config.displayKey);
       return '/?' + q.toString();
@@ -579,8 +580,22 @@
       finally { this.setState({ nlBusy: false }); }
     }
     setDesign(k, v, label) {
+      if (k === 'lang') return this.setLang(v);
       this.setState((s) => ({ design: Object.assign({}, s.design || {}, { [k]: v }) }));
       this.run('design', { patch: { [k]: v }, label: LABEL[k] + ': ' + label }, LABEL[k] + ': ' + label).catch(() => {}).finally(() => this.setState({ design: null }));
+    }
+    /** The whole wall in English (for visiting delegations) or back to Hebrew. Switching to English waits while the
+     *  server translates what the wall shows now, so it comes up in English at once. */
+    setLang(v) {
+      if (this.state.langBusy) return;
+      const en = v === 'en';
+      this.setState((s) => ({ langBusy: en, design: Object.assign({}, s.design || {}, { lang: v }) }));
+      const said = (r) => !en ? 'הצג חוזר לעברית'
+        : r && r.error === 'no-key' ? 'הצג עבר לאנגלית, אבל התוכן המתחלף יישאר בעברית: לתרגום צריך את מפתח ה-API של הסוכן'
+        : r && r.missing ? 'הצג עבר לאנגלית. חלק מהתוכן עוד מתורגם ויתחלף בדקות הקרובות'
+        : 'הצג עבר לאנגלית';
+      this.run('design', { patch: { lang: v }, label: en ? 'הצג באנגלית (משלחת)' : 'הצג חזר לעברית' }, said).catch(() => {})
+        .finally(() => this.setState({ design: null, langBusy: false }));
     }
     slideDesign(k, v, unit) {
       this.setState((s) => ({ design: Object.assign({}, s.design || {}, { [k]: v }) }));
@@ -734,6 +749,7 @@
           { label: 'ניוזלטר השבוע', sub: nl && nl.range ? 'בצג: ' + nl.range : 'עדיין לא יובא גיליון', dot: LIME, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('newsletter', { url: '' }) },
           { label: 'אנשי המנהלת', sub: activeP.length ? activeP.length + ' ברשימה · הוספה, עריכה וייבוא' : 'הרשימה ריקה · הוספה או ייבוא מאקסל', dot: WARM, bg: 'rgba(14,28,58,.55)', border: activeP.length ? 'rgba(150,190,240,.16)' : 'rgba(233,184,114,.45)', go: () => this.goPeople() }] },
         { title: 'עוד', items: [
+          { label: design.lang === 'en' ? 'חזרה לעברית' : 'הצג באנגלית', sub: s.langBusy ? 'מתרגם את הצג…' : design.lang === 'en' ? 'הצג מוצג עכשיו באנגלית' : 'כל הצג באנגלית, למשלחות מחו״ל', dot: '#7fe0c4', bg: design.lang === 'en' ? 'rgba(127,224,196,.09)' : 'rgba(14,28,58,.55)', border: design.lang === 'en' ? 'rgba(127,224,196,.45)' : 'rgba(150,190,240,.16)', go: () => this.setLang(design.lang === 'en' ? 'he' : 'en') },
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
           { label: 'עיצוב הצג', sub: 'גלובוס ' + (design.globeStyle === 'real' ? 'ריאליסטי' : 'הולוגרפי') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
       ];

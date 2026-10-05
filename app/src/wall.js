@@ -39,17 +39,23 @@
     live: q.get('live') || '/api/live',
     livePoll: Math.max(3, num('livePoll', 5)),
     preview: bool('preview', false),               // embedded in the remote: muted, no keyboard
+    lang: q.get('lang') === 'en' ? 'en' : 'he',    // en: the whole wall in English (the remote's switch, for delegations)
   };
   // Stored design (from the remote) → CFG, except where the URL sets the option explicitly.
-  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway' };
+  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang' };
   function applyDesign(d) {
     let changed = false;
     for (const k in DESIGN_KEYS) {
       if (q.has(k) || d[k] === undefined) continue;
       if (CFG[DESIGN_KEYS[k]] !== d[k]) { CFG[DESIGN_KEYS[k]] = d[k]; changed = true; }
     }
+    window.wallLang = CFG.lang;                    // overlays.js reads it
     return changed;
   }
+  window.wallLang = CFG.lang;
+  // English (CFG.lang 'en'): the wall's own words here; what changes comes translated from /api/feed?lang=en.
+  const EN = () => CFG.lang === 'en';
+  const tr = (he, en) => (EN() ? en : he);
 
   // ---- time, fetches, reloads --------------------------------------------------------------------
   // The server's clock (from /api/live's `at`): a kiosk whose own clock drifts still opens and closes moments on time.
@@ -93,7 +99,8 @@
 
   const fmtIL = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   const fmtUTC = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false });
-  const fmtDate = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long' });
+  const fmtDateHe = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long' });
+  const fmtDateEn = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long' });
   const fmtWhen = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
   const fmtParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
@@ -143,7 +150,9 @@
         // A new deployment counts once it has answered twice in a row; '' (unknown) never does.
         if (L.build && !this._build) this._build = L.build;
         this._newBuild = L.build && L.build !== this._build ? (this._newBuild || 0) + 1 : 0;
+        const lang = CFG.lang;
         if (L.design && applyDesign(L.design)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ovK = null; }
+        if (CFG.lang !== lang) { this._lastBody = null; clearTimeout(this.poll); this.poll = setTimeout(() => this.load(), 0); }
         this.setState({ live: L, now: serverNow() }, () => this.syncTakeover());
       } catch (e) { /* liveOk lapses by itself */ } finally { this._liveBusy = false; }
     }
@@ -163,7 +172,7 @@
 
     async fetchText(url, ms) {
       const sep = url.includes('?') ? '&' : '?';
-      const res = await fetch(url + sep + 't=' + Date.now() + (CFG.key ? '&key=' + encodeURIComponent(CFG.key) : ''), { cache: 'no-store', signal: timeout(ms) });
+      const res = await fetch(url + sep + 't=' + Date.now() + (CFG.key ? '&key=' + encodeURIComponent(CFG.key) : '') + (EN() ? '&lang=en' : ''), { cache: 'no-store', signal: timeout(ms) });
       if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
       return res.text();
     }
@@ -172,8 +181,13 @@
       if (this._loading) return;
       this._loading = true;
       let wait = CFG.refresh;
+      const lang = CFG.lang;
       try {
         const body = await this.fetchText(CFG.sample ? '/data/feed.json' : CFG.feed, 20e3);
+        // The language changed while this was on its way: ask again in the new one.
+        if (lang !== CFG.lang) { wait = 0; return; }
+        // English with some text still being translated (it shows in Hebrew meanwhile): look again soon.
+        if (EN() && /"missing":[1-9]/.test(body)) wait = Math.min(wait, 15);
         if (body !== this._lastBody) {
           const data = JSON.parse(body);
           if (!Array.isArray(data.news) || !Array.isArray(data.people)) throw new Error('feed is not in the v4 shape');
@@ -218,7 +232,7 @@
     schedule() {
       const D = this.D, now = serverNow();
       let ov = this.state.ov;
-      if (ov && now > ov.until) { if (ov.kind === 'launch' && !ov.demo) this.setState({ toast: { title: 'שוגר', line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.setState({ ov: null }); }
+      if (ov && now > ov.until) { if (ov.kind === 'launch' && !ov.demo) this.setState({ toast: { title: tr('שוגר', 'Liftoff'), line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.setState({ ov: null }); }
       if (this.state.toast && now > this.state.toast.until) this.setState({ toast: null });
       const T = this.ilParts(now);
       this.maybeReload(T, ov);
@@ -298,7 +312,7 @@
       this._embRest = rest;
       return (this._emb = h('div', { style: { position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
         h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } }),
-        h('space-emblem-v2', { key: CFG.globeStyle, speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
+        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, word: tr('מנהלת החלל', 'SPACE DIRECTORATE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
@@ -313,14 +327,14 @@
         h('div', { style: { height: 150, position: 'relative', overflow: 'hidden' } },
           h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', animation: `zoomBg ${sec}s linear both` } }),
           h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(6,12,26,.15) 0%, rgba(6,12,26,.35) 55%, rgba(8,16,34,.98) 100%)' } }),
-          h('div', { style: { position: 'absolute', top: 12, right: 12, display: 'flex', gap: 6 } }, chip(n.cat, col), n.il ? chip('ישראל', '#d4f25c', true) : null),
-          h('span', { dir: 'ltr', style: { position: 'absolute', top: 14, left: 14, fontFamily: "'Lexend',sans-serif", fontSize: 13, color: '#e6f1ff', letterSpacing: '.08em' } }, String(idx + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0'))),
+          h('div', { style: { position: 'absolute', top: 12, [EN() ? 'left' : 'right']: 12, display: 'flex', gap: 6 } }, chip(n.cat, col), n.il ? chip(tr('ישראל', 'Israel'), '#d4f25c', true) : null),
+          h('span', { dir: 'ltr', style: { position: 'absolute', top: 14, [EN() ? 'right' : 'left']: 14, fontFamily: "'Lexend',sans-serif", fontSize: 13, color: '#e6f1ff', letterSpacing: '.08em' } }, String(idx + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0'))),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 18px 16px', marginTop: -26, position: 'relative' } },
           h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: MUTED } }, n.date + ' · ' + n.src),
           h('h3', { style: { margin: 0, fontSize: 25, fontWeight: 700, lineHeight: 1.22, textWrap: 'pretty' } }, n.title),
           h('p', { style: { margin: 0, fontSize: 16, color: '#b3c2dc', fontWeight: 300, lineHeight: 1.4, textWrap: 'pretty' } }, n.dek),
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 } },
-            h('div', { style: { flex: 1, height: 3, borderRadius: 3, background: 'rgba(150,190,240,.14)', overflow: 'hidden' } }, h('div', { style: { height: '100%', background: 'linear-gradient(270deg,#d4f25c,#6fd6ea)', transformOrigin: 'right', animation: `grow ${sec}s linear both` } })),
+            h('div', { style: { flex: 1, height: 3, borderRadius: 3, background: 'rgba(150,190,240,.14)', overflow: 'hidden' } }, h('div', { style: { height: '100%', background: `linear-gradient(${EN() ? 90 : 270}deg,#d4f25c,#6fd6ea)`, transformOrigin: EN() ? 'left' : 'right', animation: `grow ${sec}s linear both` } })),
             CFG.showQr && n.url ? h('img', { src: qrData(n.url), alt: 'QR', style: { width: 50, height: 50, borderRadius: 8, background: '#0b1430', padding: 3, border: '1px solid rgba(230,241,255,.22)' } }) : null))));
     }
     newsList(D) {
@@ -353,12 +367,12 @@
     }
     ticker(D) {
       if (this._tick) return this._tick;
-      const item = (e, i) => { const opp = e.kind === 'הזדמנות', c = opp ? '#d4f25c' : '#6fd6ea'; return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '0 26px', whiteSpace: 'nowrap', fontSize: 16 } },
+      const item = (e, i) => { const opp = e.kind === 'הזדמנות' || e.kind === 'Opportunity', c = opp ? '#d4f25c' : '#6fd6ea'; return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '0 26px', whiteSpace: 'nowrap', fontSize: 16 } },
         h('span', { style: { padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 500, color: c, border: `1px solid ${c}` } }, e.kind),
         h('span', { style: { fontFamily: "'Lexend',sans-serif", color: '#9fdcff', fontSize: 14 } }, e.date),
-        h('span', null, e.name), h('span', { style: { color: 'rgba(150,190,240,.3)', marginRight: 14 } }, '◆')); };
+        h('span', null, e.name), h('span', { style: { color: 'rgba(150,190,240,.3)', [EN() ? 'marginLeft' : 'marginRight']: 14 } }, '◆')); };
       return (this._tick = h('div', { style: { flex: 1, minWidth: 0, overflow: 'hidden', height: '100%', display: 'flex', alignItems: 'center' } },
-        h('div', { style: { display: 'flex', width: 'max-content', animation: `scrollX ${Math.max(1, D.ticker.length) * 8}s linear infinite` } }, [...D.ticker, ...D.ticker].map(item))));
+        h('div', { style: { display: 'flex', width: 'max-content', animation: `${EN() ? 'scrollXL' : 'scrollX'} ${Math.max(1, D.ticker.length) * 8}s linear infinite` } }, [...D.ticker, ...D.ticker].map(item))));
     }
     launchVals(L, now) {
       let nextFound = false; const p = (n) => String(n).padStart(2, '0');
@@ -369,20 +383,23 @@
         const a = Math.abs(d), dd = Math.floor(a / 86400e3), hh = Math.floor(a / 3600e3) % 24, mm = Math.floor(a / 60e3) % 60, ss = Math.floor(a / 1e3) % 60;
         // Past its time a launch reads as launched only on Launch Library's word; otherwise it probably slipped.
         const flew = gone && (FLOWN[l.code] || goNow(l, now));
-        const segs = !gone ? [{ v: p(dd), u: 'ימים' }, { v: p(hh), u: 'שע׳' }, { v: p(mm), u: 'דק׳' }, { v: p(ss), u: 'שנ׳' }]
-          : flew ? [{ v: 'T+', u: '' }, { v: p(Math.min(99, Math.floor(a / 3600e3))), u: 'שע׳' }, { v: p(mm), u: 'דק׳' }] : [{ v: '--', u: 'שע׳' }, { v: '--', u: 'דק׳' }];
-        const status = !gone ? l.status : !flew ? 'ממתין לעדכון' : l.code === 'Go' ? 'שוגר' : l.status;
-        const statusColor = gone ? '#6f82a6' : l.status === 'אושר' ? '#8fe0b8' : '#e9b872';
+        const U = EN() ? { d: 'DAYS', h: 'HRS', m: 'MIN', s: 'SEC' } : { d: 'ימים', h: 'שע׳', m: 'דק׳', s: 'שנ׳' };
+        const segs = !gone ? [{ v: p(dd), u: U.d }, { v: p(hh), u: U.h }, { v: p(mm), u: U.m }, { v: p(ss), u: U.s }]
+          : flew ? [{ v: 'T+', u: '' }, { v: p(Math.min(99, Math.floor(a / 3600e3))), u: U.h }, { v: p(mm), u: U.m }] : [{ v: '--', u: U.h }, { v: '--', u: U.m }];
+        const status = !gone ? l.status : !flew ? tr('ממתין לעדכון', 'Awaiting update') : l.code === 'Go' ? tr('שוגר', 'Launched') : l.status;
+        const statusColor = gone ? '#6f82a6' : l.code === 'Go' ? '#8fe0b8' : '#e9b872';
         return Object.assign({}, l, { when, segs, status, statusColor, numColor: gone ? '#6f82a6' : isNext ? '#d4f25c' : '#e6f1ff', border: isNext ? 'rgba(212,242,92,.55)' : 'rgba(150,190,240,.14)', shadow: isNext ? '0 0 24px rgba(212,242,92,.16)' : 'none' });
       });
     }
     /** "updated X ago" from the feed's generatedAt; amber when stale, or when the feed itself has stopped answering. */
     updatedAgo(D) {
       const off = !CFG.sample && Date.now() - (this._feedOkAt || Date.now()) > Math.max(5 * 60e3, 3 * CFG.refresh * 1000);
-      const t = Date.parse(D.generatedAt); if (!t) return { text: off ? 'אין חיבור לנתונים' : 'עודכן —', stale: true };
+      const noData = tr('אין חיבור לנתונים', 'No data connection');
+      const t = Date.parse(D.generatedAt); if (!t) return { text: off ? noData : tr('עודכן —', 'Updated —'), stale: true };
       const min = Math.max(0, Math.round((this.state.now - t) / 6e4));
-      const text = min < 1 ? 'עכשיו' : min < 60 ? `לפני ${min} דק׳` : min < 1440 ? `לפני ${Math.floor(min / 60)} שע׳` : `לפני ${Math.floor(min / 1440)} ימים`;
-      return { text: (off ? 'אין חיבור לנתונים · ' : '') + 'עודכן ' + text, stale: off || min > CFG.staleAfterMin };
+      const text = EN() ? (min < 1 ? 'just now' : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.floor(min / 60)} h ago` : `${Math.floor(min / 1440)} days ago`)
+        : min < 1 ? 'עכשיו' : min < 60 ? `לפני ${min} דק׳` : min < 1440 ? `לפני ${Math.floor(min / 60)} שע׳` : `לפני ${Math.floor(min / 1440)} ימים`;
+      return { text: (off ? noData + ' · ' : '') + tr('עודכן ', 'Updated ') + text, stale: off || min > CFG.staleAfterMin };
     }
 
     // ---- the template -----------------------------------------------------------------------------
@@ -392,7 +409,7 @@
       // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
       const rest = !!this.state.ov && this.state.covered;
       const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
-        h('div', { dir: 'rtl', style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } },
+        h('div', { dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } },
           h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers),
           h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
       const ago = D && this.updatedAgo(D);
@@ -404,11 +421,11 @@
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
           h('div', { style: { width: 52, height: 52, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
             h('img', { src: '/assets/logo-mark.png', alt: '', style: { width: 44, height: 44, objectFit: 'contain' } })),
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, 'צג חלל · מנהלת החלל'))),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Israel Space Directorate')))),
         h('div'),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, fontFamily: "'Lexend',sans-serif" } },
           ago ? h('div', { style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, ago.text)) : null,
-          timeBox(fmtIL.format(nd), fmtDate.format(nd), { box: { padding: '6px 20px' }, big: { fontWeight: 400 } }, { fontFamily: 'Heebo' }),
+          timeBox(fmtIL.format(nd), (EN() ? fmtDateEn : fmtDateHe).format(nd), { box: { padding: '6px 20px' }, big: { fontWeight: 400 } }, { fontFamily: 'Heebo' }),
           timeBox(fmtUTC.format(nd), 'UTC', { box: { padding: '6px 18px' }, big: { fontWeight: 300, color: '#9fdcff' } }, { letterSpacing: '.12em' })));
       const quiet = (text, extra) => h('span', { style: Object.assign({ fontSize: 15, color: MUTED, lineHeight: 1.4 }, extra) }, text);
 
@@ -418,8 +435,8 @@
         return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header,
           h('div', { key: 'e', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem(rest)),
           h('div', { key: 'w', style: { gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 } },
-            h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, 'מתחבר לנתונים…'),
-            denied ? quiet('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת') : null)]);
+            h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, tr('מתחבר לנתונים…', 'Connecting…')),
+            denied ? quiet(tr('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת', 'The wall has no access to its data: check the display key (key) in the address')) : null)]);
       }
 
       const fsec = CFG.featureSeconds, fIdx = D.featured.length ? Math.floor(t / (fsec * 1000)) % D.featured.length : 0;
@@ -430,7 +447,7 @@
       // Events that have ended drop out between feed updates too; "עכשיו" while one runs, "הבא" only for the next to come.
       let nextTagged = false;
       const directorate = D.directorate.filter((d) => !d.end || Date.parse(d.end) > now).map((d, i) => {
-        const tag = d.start && Date.parse(d.start) <= now ? 'עכשיו' : nextTagged ? '' : ((nextTagged = true), 'הבא');
+        const tag = d.start && Date.parse(d.start) <= now ? tr('עכשיו', 'NOW') : nextTagged ? '' : ((nextTagged = true), tr('הבא', 'NEXT'));
         return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
           h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } },
             h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
@@ -447,11 +464,11 @@
 
       const right = h('section', { key: 'r', style: { display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 } },
         h('div', { style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }) },
-          this.sheen(1, 0), panelHead('אירועים במנהלת', 'השבוע'), directorate.length ? directorate : quiet('אין אירועים השבוע')),
+          this.sheen(1, 0), panelHead(tr('אירועים במנהלת', 'Directorate events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))),
         h('div', { style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
           this.sheen(2, 4.5),
-          panelHead('אנשים במנהלת', D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),
-          D.people.length ? this.spotlight(D, pIdx) : quiet('אין ימי הולדת או רגעים אישיים בימים הקרובים'),
+          panelHead(tr('אנשים במנהלת', 'Our people'), D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),
+          D.people.length ? this.spotlight(D, pIdx) : quiet(tr('אין ימי הולדת או רגעים אישיים בימים הקרובים', 'No birthdays or personal moments in the coming days')),
           D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null));
 
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
@@ -460,18 +477,18 @@
       const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }) },
         this.sheen(3, 9),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, 'ניוזלטר החלל השבועי'), h('span', { style: { fontSize: 13, color: MUTED } }, ['רקיע · הפורום הישראלי לחלל', D.issue.range].filter(Boolean).join(' · '))),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, tr('ניוזלטר החלל השבועי', 'Weekly space newsletter')), h('span', { style: { fontSize: 13, color: MUTED } }, [tr('רקיע · הפורום הישראלי לחלל', 'Rakia · The Israeli Space Forum'), D.issue.range].filter(Boolean).join(' · '))),
           CFG.showQr && D.issue.url ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-            h('span', { style: { fontSize: 11, color: MUTED, textAlign: 'left', lineHeight: 1.3 } }, 'לגיליון', h('br'), 'המלא'),
+            h('span', { style: { fontSize: 11, color: MUTED, textAlign: EN() ? 'right' : 'left', lineHeight: 1.3 } }, tr('לגיליון', 'Full'), h('br'), tr('המלא', 'issue')),
             h('img', { src: qrData(D.issue.url), alt: 'QR', style: { width: 52, height: 52, borderRadius: 8, background: '#0b1430', padding: 3, border: '1px solid rgba(230,241,255,.25)' } })) : null),
-        D.news.length ? this.featured(D, fIdx, fsec) : quiet('הגיליון השבועי יופיע כאן אחרי שייקלט'),
+        D.news.length ? this.featured(D, fIdx, fsec) : quiet(tr('הגיליון השבועי יופיע כאן אחרי שייקלט', 'The weekly issue will appear here once it is imported')),
         D.news.length ? this.newsList(D) : null);
 
       const main = h('main', { key: 'main', style: { display: 'grid', gridTemplateColumns: '470px minmax(0,1fr) 470px', gap: 26, padding: '14px 36px 16px', minHeight: 0, position: 'relative', zIndex: 2 } }, right, center, left);
 
       const tickerBar = h('div', { key: 'tk', style: { display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' } },
-        h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', height: '100%', borderLeft: '1px solid rgba(150,190,240,.14)', fontSize: 15, fontWeight: 700 } }, 'אירועים והזדמנויות'),
-        D.ticker.length ? this.ticker(D) : quiet('אין אירועים או הזדמנויות קרובים', { padding: '0 26px' }));
+        h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', height: '100%', [EN() ? 'borderRight' : 'borderLeft']: '1px solid rgba(150,190,240,.14)', fontSize: 15, fontWeight: 700 } }, tr('אירועים והזדמנויות', 'Events & opportunities')),
+        D.ticker.length ? this.ticker(D) : quiet(tr('אין אירועים או הזדמנויות קרובים', 'No upcoming events or opportunities'), { padding: '0 26px' }));
 
       const launches = this.launchVals(D.launches, now).slice(0, 4).map((l, i) => h('div', { key: i, style: { height: 84, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '0 14px', borderRadius: 22, background: 'linear-gradient(180deg,rgba(40,62,104,.38),rgba(12,22,44,.6))', border: `1px solid ${l.border}`, boxShadow: l.shadow, minWidth: 0 } },
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
@@ -483,8 +500,8 @@
         h('div', { dir: 'ltr', style: { display: 'flex', gap: 4, flex: 'none' } }, l.segs.map((s, j) => h('div', { key: j, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 34, padding: '5px 3px', borderRadius: 10, background: 'rgba(6,12,26,.7)', border: '1px solid rgba(150,190,240,.12)' } },
           h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 17, fontWeight: 400, color: l.numColor, lineHeight: 1.1 } }, s.v), h('span', { style: { fontSize: 10, color: '#6f82a6' } }, s.u))))));
       const footer = h('footer', { key: 'ft', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, 'שיגורים קרובים'), h('span', { style: { fontSize: 12, color: MUTED } }, 'שעון ישראל · Launch Library')),
-        launches.length ? launches : quiet('אין כרגע נתוני שיגורים', { gridColumn: '2 / -1' }));
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
+        launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), { gridColumn: '2 / -1' }));
 
       return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer]);
     }
@@ -523,8 +540,8 @@
       return () => { clearTimeout(idle); on.forEach(([t, f]) => removeEventListener(t, f)); fsEvents.forEach((t) => document.removeEventListener(t, sync)); document.documentElement.classList.remove('idle'); };
     }, []);
     useEffect(() => { document.documentElement.classList.toggle('idle', !awake); }, [awake]);
-    const label = full ? 'יציאה ממסך מלא' : 'מסך מלא';
-    return h('button', { type: 'button', dir: 'rtl', title: label, onClick: toggleFullscreen, style: { position: 'fixed', left: 24, bottom: 24, zIndex: 100, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px 10px 16px', borderRadius: 999, background: 'rgba(14,26,50,.88)', border: '1px solid rgba(150,190,240,.3)', boxShadow: '0 10px 30px rgba(0,0,0,.45)', color: '#e6f1ff', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 16, fontWeight: 500, cursor: 'pointer', opacity: awake ? 1 : 0, pointerEvents: awake ? 'auto' : 'none', transition: 'opacity .5s ease' } },
+    const label = full ? tr('יציאה ממסך מלא', 'Exit full screen') : tr('מסך מלא', 'Full screen');
+    return h('button', { type: 'button', dir: EN() ? 'ltr' : 'rtl', title: label, onClick: toggleFullscreen, style: { position: 'fixed', left: 24, bottom: 24, zIndex: 100, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px 10px 16px', borderRadius: 999, background: 'rgba(14,26,50,.88)', border: '1px solid rgba(150,190,240,.3)', boxShadow: '0 10px 30px rgba(0,0,0,.45)', color: '#e6f1ff', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 16, fontWeight: 500, cursor: 'pointer', opacity: awake ? 1 : 0, pointerEvents: awake ? 'auto' : 'none', transition: 'opacity .5s ease' } },
       h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: '#9fdcff', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
         h('path', { d: full ? 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6' : 'M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6' })),
       label);
@@ -537,7 +554,7 @@
     componentDidCatch(e) { console.error('wall crashed', e); if (!this.retry) this.retry = setInterval(() => reloadPage(5 * 60e3), 30e3); }
     componentWillUnmount() { clearInterval(this.retry); }
     render() {
-      return this.state.crashed ? h('div', { style: { position: 'fixed', inset: 0, background: '#040914', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 22 } }, 'הצג יחזור בעוד רגע') : this.props.children;
+      return this.state.crashed ? h('div', { style: { position: 'fixed', inset: 0, background: '#040914', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 22 } }, tr('הצג יחזור בעוד רגע', 'Back in a moment')) : this.props.children;
     }
   }
 
