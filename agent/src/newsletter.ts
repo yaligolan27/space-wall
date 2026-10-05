@@ -5,6 +5,7 @@ import { db, must } from '../../lib/db.js';
 import { isoDateIL } from '../../lib/dates.js';
 import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from '../../lib/newsletter.js';
 import { storeNewsletterImages } from '../../lib/newsletter-images.js';
+import { syncForumEvents } from '../../lib/newsletter-forum.js';
 import { NewsletterContent, importNewsletter } from '../../lib/wall-ops.js';
 import { withRun, type RunCtx, type RunOpts } from './run.js';
 
@@ -29,10 +30,15 @@ export async function runNewsletter(force = false, opts?: RunOpts) {
     if (!latest) throw new Error('הניוזלטר: דף הארכיון לא מציג אף גיליון');
     ctx.log.latest = latest;
 
-    // An issue stored before pictures were imported (or whose pictures all failed) is fetched again.
-    const have = must(await db().from('newsletter_issues').select('content').eq('issue_date', latest).limit(1), 'newsletter_issues') as any[];
+    // An issue stored before pictures (or the Forum's events) were imported is fetched again.
+    const [haveR, forumR] = await Promise.all([
+      db().from('newsletter_issues').select('content').eq('issue_date', latest).limit(1),
+      db().from('settings').select('key').eq('key', 'newsletter_forum').limit(1),
+    ]);
+    const have = must(haveR, 'newsletter_issues') as any[];
     const hasPictures = (have[0]?.content?.news || []).some((n: any) => n?.image);
-    if (have.length && hasPictures && !force) { ctx.log.skipped = 'already imported'; return { issue_date: latest, imported: false }; }
+    const forumDone = (must(forumR, 'settings') as any[]).length > 0;
+    if (have.length && hasPictures && forumDone && !force) { ctx.log.skipped = 'already imported'; return { issue_date: latest, imported: false }; }
 
     const parsed = parseIssue(await fetchText(`${NEWSLETTER_SITE}/${latest}/`), isoDateIL());
     ctx.found = parsed.content.news.length;
@@ -42,6 +48,8 @@ export async function runNewsletter(force = false, opts?: RunOpts) {
     await importNewsletter(parsed.issue_date, parsed.source_url, content);
     ctx.published = content.news.length;
     ctx.log.ticker = content.ticker.length;
-    return { issue_date: parsed.issue_date, imported: true, news: content.news.length, ticker: content.ticker.length, pictures: pictures.stored };
+    const forum = await syncForumEvents(parsed.forum);
+    ctx.log.forum_added = forum.added;
+    return { issue_date: parsed.issue_date, imported: true, news: content.news.length, ticker: content.ticker.length, pictures: pictures.stored, forum_added: forum.added };
   }, opts);
 }

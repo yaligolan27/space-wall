@@ -20,7 +20,11 @@ export type ParsedIssue = {
   content: { issue: { range: string; url: string }; summary: string[]; featured: number[]; news: ParsedNews[]; ticker: ParsedTicker[] };
   /** One entry per news item, same order: the inline picture to store, or null (none, or already a URL in `image`). */
   images: (InlineImage | null)[];
+  /** The Israeli Space Forum's own events that have not ended yet; they also go into the directorate's events. */
+  forum: ForumEvent[];
 };
+/** start/end: YYYY-MM-DD (the same day for a one-day event); times HH:MM in Israel time when the page gives them. */
+export type ForumEvent = { title: string; place: string; description: string; url: string; start: string; end: string; startTime?: string; endTime?: string };
 
 const MONTHS: Record<string, number> = {
   ינואר: 1, פברואר: 2, מרץ: 3, מרס: 3, אפריל: 4, מאי: 5, יוני: 6, יולי: 7, אוגוסט: 8, ספטמבר: 9, אוקטובר: 10, נובמבר: 11, דצמבר: 12,
@@ -216,7 +220,37 @@ export function parseIssue(html: string, today: string): ParsedIssue {
       ticker: parseTicker(html, issue_date, today),
     },
     images,
+    forum: parseForum(html, issue_date, today),
   };
+}
+
+/**
+ * The Forum's events: "יום שלישי · 13.10 · 09:30–15:00" or "רביעי-חמישי · 21–22.10". Events that ended before
+ * `today` are left out, and so is anything whose date cannot be read.
+ */
+export function parseForum(html: string, issueDate: string, today: string): ForumEvent[] {
+  const out: ForumEvent[] = [];
+  for (const { open, body } of blocks(section(html, 'forum'), 'a', 'fe')) {
+    const title = text(first(/<h3[^>]*>([\s\S]*?)<\/h3>/, body));
+    const when = text(first(/class="fe-date">([\s\S]*?)<\/div>/, body));
+    const d = /(\d{1,2})(?:\s*[–-]\s*(\d{1,2}))?\.(\d{1,2})(?:\.(\d{4}))?/.exec(when);
+    if (!title || !d) continue;
+    const end = endDate(`${d[2] || d[1]}.${d[3]}${d[4] ? '.' + d[4] : ''}`, issueDate);
+    const start = endDate(`${d[1]}.${d[3]}${d[4] ? '.' + d[4] : ''}`, issueDate);
+    if (!start || !end || end < today) continue;
+    const t = /(\d{1,2}:\d{2})(?:\s*[–-]\s*(\d{1,2}:\d{2}))?/.exec(when);
+    const pad = (x: string) => x.padStart(5, '0');
+    const href = attr(open, 'href');
+    out.push({
+      title,
+      place: text(first(/class="place">([\s\S]*?)<\/div>/, body)).replace(/^📍\s*/, ''),
+      description: text(first(/<p>([\s\S]*?)<\/p>/, body)),
+      url: /^https?:\/\//.test(href) ? href : '',
+      start, end,
+      ...(t ? { startTime: pad(t[1]), ...(t[2] ? { endTime: pad(t[2]) } : {}) } : {}),
+    });
+  }
+  return out;
 }
 
 /** The newest issue date listed on the site's archive page, or null. */
