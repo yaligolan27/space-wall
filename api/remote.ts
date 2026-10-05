@@ -14,7 +14,7 @@ import { setting } from '../lib/settings.js';
 
 z.config(z.locales.he());   // validation messages in Hebrew; they reach the operator as toasts
 const FIELD_HE: Record<string, string> = { title: 'שם האירוע', name: 'שם', first: 'שם פרטי', last: 'שם משפחה', date: 'תאריך', start: 'התחלה', end: 'סיום',
-  place: 'מקום', url: 'קישור', type: 'מה קרה', note: 'ברכה', text: 'הודעה', birthday: 'תאריך לידה', joined: 'תאריך הצטרפות', leaves: 'תאריך שחרור',
+  place: 'מקום', url: 'קישור', type: 'מה קרה', note: 'נוסח אישי', text: 'הודעה', birthday: 'תאריך לידה', joined: 'תאריך הצטרפות', leaves: 'תאריך שחרור',
   email: 'מייל', phone: 'טלפון', rank: 'דרגה', role: 'תפקיד', unit: 'אגף', notes: 'הערות', rows: 'שורות', dataUrl: 'תמונה', value: 'ערך',
   key: 'מפתח', files: 'קבצים', images: 'תמונות', history: 'השיחה' };
 

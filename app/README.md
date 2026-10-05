@@ -21,8 +21,8 @@ three seconds still. A double-click or the F key does the same. Browser full scr
 | Area | Content | Source |
 | --- | --- | --- |
 | Header | logo, "updated X ago" with a live dot (amber when stale), Israel clock + date, UTC | feed `generatedAt` |
-| Right column, top | אירועים במנהלת: the week's internal events, the next one highlighted | Telegram → `directorate_events` |
-| Right column, bottom | אנשים במנהלת: rotating spotlight + six tiles (birthdays, births, weddings, promotions, discharges, new people) | Telegram → `people`, `life_events` |
+| Right column, top | אירועים: the week's internal events, the next one highlighted | Telegram → `directorate_events` |
+| Right column, bottom | אנשי המנהלת: rotating spotlight + six tiles (birthdays, births, weddings, promotions, discharges, new people) | Telegram → `people`, `life_events` |
 | Centre | the 3D emblem (holographic globe, orbits, satellites, wordmark) | — |
 | Left column | ניוזלטר החלל השבועי: rotating feature card with QR to the article, then a scrolling list | weekly newsletter import |
 | Ticker | אירועים והזדמנויות, colour-coded by kind | newsletter + Telegram → `industry_events` |
