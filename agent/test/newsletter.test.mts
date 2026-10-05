@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { parseIssue, latestFromArchive, compactRange, endDate } from '../../lib/newsletter.js';
 import { NewsletterContent } from '../../lib/wall-ops.js';
 import { storeNewsletterImages } from '../../lib/newsletter-images.js';
+import { forumKey, forumRow, planForum } from '../../lib/newsletter-forum.js';
 
 const FIX = new URL('fixtures/', import.meta.url).pathname;
 const page = (name: string) => readFileSync(FIX + name, 'utf8');
@@ -56,6 +57,27 @@ check('ticker items carry their last day', cur.content.ticker.every(t => /^\d{4}
 check('fits NewsletterContent', NewsletterContent.safeParse(cur.content).success);
 check('NewsletterContent keeps the last day', NewsletterContent.parse(cur.content).ticker.every(t => t.end));
 check('an issue stored before end existed still fits', NewsletterContent.safeParse({ ...cur.content, ticker: [{ kind: 'אירוע', date: '27–29.10', name: 'x' }] }).success);
+
+// The Forum's own events, for the directorate's events.
+check('forum events of the issue', cur.forum.length === 3 && cur.forum[0].title.startsWith('פורום עסקי צ׳כיה') && cur.forum[0].place === 'תל אביב', String(cur.forum.length));
+check('one-day event with hours', cur.forum[0].start === '2026-10-13' && cur.forum[0].end === '2026-10-13' && cur.forum[0].startTime === '09:30' && cur.forum[0].endTime === '15:00');
+check('multi-day event without hours', cur.forum[1].start === '2026-10-21' && cur.forum[1].end === '2026-10-22' && !cur.forum[1].startTime);
+check('mailto links are not kept as urls', cur.forum[0].url === '' && cur.forum[1].url.startsWith('https://'));
+check('forum events that ended are left out', parseIssue(page('rakia-2026-10-08.html'), '2026-10-20').forum.length === 2);
+{
+  const r0 = forumRow(cur.forum[0]), r1 = forumRow(cur.forum[1]);
+  check('row times in Israel time', Date.parse(r0.starts_at) === Date.parse('2026-10-13T09:30:00+03:00') && Date.parse(r0.ends_at) === Date.parse('2026-10-13T15:00:00+03:00'), r0.starts_at);
+  check('without hours it runs to the end of its last day', Date.parse(r1.starts_at) === Date.parse('2026-10-21T00:00:00+03:00') && Date.parse(r1.ends_at) === Date.parse('2026-10-23T00:00:00+03:00'), r1.ends_at);
+  check('row is a plain approved event from the newsletter', r0.type === 'other' && r0.approved && r0.created_by === 'newsletter' && r0.place === 'תל אביב');
+  const first = planForum(cur.forum, []);
+  check('first import adds all', first.fresh.length === 3 && first.keys.length === 3);
+  check('next import adds nothing', planForum(cur.forum, first.keys).fresh.length === 0);
+  // The 03.09 issue words the same Czech event differently; it is still the same event.
+  const older = parseIssue(page('rakia-2026-09-03.html'), '2026-09-03').forum;
+  const czech = older.find(e => e.start === '2026-10-13')!;
+  check('reworded title is the same event', czech.title !== cur.forum[0].title && forumKey(czech) === forumKey(cur.forum[0]));
+  check('an earlier issue then adds only what is new', planForum(older, first.keys).fresh.length === older.length - 3);
+}
 
 // Older layouts: an empty range div (falls back to og:title) and a news-only issue with Israeli items.
 const sep = parseIssue(page('rakia-2026-09-03.html'), '2026-09-03');
