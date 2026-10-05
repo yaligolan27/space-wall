@@ -1,4 +1,5 @@
 // <space-emblem-v2 speed="90" globe="holo|real" sway="on|off" [word="…"] [paused]> — Space Directorate emblem, v2. While `paused` it keeps its last frame and draws nothing.
+// el.getTime() / el.setTime(t): its animation clock, to put two emblems in step.
 // Geometry is measured from the original logo (globe radius R = 1 unit): rocket, fins, the two crossing orbits, 4 satellites (original sizes), condensed wordmark.
 // Objects in front of the globe are scaled by (D-z)/D so the straight-on projection keeps the logo proportions exactly.
 // Tech layer: point-cloud continents, lat/long grid, scanning latitude ring, HUD ticks + radar sweep, Israel ground-station pulse with a live satellite link, light sweep across the lacquer.
@@ -446,6 +447,10 @@
       };
       setTimeout(() => loop(performance.now()), 0);
       this.renderOnce = () => renderer.render(scene, camera);
+      // The emblem's own clock (globe turn, orbits, scans, camera sway all follow it). Two emblems on the same clock, speed
+      // and sway draw the same picture: the welcome screen hands its emblem over to the wall's this way, with no jump.
+      this.getTime = () => t;
+      this.setTime = (v) => { if (Number.isFinite(v)) { t = v; last = performance.now(); } };
       // A new size or sharpness only on a real change: setting one clears the picture, and a wall coming back from rest
       // (not displayed, nothing to measure) must still show it.
       let cw = w, ch = h;
