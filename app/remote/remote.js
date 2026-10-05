@@ -70,6 +70,8 @@
     { label: 'מי חוגג/ת יום הולדת החודש?', send: true },
     { label: 'להוסיף יום הולדת…', fill: 'תוסיף/י יום הולדת ל' },
     { label: 'להזיז אירוע…', fill: 'תעביר/י את האירוע ' },
+    { label: 'ידיעה חדשה מהאינטרנט…', fill: 'תמצא/י באינטרנט ידיעה חדשה על ' },
+    { label: 'לייב של השיגור הבא', send: true },
   ];
   const AGENT_FILES = 3, AGENT_TEXT = 20000;   // per message, as the server takes them (lib/remote-agent.ts)
 
@@ -426,6 +428,8 @@
       if (tk.kind === 'noon') return 'סרטון תדמית';
       if (tk.kind === 'welcome') return 'ברוכים הבאים' + (tk.guest ? ' · ' + tk.guest : '');
       if (tk.kind === 'event') return tk.title;
+      if (tk.kind === 'image') return 'תמונה' + (tk.caption ? ' · ' + tk.caption : '');
+      if (tk.kind === 'stream') return 'שידור חי' + (tk.title ? ' · ' + tk.title : '');
       return tpl(tk.type || (tk.person && tk.person.type)).head + (tk.person ? ' · ' + tk.person.name : '');
     }
 
@@ -656,7 +660,7 @@
         const j = await api('POST', { action: 'agent', text, files, images, history });
         const r = j.result || {};
         this.setState({ data: j.state, loadErr: '' });
-        reply = { text: r.reply || 'בוצע.', actions: r.done || [], undoId: r.undoId || null, err: !!r.error && !(r.done || []).length };
+        reply = { text: r.reply || 'בוצע.', actions: r.done || [], undoId: r.undoId || null, err: !!r.error && !(r.done || []).length, proposals: r.proposals || [] };
       } catch (e) {
         if (e.auth) this.setState({ auth: false, data: null, gateErr: e.message });
         const fresh = e.auth ? null : await this.refresh();
@@ -667,6 +671,15 @@
       }
       this.setState((st) => ({ agentBusy: false, messages: [...st.messages, Object.assign({ id: Date.now() + 1, role: 'bot' }, reply)] }));
     }
+    /** An agent's suggestion from the internet (a news item, a picture, a stream) goes on the wall only on the operator's tap. */
+    async approve(m, p) {
+      const mark = (state) => this.setState((st) => ({ messages: st.messages.map((x) => (x.id === m.id ? Object.assign({}, x, { proposals: x.proposals.map((y) => (y.id === p.id ? Object.assign({}, y, { state }) : y)) }) : x)) }));
+      if (p.state === 'busy' || p.state === 'done') return;
+      mark('busy');
+      const label = p.kind === 'news' ? 'הידיעה נוספה לצג' : p.kind === 'image' ? 'התמונה מוצגת על כל המסך' : 'השידור מוצג על כל המסך';
+      try { await this.run(p.action, p.args, label); mark('done'); } catch (e) { mark(''); }
+    }
+    dismiss(m, p) { this.setState((st) => ({ messages: st.messages.map((x) => (x.id === m.id ? Object.assign({}, x, { proposals: x.proposals.map((y) => (y.id === p.id ? Object.assign({}, y, { state: 'no' }) : y)) }) : x)) })); }
     async undoReply(m) {
       if (await this.restore(m.undoId)) this.setState((st) => ({ messages: st.messages.map((x) => (x.id === m.id ? Object.assign({}, x, { undone: true }) : x)) }));
     }
@@ -849,9 +862,12 @@
         onChatFiles: (e) => { this.addFiles(e.target.files); e.target.value = ''; },
         msgs: s.messages.map((m) => Object.assign({}, m, { isUser: m.role === 'user', isBot: m.role === 'bot', hasText: !!m.text, color: m.err ? '#ffb4a8' : '#e6f1ff',
           hasActions: !!(m.actions && m.actions.length), hasUndo: !!m.undoId, undo: () => this.undoReply(m),
+          props: (m.proposals || []).map((p) => Object.assign({}, p, { kindLabel: p.kind === 'news' ? 'ידיעה לניוזלטר בצג' : p.kind === 'image' ? 'תמונה על כל המסך' : 'שידור חי על כל המסך',
+            el: p.image ? imgEl(p.image, { display: 'block', width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 10 }) : null,
+            approve: () => this.approve(m, p), dismiss: () => this.dismiss(m, p) })),
           files: (m.files || []).map((fl) => Object.assign({}, fl, { isImg: fl.kind === 'image', isDoc: fl.kind !== 'image', el: fl.src ? imgEl(fl.src, { display: 'block', maxWidth: 180, maxHeight: 120, borderRadius: 10, border: '1px solid rgba(150,190,240,.2)' }) : null })) })),
         agentReady: agentOn, agentSub: !D ? '' : agent.ready ? 'כתבו מה לשנות, והסוכן יבצע. אפשר לבטל כל שינוי.' : 'צריך לחבר פעם אחת מפתח API',
-        greeting: agentOn && !s.messages.length ? 'שלום' + (s.who ? ' ' + s.who : '') + '! כתבו כאן מה לשנות בצג, ואבצע את זה מיד: להוסיף יום הולדת או שמחה, להזיז אירוע, להעלות הודעה דחופה, לעדכן את רשימת האנשים ועוד. כל שינוי אפשר לבטל. אפשר גם לצרף אקסל, CSV או תמונה.' : '',
+        greeting: agentOn && !s.messages.length ? 'שלום' + (s.who ? ' ' + s.who : '') + '! כתבו כאן מה לשנות בצג, ואבצע את זה מיד: להוסיף יום הולדת או שמחה, להזיז אירוע, להעלות הודעה דחופה, לעדכן את רשימת האנשים, לשנות משהו בעיצוב, להביא ידיעה או תמונה מהאינטרנט (הן עולות לצג רק אחרי אישור שלכם) ולפתוח שידור חי של שיגור. כל שינוי אפשר לבטל. אפשר גם לצרף אקסל, CSV או תמונה.' : '',
         agentBusy: s.agentBusy, busyText: 'עובד על זה…' + (s.agentBusy && now - s.agentAt >= 5000 ? ' ' + Math.round((now - s.agentAt) / 1000) + ' שנ׳' : ''),
         showSuggest: agentOn && !s.messages.length && !s.agentBusy,
         suggestions: SUGGESTIONS.map((sg) => ({ label: sg.label, send: () => (sg.send ? this.sendChat(sg.label) : this.setState({ chatInput: sg.fill }, () => { const t = document.getElementById('agent-input'); if (t) { t.focus(); t.setSelectionRange(sg.fill.length, sg.fill.length); } })) })),
@@ -1220,7 +1236,19 @@
                 m.actions.map((a, i) => el('div', `display:flex;align-items:baseline;gap:8px;font-size:13px;color:#b9c8e2${m.undone ? ';text-decoration:line-through' : ''}`, { key: i }, el('span', 'flex:none;width:6px;height:6px;border-radius:50%;background:#d4f25c;transform:translateY(-1px)'), el('span', null, null, a))),
                 m.hasUndo ? el('div', 'display:flex;padding-top:6px', null, m.undone
                   ? el('span', 'font-size:13px;color:#8b9dbd', null, 'בוטל')
-                  : el('button', 'min-height:34px;padding:0 14px;border-radius:10px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:13px;font-weight:600;cursor:pointer', { onClick: m.undo }, 'ביטול')) : null) : null) : null)),
+                  : el('button', 'min-height:34px;padding:0 14px;border-radius:10px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:13px;font-weight:600;cursor:pointer', { onClick: m.undo }, 'ביטול')) : null) : null,
+              m.props.map((p) => el('div', `display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:rgba(4,9,20,.6);border:1px solid ${p.state === 'done' ? 'rgba(143,224,184,.5)' : 'rgba(212,242,92,.4)'};opacity:${p.state === 'no' ? 0.5 : 1}`, { key: p.id },
+                el('span', 'font-size:12px;color:#d4f25c;font-weight:600', null, p.kindLabel + ' · מחכה לאישור'),
+                p.el,
+                el('span', 'font-size:15px;font-weight:700;line-height:1.35', null, p.title),
+                p.text ? el('span', 'font-size:13px;color:#b9c8e2;line-height:1.45', null, p.text) : null,
+                p.source || p.url ? el('span', 'font-size:12px;color:#8b9dbd;direction:ltr;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', null,
+                  [p.source, p.url ? el('a', 'color:#9fdcff', { key: 'u', href: p.url, target: '_blank', rel: 'noopener noreferrer' }, p.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 60)) : null].filter(Boolean).reduce((a, x, i) => (i ? [...a, ' · ', x] : [x]), [])) : null,
+                p.state === 'done' ? el('span', 'font-size:13px;color:#8fe0b8;font-weight:600', null, 'עלה לצג ✓ (אפשר לבטל בהיסטוריה)')
+                  : p.state === 'no' ? el('span', 'font-size:13px;color:#8b9dbd', null, 'לא עלה')
+                  : el('div', 'display:flex;gap:8px', null,
+                    el('button', `flex:1;min-height:40px;border-radius:10px;border:none;background:#d4f25c;color:#0b1400;font-size:14px;font-weight:800;cursor:pointer;opacity:${p.state === 'busy' ? 0.5 : 1}`, { onClick: p.approve }, 'להעלות לצג'),
+                    el('button', 'min-height:40px;padding:0 14px;border-radius:10px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:14px;cursor:pointer', { onClick: p.dismiss }, 'לא'))))) : null)),
           v.agentBusy ? el('div', 'align-self:flex-start;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.12);font-size:14px;color:#b9c8e2', { role: 'status' },
             el('span', 'flex:none;width:8px;height:8px;border-radius:50%;background:#d4f25c'), v.busyText) : null,
           v.showSuggest ? el('div', 'display:flex;flex-wrap:wrap;gap:6px', null, v.suggestions.map((sg) =>
