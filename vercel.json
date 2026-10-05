@@ -6,7 +6,7 @@
       "maxDuration": 60
     },
     "api/feed.ts": {
-      "maxDuration": 15
+      "maxDuration": 30
     },
     "api/mcp.ts": {
       "maxDuration": 30
@@ -18,7 +18,7 @@
       "maxDuration": 60
     },
     "api/live.ts": {
-      "maxDuration": 10
+      "maxDuration": 15
     }
   },
   "headers": [

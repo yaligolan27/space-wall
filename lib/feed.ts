@@ -23,8 +23,8 @@ function feedSettings(raw: any): Settings {
   return cfg;
 }
 
-const DOW = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
-const MON = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
+export const DOW = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+export const MON = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
 const dowOf = (iso: string) => DOW[new Date(iso + 'T00:00:00Z').getUTCDay()];
 
 // Life-event types → the chip label and colour the design uses. `d` = days from today to the event (negative once it
@@ -218,7 +218,7 @@ export async function buildFeed() {
     if (!r.error && r.data) lRows = r.data;
   }
   const launches = lRows.slice(0, cfg.launchCount).map(l => ({ vehicle: [l.vehicle, l.provider].filter(Boolean).join(' · '), mission: l.mission || l.name,
-    site: l.site_he || l.site_en || '', at: l.net, status: LAUNCH_STATUS[l.status] || 'ממתין', code: l.status || '', checked: l.updated_at || null }));
+    site: l.site_he || l.site_en || '', siteEn: l.site_en || '', at: l.net, status: LAUNCH_STATUS[l.status] || 'ממתין', code: l.status || '', checked: l.updated_at || null }));
 
   const lastRun = must(runR, 'runs') as any[];
 

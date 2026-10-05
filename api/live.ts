@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { live } from '../lib/remote-ops.js';
 import { setting } from '../lib/settings.js';
+import { liveInEnglish } from '../lib/translate.js';
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 async function keyOk(req: VercelRequest): Promise<boolean> {
@@ -17,7 +18,8 @@ async function keyOk(req: VercelRequest): Promise<boolean> {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
-    const body = await live();
+    // ?lang=en (the wall in English): the urgent banner and a full-screen moment's text, translated once and cached.
+    const body = req.query.lang === 'en' ? await liveInEnglish(await live(), 6e3) : await live();
     res.setHeader('Cache-Control', 's-maxage=4, stale-while-revalidate=10');
     return res.status(200).json(body);
   } catch (e: any) {

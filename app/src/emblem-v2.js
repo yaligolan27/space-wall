@@ -1,4 +1,4 @@
-// <space-emblem-v2 speed="90" globe="holo|real" sway="on|off" [paused]> — Space Directorate emblem, v2. While `paused` it keeps its last frame and draws nothing.
+// <space-emblem-v2 speed="90" globe="holo|real" sway="on|off" [word="…"] [paused]> — Space Directorate emblem, v2. While `paused` it keeps its last frame and draws nothing.
 // Geometry is measured from the original logo (globe radius R = 1 unit): rocket, fins, the two crossing orbits, 4 satellites (original sizes), condensed wordmark.
 // Objects in front of the globe are scaled by (D-z)/D so the straight-on projection keeps the logo proportions exactly.
 // Tech layer: point-cloud continents, lat/long grid, scanning latitude ring, HUD ticks + radar sweep, Israel ground-station pulse with a live satellite link, light sweep across the lacquer.
@@ -285,7 +285,7 @@
         const fam = "'Open Sans'", spec = '800 condensed 200px ' + fam;
         try { await Promise.race([document.fonts.load(spec, text), new Promise((r) => setTimeout(r, 3000))]); } catch (e) {}
         const c = document.createElement('canvas'); const g = c.getContext('2d');
-        const setFont = () => { g.font = spec + ", 'Arial Narrow', Arial, sans-serif"; try { g.fontStretch = 'condensed'; } catch (e) {} g.direction = 'rtl'; g.textAlign = 'center'; g.textBaseline = 'middle'; };
+        const setFont = () => { g.font = spec + ", 'Arial Narrow', Arial, sans-serif"; try { g.fontStretch = 'condensed'; } catch (e) {} g.direction = /[\u0590-\u05ff]/.test(text) ? 'rtl' : 'ltr'; g.textAlign = 'center'; g.textBaseline = 'middle'; };
         setFont(); const inkW = g.measureText(text).width;
         const cw = Math.ceil(inkW) + 80, ch = 320; c.width = cw; c.height = ch;
         g.fillStyle = '#fff'; g.fillRect(0, 0, cw, ch); setFont(); g.fillStyle = '#000'; g.fillText(text, cw / 2, ch / 2);
@@ -307,6 +307,7 @@
         const dp = (p, eps) => { if (p.length < 3) return p; const [ax, ay] = p[0], [bx, by] = p[p.length - 1]; const Ln = Math.hypot(bx - ax, by - ay) || 1e-9; let md = 0, mi = 0; for (let i = 1; i < p.length - 1; i++) { const q = Math.abs((bx - ax) * (ay - p[i][1]) - (ax - p[i][0]) * (by - ay)) / Ln; if (q > md) { md = q; mi = i; } } return md > eps ? dp(p.slice(0, mi + 1), eps).slice(0, -1).concat(dp(p.slice(mi), eps)) : [p[0], p[p.length - 1]]; };
         const simp = loops.map((loop) => { let far = 0, fd = 0; for (let i = 1; i < loop.length; i++) { const q = Math.hypot(loop[i][0] - loop[0][0], loop[i][1] - loop[0][1]); if (q > fd) { fd = q; far = i; } } return dp(loop.slice(0, far + 1), 0.6).slice(0, -1).concat(dp(loop.slice(far).concat([loop[0]]), 0.6).slice(0, -1)); });
         let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const l of simp) for (const [x, y] of l) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+        if (!BW) BW = Math.min(2.4, BH * (x1 - x0) / (y1 - y0));   // another text (the English wall's): its own width at the logo's height
         const kx = BW / (x1 - x0), ky = BH / (y1 - y0), mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
         const polys = simp.map((l) => l.map(([x, y]) => [(x - mx) * kx, -(y - my) * ky]));
         const inside = (q, poly) => { let c2 = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > q[1]) !== (yj > q[1]) && q[0] < (xj - xi) * (q[1] - yi) / (yj - yi) + xi) c2 = !c2; } return c2; };
@@ -318,7 +319,8 @@
         geo.translate(0, 0, -0.035);
         return new THREE.Mesh(geo, [M.typeFront, M.typeSide]);
       };
-      wordmark('מנהלת החלל', 1.66, 0.27).then((m) => { if (gen !== this._gen) return; m.position.set(0, -1.508, 0); m.rotation.x = deg(-6); wordG.add(m); }).catch((e) => console.warn('wordmark', e));
+      const word = this.getAttribute('word') || 'מנהלת החלל';
+      wordmark(word, word === 'מנהלת החלל' ? 1.66 : 0, 0.27).then((m) => { if (gen !== this._gen) return; m.position.set(0, -1.508, 0); m.rotation.x = deg(-6); wordG.add(m); }).catch((e) => console.warn('wordmark', e));
 
       // ---------- Random events: city-to-city data arcs + target-lock reticles ----------
       const cities = [];

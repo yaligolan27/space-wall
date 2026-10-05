@@ -6,6 +6,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { buildFeed } from '../lib/feed.js';
 import { setting } from '../lib/settings.js';
+import { feedInEnglish } from '../lib/translate.js';
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 async function keyOk(req: VercelRequest): Promise<boolean> {
@@ -18,6 +19,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
     const feed = await buildFeed();
+    // ?lang=en: the wall in English (the remote's switch). Text with no English yet stays Hebrew, and that answer is
+    // cached only briefly, so the next poll picks up what the model has finished meanwhile.
+    if (req.query.lang === 'en') {
+      const en = await feedInEnglish(feed, 12e3);
+      res.setHeader('Cache-Control', en.translated.missing ? 's-maxage=5' : 's-maxage=60, stale-while-revalidate=300');
+      return res.status(200).json(en);
+    }
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
     return res.status(200).json(feed);
   } catch (e: any) {

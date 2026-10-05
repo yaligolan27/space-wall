@@ -378,16 +378,17 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'set_wall_design',
-    description: 'עיצוב הצג. noon: מופע צהריים אוטומטי. qr: קודי QR לכתבות. fx: אפקטי רקע. sway: תנועת מצלמה. feature: שניות לכתבה מרכזית (6–30). list: שניות לכל ידיעה ברשימה (2–10). globe: שניות לסיבוב הגלובוס (20–240). globeStyle: holo (הולוגרפי) או real (ריאליסטי).',
+    description: 'עיצוב הצג. noon: מופע צהריים אוטומטי. qr: קודי QR לכתבות. fx: אפקטי רקע. sway: תנועת מצלמה. feature: שניות לכתבה מרכזית (6–30). list: שניות לכל ידיעה ברשימה (2–10). globe: שניות לסיבוב הגלובוס (20–240). globeStyle: holo (הולוגרפי) או real (ריאליסטי). lang: en = כל הצג באנגלית (למשל כשמשלחת מבקרת; התוכן מתורגם אוטומטית), he = חזרה לעברית.',
     input_schema: obj({
       changes: obj({
         noon: { type: 'boolean' }, qr: { type: 'boolean' }, fx: { type: 'boolean' }, sway: { type: 'boolean' },
         feature: { type: 'integer', minimum: 6, maximum: 30 }, list: { type: 'integer', minimum: 2, maximum: 10 },
         globe: { type: 'integer', minimum: 20, maximum: 240 }, globeStyle: { type: 'string', enum: ['holo', 'real'] },
+        lang: { type: 'string', enum: ['he', 'en'] },
       }),
       label: str('תיאור קצר לשינוי, להיסטוריה. למשל "סגנון הגלובוס: ריאליסטי"', 80),
     }, ['changes', 'label']),
-    async run(a, ctx) { await ACTIONS.design({ patch: a.changes, label: a.label }, ctx.who); return ok(); },
+    async run(a, ctx) { await ACTIONS.design({ patch: a.changes, label: a.label, warm: false }, ctx.who); return ok(); },
   },
   {
     name: 'reset_wall_design',
