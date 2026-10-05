@@ -292,7 +292,7 @@
         keyDraft: '', keyBusy: false, keyErr: '', keyOpen: false,
       };
       this.fileRef = React.createRef(); this.photoRef = React.createRef(); this.scrollRef = React.createRef(); this.previewRef = React.createRef();
-      this.personPhotoRef = React.createRef(); this.importRef = React.createRef(); this.panelRef = React.createRef();
+      this.personPhotoRef = React.createRef(); this.importRef = React.createRef(); this.panelRef = React.createRef(); this.eventPhotoRef = React.createRef();
       this.timers = {};
     }
 
@@ -444,7 +444,7 @@
     }
     openEvent(e) {
       if (e) this.openSheet('event', Object.assign({}, e), 'edit');
-      else this.openSheet('event', { title: '', date: iso(this.state.now), start: '10:00', end: '11:00', place: '', big: false });
+      else this.openSheet('event', { title: '', date: iso(this.state.now), start: '10:00', end: '11:00', place: '', big: false, photo: null });
     }
     showNoon() { this.run('noon', {}, 'הופעל סרטון התדמית').catch(() => {}); }
     showCeleb(x) { this.run('celebrate', { personId: x.person.free ? null : x.person.id, lifeId: x.lifeId }, 'מודעה אישית על כל המסך: ' + dn(x.person)).catch(() => {}); }
@@ -474,7 +474,7 @@
       if (toMin(f.end) <= toMin(f.start)) return this.toast('שעת הסיום צריכה להיות אחרי שעת ההתחלה');
       const edit = sh.mode === 'edit';
       try {
-        await this.run('saveEvent', { id: edit ? f.id : undefined, title: f.title.trim(), date: f.date, start: f.start, end: f.end, place: (f.place || '').trim(), big: !!f.big },
+        await this.run('saveEvent', { id: edit ? f.id : undefined, title: f.title.trim(), date: f.date, start: f.start, end: f.end, place: (f.place || '').trim(), big: !!f.big, photo: f.photo || null },
           (edit ? 'עודכן אירוע: ' : 'נוסף אירוע: ') + f.title.trim());
         this.closeSheet();
       } catch (e) { /* toasted */ }
@@ -503,6 +503,17 @@
       } catch (e) { /* toasted */ }
     }
     delPerson(f) { this.run('deletePerson', { id: f.id }, 'נמחק/ה מהרשימה: ' + dn(f)).then(() => this.closeSheet(), () => {}); }
+    /** The event's picture: shown big when the event takes the full screen, so it keeps more detail than a face. */
+    async onEventPhoto(e) {
+      const fl = e.target.files[0]; e.target.value = ''; if (!fl) return;
+      this.setState({ photoBusy: true });
+      try {
+        let dataUrl = await shrinkImage(fl, 1600); if (dataUrl.length > 1900000) dataUrl = await shrinkImage(fl, 1100);   // the server takes up to 2M
+        const r = await api('POST', { action: 'photo', dataUrl, folder: 'events' }); this.setFV({ photo: r.result.url });
+      }
+      catch (er) { this.toast(er.message && er.message !== 'unauthorized' ? er.message : 'לא הצלחתי להעלות את התמונה'); }
+      finally { this.setState({ photoBusy: false }); }
+    }
     async onPersonPhoto(e) {
       const fl = e.target.files[0]; e.target.value = ''; if (!fl) return;
       this.setState({ photoBusy: true });
@@ -709,7 +720,7 @@
 
       // Everything ahead: directorate events (a year), personal moments still to show, birthdays in the next 30 days.
       const soon = [], bLim = iso(addDays(now, BDAY_DAYS));
-      events.filter((e) => e.date >= ti).forEach((e) => soon.push({ key: e.id, date: e.date, title: e.title, sub: e.start + '–' + e.end + (e.place ? ' · ' + e.place : '') + (e.big ? ' · מודעה מנהלת' : ''), tag: 'אירועים', tagColor: ICE, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
+      events.filter((e) => e.date >= ti).forEach((e) => soon.push({ key: e.id, date: e.date, title: e.title, sub: e.start + '–' + e.end + (e.place ? ' · ' + e.place : '') + (e.big ? ' · מודעה מנהלת' : ''), tag: 'אירועים', tagColor: ICE, img: e.photo || null, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
       life.filter((l) => l.showUntil >= ti).forEach((l) => { const pp = this.lifeP(l), tp = l.kind === 'bereavement' ? tpl('אבל') : tpl(l.type);
         soon.push({ key: l.id, date: l.date, title: dn(pp), sub: (l.note ? l.note + ' · ' : '') + (!onWall(pp) ? 'לא מוצג: ' + (pp.active ? 'ביקש/ה לא להופיע בצג' : 'כבר לא במנהלת') : l.showFrom > ti ? 'יוצג החל מ-' + dm(l.showFrom) : (tp.quiet ? 'מוצג בשקט' : 'מוצג עכשיו')), tag: l.type, tagColor: tp.color, editable: true, edit: () => this.openLife(l), del: () => this.delLife(l) }); });
       (D && D.ticker ? D.ticker : []).forEach((t) => soon.push({ key: t.id, date: t.start < ti ? ti : t.start, title: t.name,
@@ -919,6 +930,9 @@
         evPlace: f.place || '', setEvPlace: this.fv('place'),
         evBigJ: f.big ? 'flex-end' : 'flex-start', evBigBg: f.big ? ICE : OFF, toggleEvBig: () => this.setFV({ big: !f.big }),
         evIsEdit: sh && sh.mode === 'edit', evSaveLabel: sh && sh.mode === 'edit' ? 'שמירת שינויים' : 'שמירה',
+        evHasPhoto: !!f.photo, evThumbEl: f.photo ? imgEl(f.photo, { width: '100%', height: '100%', objectFit: 'cover' }) : null,
+        evPhotoBtn: s.photoBusy ? 'מעלה…' : f.photo ? 'החלפת תמונה' : '+ הוספת תמונה',
+        pickEvPhoto: () => { if (!s.photoBusy && this.eventPhotoRef.current) this.eventPhotoRef.current.click(); }, clearEvPhoto: () => this.setFV({ photo: null }), onEventPhoto: (e) => this.onEventPhoto(e),
         saveEvent: () => this.saveEvent(), deleteEvent: () => { const e = events.find((x) => x.id === f.id); if (e) this.delEvent(e); this.closeSheet(); },
 
         nlHas: !!(nl && nl.range), nlRange: nl ? nl.range : '', nlCount: nl ? nl.count : 0, nlAt: nl ? nlAt(nl.at) : '', nlUrl: nl ? nl.url : '',
@@ -1107,6 +1121,7 @@
             el('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(150,190,240,.08)', null,
               el('div', 'flex:none;width:44px;height:44px;border-radius:10px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.14);display:flex;flex-direction:column;align-items:center;justify-content:center', null,
                 el('span', 'font-size:16px;font-weight:800;line-height:1', null, r.day), el('span', 'font-size:11px;color:#8b9dbd', null, r.dow)),
+              r.img ? el('img', 'flex:none;width:44px;height:44px;border-radius:10px;object-fit:cover;background:#000', { src: r.img, alt: '' }) : null,
               el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null,
                 el('span', 'font-size:15px;font-weight:600;text-wrap:pretty', null, r.title),
                 el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap', null,
@@ -1299,11 +1314,16 @@
               el('label', 'flex:1;min-width:100px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'מ-', el('input', dateField, { type: 'time', value: v.evStart, onChange: v.setEvStart })),
               el('label', 'flex:1;min-width:100px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'עד', el('input', dateField, { type: 'time', value: v.evEnd, onChange: v.setEvEnd }))),
             el('input', field, { value: v.evPlace, onChange: v.setEvPlace, placeholder: 'מקום, למשל: אולם א׳', maxLength: 60 }),
+            el('div', 'display:flex;align-items:center;gap:14px', null,
+              v.evHasPhoto ? el('div', 'flex:none;width:72px;height:72px;border-radius:12px;overflow:hidden;background:#000', null, v.evThumbEl) : null,
+              el('div', 'display:flex;flex-direction:column;gap:6px;align-items:flex-start', null,
+                el('button', 'min-height:38px;padding:0 14px;border-radius:10px;border:1px dashed rgba(159,220,255,.4);background:transparent;color:#9fdcff;font-size:14px;cursor:pointer', { onClick: v.pickEvPhoto }, v.evPhotoBtn),
+                v.evHasPhoto ? linkBtn('הסרת התמונה', v.clearEvPhoto) : el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'תמונה (לא חובה): מוצגת ליד האירוע בצג, וגדולה כשהוא על כל המסך'))),
             el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
               el('div', 'display:flex;flex-direction:column;gap:2px', null, el('span', 'font-size:15px;font-weight:600', null, 'מודעה מנהלת'), el('span', 'font-size:13px;color:#8b9dbd;text-wrap:pretty', null, 'האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד כשהוא נגמר')),
               toggleBtn(true, v.evBigJ, v.evBigBg, v.toggleEvBig, 'מודעה מנהלת')),
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
-              el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.saveEvent, disabled: s.busyAct }, v.evSaveLabel),
+              el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.saveEvent, disabled: s.busyAct || s.photoBusy }, v.evSaveLabel),
               v.evIsEdit ? el('button', 'min-height:48px;padding:0 18px;border-radius:12px;border:1px solid rgba(255,122,107,.5);background:transparent;color:#ff7a6b;font-size:15px;cursor:pointer', { onClick: v.deleteEvent }, 'מחיקה') : null)) : null,
           v.shNl ? h(React.Fragment, null,
             v.nlHas ? el('div', 'display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
@@ -1405,6 +1425,7 @@
         el('input', 'display:none', { type: 'file', ref: this.fileRef, multiple: true, accept: '.xlsx,.xls,.csv,.txt,image/*', onChange: v.onChatFiles }),
         el('input', 'display:none', { type: 'file', ref: this.photoRef, accept: 'image/*', onChange: v.onPhotoFile }),
         el('input', 'display:none', { type: 'file', ref: this.personPhotoRef, accept: 'image/*', onChange: v.onPersonPhoto }),
+        el('input', 'display:none', { type: 'file', ref: this.eventPhotoRef, accept: 'image/*', onChange: v.onEventPhoto }),
         el('input', 'display:none', { type: 'file', ref: this.importRef, accept: '.xlsx,.xls,.csv,.txt', onChange: v.onImportFile }),
         el('div', { minHeight: '100vh', display: 'grid', gridTemplateColumns: v.rootCols, background: 'radial-gradient(1200px 600px at 60% -10%, #0c1c3a 0%, #040914 60%)' }, { dir: 'rtl' },
           el('main', { minWidth: 0, padding: v.mainPad, display: 'flex', flexDirection: 'column', gap: 16 }, null,
