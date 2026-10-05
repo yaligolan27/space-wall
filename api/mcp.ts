@@ -130,9 +130,10 @@ function buildServer(): McpServer {
 
   server.registerTool('show_fullscreen', {
     title: 'הצגה על כל המסך',
-    description: 'מציג עכשיו על כל המסך: noon (מופע הצהריים, סרטון התדמית), celebration (ברכה: life_event_id של אירוע אישי, גם של מי שלא ברשימה; או person_id לבד, וזו ברכת יום הולדת), event (אירוע מנהלת: event_id; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
-    inputSchema: { what: z.enum(['noon', 'celebration', 'event', 'end']), person_id: idOf.optional(), life_event_id: idOf.optional(), event_id: idOf.optional() },
-  }, guard(async (a: { what: string; person_id?: string; life_event_id?: string; event_id?: string }) => {
+    description: 'מציג עכשיו על כל המסך: welcome (מסך WELCOME TO THE ISRAELI SPACE PROGRAM OFFICE לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה; guest: שורה אופציונלית מתחת לכותרת), noon (מופע הצהריים, סרטון התדמית), celebration (ברכה: life_event_id של אירוע אישי, גם של מי שלא ברשימה; או person_id לבד, וזו ברכת יום הולדת), event (אירוע מנהלת: event_id; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
+    inputSchema: { what: z.enum(['welcome', 'noon', 'celebration', 'event', 'end']), guest: z.string().max(80).optional(), person_id: idOf.optional(), life_event_id: idOf.optional(), event_id: idOf.optional() },
+  }, guard(async (a: { what: string; guest?: string; person_id?: string; life_event_id?: string; event_id?: string }) => {
+    if (a.what === 'welcome') return ACTIONS.welcome({ guest: a.guest }, WHO).then(() => 'בוצע');
     if (a.what === 'noon') return ACTIONS.noon({}, WHO).then(() => 'בוצע');
     if (a.what === 'end') return ACTIONS.endTakeover({}, WHO).then(() => 'בוצע');
     if (a.what === 'event') return ACTIONS.showEvent({ eventId: a.event_id }, WHO).then(() => 'בוצע');

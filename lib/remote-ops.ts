@@ -30,6 +30,7 @@ const NOON_MS = 150e3;            // 10 s countdown + the 107 s promo, with a ma
 const CELEBRATE_MS = 60e3;
 const EVENT_FALLBACK_MS = 30 * 60e3;
 const EVENT_PREVIEW_MS = 10 * 60e3;
+const WELCOME_MS = 12 * 3600e3;   // the welcome screen waits for "enter" (endTakeover); a forgotten one still ends
 export const HE_TYPE: Record<string, string> = { birthday: 'יום הולדת', wedding: 'חתונה', birth: 'לידה', bereavement: 'אבל', promotion: 'העלאה בדרגה', discharge: 'שחרור', joined: 'קליטה', other: 'אירוע' };
 
 /** Mourning words as whole words (with a ו/ב/ה/ל prefix), so "חתימות" or "השלמות" aren't read as "מות". Same list as the remote's tpl(). */
@@ -263,6 +264,14 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const now = Date.now();
     await record(who, 'הופעל מופע הצהריים', [await patchState({ takeover: { id: 'rt:' + now, kind: 'noon', until: new Date(now + NOON_MS).toISOString() } }, who)]);
   },
+  /** The welcome screen for a delegation's visit, up until "enter" (endTakeover), which plays the wall's entrance.
+   *  guest: an optional line under the title, as typed (e.g. "Delegation of Japan"). */
+  async welcome(a, who) {
+    const { guest } = z.object({ guest: z.string().trim().max(80, 'עד 80 תווים').optional() }).parse(a || {});
+    const now = Date.now();
+    await record(who, 'מסך ברוכים הבאים' + (guest ? ': ' + guest : ''),
+      [await patchState({ takeover: { id: 'rt:' + now, kind: 'welcome', guest: guest || '', until: new Date(now + WELCOME_MS).toISOString() } }, who)]);
+  },
   async celebrate(a, who) {
     const { personId, lifeId } = z.object({ personId: UUID.nullable().optional(), lifeId: UUID.optional() })
       .refine(x => x.personId || x.lifeId, 'חסר למי הברכה').parse(a);
@@ -293,7 +302,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const tk = effectiveTakeover(st, big, now);
     if (!tk) return;
     const patch: Row = tk.auto ? { dismissed: [...(st.dismissed || []), tk.id].slice(-20) } : { takeover: null };
-    await record(who, 'חזרה לתצוגה רגילה', [await patchState(patch, who)]);
+    await record(who, tk.kind === 'welcome' ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה', [await patchState(patch, who)]);
   },
   async noonToday(a, who) {
     const { on } = z.object({ on: z.boolean() }).parse(a);
