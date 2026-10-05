@@ -1,4 +1,4 @@
-// <space-emblem-v2 speed="90" globe="holo|real" sway="on|off"> — Space Directorate emblem, v2.
+// <space-emblem-v2 speed="90" globe="holo|real" sway="on|off" [paused]> — Space Directorate emblem, v2. While `paused` it keeps its last frame and draws nothing.
 // Geometry is measured from the original logo (globe radius R = 1 unit): rocket, fins, the two crossing orbits, 4 satellites (original sizes), condensed wordmark.
 // Objects in front of the globe are scaled by (D-z)/D so the straight-on projection keeps the logo proportions exactly.
 // Tech layer: point-cloud continents, lat/long grid, scanning latitude ring, HUD ticks + radar sweep, Israel ground-station pulse with a live satellite link, light sweep across the lacquer.
@@ -6,14 +6,25 @@
   const TEXDIR = '/assets/textures/';
   const res = (f) => (window.__resources && window.__resources[f.replace(/\W/g, '_')]) || (TEXDIR + f);
   class SpaceEmblemV2 extends HTMLElement {
-    static get observedAttributes() { return ['speed', 'sway']; }
+    static get observedAttributes() { return ['speed', 'sway', 'paused']; }
     connectedCallback() { if (this._started) return; this._started = true; this.style.display = 'block'; this._init().catch((e) => console.error('space-emblem-v2', e)); }
     disconnectedCallback() {
       this._alive = false; this._started = false; this._gen = (this._gen || 0) + 1;
       if (this._ro) this._ro.disconnect();
-      if (this._renderer) { this._renderer.dispose(); this._renderer.domElement.remove(); this._renderer = null; }
+      if (this._onResize) removeEventListener('resize', this._onResize);
+      // Lose the context now: a phone holding two of them (the wall builds the emblem again once its data arrives) runs out of memory.
+      if (this._renderer) { this._renderer.dispose(); this._renderer.forceContextLoss(); this._renderer.domElement.remove(); this._renderer = null; }
     }
-    attributeChangedCallback() { this._speed = Number(this.getAttribute('speed')) || 90; this._sway = this.getAttribute('sway') !== 'off'; }
+    /** Drawing resolution. Shown small (the 1920×1080 wall on a phone, or the remote's preview of it), the emblem gets
+     *  about the screen pixels it really covers: a full-size picture there is 10+ times larger and exhausted a phone's
+     *  memory. A lobby screen (seen at half size or more) draws it as before. */
+    _sharpness() {
+      const dpr = window.devicePixelRatio || 1;
+      let k = this.clientWidth ? this.getBoundingClientRect().width / this.clientWidth : 1;   // the wall's own scaling
+      try { const f = window.frameElement; if (f && innerWidth) k *= f.getBoundingClientRect().width / innerWidth; } catch (e) { /* not ours */ }
+      return k > 0 && k < 0.5 ? Math.min(2, Math.max(0.35, dpr * k)) : Math.min(dpr, 2);
+    }
+    attributeChangedCallback() { this._speed = Number(this.getAttribute('speed')) || 90; this._sway = this.getAttribute('sway') !== 'off'; this._paused = this.hasAttribute('paused'); }
     async _init() {
       this.attributeChangedCallback();
       const gen = this._gen = (this._gen || 0) + 1;
@@ -27,7 +38,7 @@
       const w = this.clientWidth || 800, h = this.clientHeight || 800;
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
       this._renderer = renderer;
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setPixelRatio(this.clientWidth ? this._sharpness() : 1);
       renderer.setSize(w, h); renderer.setClearColor(0x000000, 0);
       renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.08;
       renderer.domElement.style.cssText = 'width:100%;height:100%;display:block';
@@ -375,6 +386,7 @@
       let last = performance.now(), t = 0;
       const loop = (now) => {
         if (!this._alive || gen !== this._gen) return;
+        if (this._paused) { last = now; setTimeout(() => loop(performance.now()), 250); return; }
         const dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt;
         U.time.value = t;
         spinG.rotation.y = EARTH0 + TAU / this._speed * t;
@@ -431,8 +443,16 @@
       };
       setTimeout(() => loop(performance.now()), 0);
       this.renderOnce = () => renderer.render(scene, camera);
-      this._ro = new ResizeObserver(() => { const nw = this.clientWidth, nh = this.clientHeight; if (!nw || !nh || !this._renderer) return; renderer.setSize(nw, nh); fit(nw, nh); });
-      this._ro.observe(this);
+      // A new size or sharpness only on a real change: setting one clears the picture, and a wall coming back from rest
+      // (not displayed, nothing to measure) must still show it.
+      let cw = w, ch = h;
+      const resize = () => {
+        const nw = this.clientWidth, nh = this.clientHeight; if (!nw || !nh || !this._renderer) return;
+        const pr = this._sharpness(); if (nw === cw && nh === ch && Math.abs(pr - renderer.getPixelRatio()) < 0.05) return;
+        cw = nw; ch = nh; renderer.setPixelRatio(pr); renderer.setSize(nw, nh); fit(nw, nh); renderer.render(scene, camera);
+      };
+      this._ro = new ResizeObserver(resize); this._ro.observe(this);
+      addEventListener('resize', this._onResize = resize);
     }
   }
   if (!customElements.get('space-emblem-v2')) customElements.define('space-emblem-v2', SpaceEmblemV2);

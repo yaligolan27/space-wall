@@ -94,10 +94,13 @@ window.makeWallOverlays = (React) => {
   };
 
   // ---------- 12:00 show: 10…0 countdown around the logo, then the promo video ----------
+  // The video loads, unseen, from the start of the countdown, so it plays from the first frame without waiting on the
+  // network. Without a src (the remote's preview, which shows its own card) the show ends on the dark background.
   const NoonShow = ({ src, logo, muted, onDone }) => {
     const [phase, setPhase] = useState('count'), [n, setN] = useState(10), vid = useRef(null);
     useEffect(() => { if (phase !== 'count') return; const id = setInterval(() => setN((x) => { if (x <= 0) { clearInterval(id); setTimeout(() => setPhase('video'), 900); return 0; } return x - 1; }), 1000); return () => clearInterval(id); }, [phase]);
     useEffect(() => { if (phase !== 'video' || !vid.current) return; const v = vid.current; v.muted = !!muted; v.volume = 1; v.play().catch(() => { v.muted = true; v.play().catch(() => onDone && onDone()); }); }, [phase]);
+    const playing = phase === 'video';
     const ticks = Array.from({ length: 10 }, (_, i) => i);
     return shell([
       h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 50%, rgba(14,34,70,.94), rgba(2,5,12,.99) 65%)' } }),
@@ -110,8 +113,8 @@ window.makeWallOverlays = (React) => {
           h('div', { key: n, dir: 'ltr', style: { position: 'absolute', left: 0, right: 0, bottom: -150, textAlign: 'center', fontFamily: LEX, fontSize: 110, fontWeight: 300, color: n === 0 ? '#d4f25c' : '#fff', animation: 'countPop .9s ease both', fontVariantNumeric: 'tabular-nums' } }, n === 0 ? 'LIFTOFF' : p2(n))),
         h('div', { style: { fontSize: 40, fontWeight: 700, letterSpacing: '.02em' } }, 'מנהלת החלל · מופע הצהריים'),
         h('div', { style: { fontFamily: MONO, fontSize: 20, color: '#8b9dbd', letterSpacing: '.2em' } }, '12:00 · DAILY BROADCAST')) : null,
-      n === 0 ? h('div', { key: 'fl', style: { position: 'absolute', inset: 0, background: '#fff', animation: 'flash 1.2s ease-out both', pointerEvents: 'none' } }) : null,
-      phase === 'video' ? h('video', { key: 'v', ref: vid, src, playsInline: true, onEnded: () => onDone && onDone(), style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000', animation: 'ovIn 1s ease both' } }) : null
+      src ? h('video', { key: 'v', ref: vid, src, preload: 'auto', playsInline: true, onEnded: () => onDone && onDone(), style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000', visibility: playing ? 'visible' : 'hidden', animation: playing ? 'ovIn 1s ease both' : 'none' } }) : null,
+      n === 0 && !playing ? h('div', { key: 'fl', style: { position: 'absolute', inset: 0, background: '#fff', animation: 'flash 1.2s ease-out both', pointerEvents: 'none' } }) : null
     ]);
   };
 
