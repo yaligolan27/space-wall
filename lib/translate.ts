@@ -56,11 +56,11 @@ async function saveCache(add: Record<string, string>): Promise<void> {
 }
 
 // ---- the model -------------------------------------------------------------------------------------------------
-const INSTRUCTIONS = `You translate the text of a large lobby display at the Israel Space Program Office (מנהלת החלל, Ministry of Defense) into English, for visiting foreign delegations.
+const INSTRUCTIONS = `You translate the text of a large lobby display at the Space Program Office (מנהלת החלל, Israel, Ministry of Defense) into English, for visiting foreign delegations.
 Each item is one piece of on-screen text: a news headline or summary, a category, an event name or place, a launch mission or site, a person's name, a short greeting line, or an announcement.
 - Natural, concise English that fits the same space on screen. Keep the tone: news reads like news, greetings warm.
 - People's names: transliterate them in their common English spelling (דנה כהן → Dana Cohen). A military rank before a name becomes its English abbreviation: טוראי Pvt., רב"ט Cpl., סמל Sgt., סמ"ר SSgt., רס"ל SFC, רס"ר MSgt., רס"מ SgtMaj., רס"ב CWO, סג"ם 2nd Lt., סגן Lt., סרן Capt., רס"ן Maj., סא"ל Lt. Col., אל"ם Col., תא"ל Brig. Gen., אלוף Maj. Gen.
-- Known organizations and programs by their official English names (סוכנות החלל הישראלית → Israel Space Agency, התעשייה האווירית → Israel Aerospace Industries, רקיע → Rakia, מנהלת החלל or המנהלת → the Israel Space Program Office).
+- Known organizations and programs by their official English names (סוכנות החלל הישראלית → Israel Space Agency, התעשייה האווירית → Israel Aerospace Industries, רקיע → Rakia, מנהלת החלל or המנהלת → the Space Program Office).
 - Keep numbers, dates, times, URLs and the separators · – | exactly as they are. Text already in English stays as it is.
 - Gendered Hebrew forms like חוגג/ת become plain English ("celebrating").
 Return every item with its id and the English text.`;

@@ -362,7 +362,7 @@
       this._embRest = rest;
       return (this._emb = h('div', { style: { position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
         h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } }),
-        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, word: tr('מנהלת החלל', 'ISRAEL SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
+        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
@@ -478,7 +478,7 @@
           // and the emblem sits a little right of the file's middle.
           h('div', { 'data-w': 'logo', style: { position: 'relative', width: 52, height: 52, flex: 'none', borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', overflow: 'hidden' } },
             h('img', { 'data-w': 'logo-img', src: '/assets/logo-mark.png', alt: '', style: { position: 'absolute', left: '50%', top: '50%', width: 54, height: 'auto', marginLeft: -28.4, marginTop: -23.3, clipPath: 'inset(0 0 23% 0)' } })),
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { 'data-w': 'title', style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Israel Space Program Office')))),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { 'data-w': 'title', style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Space Program Office')))),
         headline ? h('div', { 'data-w': 'headline', style: { padding: '8px 28px', borderRadius: 999, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(212,242,92,.35)', fontSize: 26, fontWeight: 700, color: '#e6f1ff', whiteSpace: 'nowrap', maxWidth: 820, overflow: 'hidden', textOverflow: 'ellipsis' } }, headline) : h('div'),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, fontFamily: "'Lexend',sans-serif" } },
           ago ? h('div', { 'data-w': 'updated', style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, ago.text)) : null,

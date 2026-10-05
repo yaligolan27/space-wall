@@ -131,7 +131,7 @@ function buildServer(): McpServer {
 
   server.registerTool('show_fullscreen', {
     title: 'הצגה על כל המסך',
-    description: 'מציג עכשיו על כל המסך: welcome (מסך WELCOME TO THE ISRAELI SPACE PROGRAM OFFICE לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה; guest: שורה אופציונלית מתחת לכותרת), noon (סרטון התדמית), celebration (מודעה אישית: life_event_id של אירוע אישי, גם של מי שלא ברשימה; או person_id לבד, וזו מודעת יום הולדת), event (מודעה מנהלת: event_id של אירוע; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
+    description: 'מציג עכשיו על כל המסך: welcome (מסך WELCOME TO THE SPACE PROGRAM OFFICE לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה; guest: שורה אופציונלית מתחת לכותרת), noon (סרטון התדמית), celebration (מודעה אישית: life_event_id של אירוע אישי, גם של מי שלא ברשימה; או person_id לבד, וזו מודעת יום הולדת), event (מודעה מנהלת: event_id של אירוע; יורד לבד בסוף האירוע), או end (חזרה לתצוגה רגילה).',
     inputSchema: { what: z.enum(['welcome', 'noon', 'celebration', 'event', 'end']), guest: z.string().max(80).optional(), person_id: idOf.optional(), life_event_id: idOf.optional(), event_id: idOf.optional() },
   }, guard(async (a: { what: string; guest?: string; person_id?: string; life_event_id?: string; event_id?: string }) => {
     if (a.what === 'welcome') return ACTIONS.welcome({ guest: a.guest }, WHO).then(() => 'בוצע');
