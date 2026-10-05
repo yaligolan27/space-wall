@@ -188,7 +188,8 @@ window.makeWallOverlays = (React) => {
     io.current.fx = fx; io.current.leaving = leaving; io.current.target = target;
     useEffect(() => {
       const c = ref.current, g = c.getContext('2d');
-      const st = c.getBoundingClientRect().width / 1920 || 1, k = preview ? 0.5 : Math.min(1, st * (window.devicePixelRatio || 1));
+      const st = (c.getBoundingClientRect().width / 1920 || 1) * (window.__pageScale ? window.__pageScale() : 1);
+      const k = preview ? 0.5 : Math.min(1, st * (window.devicePixelRatio || 1));
       c.width = Math.round(1920 * k); c.height = Math.round(1080 * k);
       const rnd = mulberry(0x5EED), BANDS = [[1024, 0.5, 0.9, 0.22, 0.5, 0.04], [376, 0.8, 1.3, 0.45, 0.8, 0.07], [82, 1.3, 2.0, 0.75, 1, 0.11]];
       const N = BANDS.reduce((a, b) => a + b[0], 0);

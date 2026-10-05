@@ -29,6 +29,7 @@
       const dpr = window.devicePixelRatio || 1;
       let k = this.clientWidth ? this.getBoundingClientRect().width / this.clientWidth : 1;   // the wall's own scaling
       try { const f = window.frameElement; if (f && innerWidth) k *= f.getBoundingClientRect().width / innerWidth; } catch (e) { /* not ours */ }
+      if (window.__pageScale) k *= window.__pageScale();   // a phone zooms the whole page out (index.html)
       return Math.min(this._maxpr, k > 0 && k < 0.5 ? Math.min(2, Math.max(0.35, dpr * k)) : Math.min(dpr, 2));
     }
     attributeChangedCallback() {
@@ -535,7 +536,7 @@
         cw = nw; ch = nh; renderer.setPixelRatio(pr); renderer.setSize(nw, nh); fit(nw, nh); renderer.render(scene, camera);
       };
       this._ro = new ResizeObserver(resize); this._ro.observe(this);
-      addEventListener('resize', this._onResize = resize);
+      addEventListener('resize', this._onResize = () => { resize(); setTimeout(resize, 120); });   // again once the wall has re-fitted its stage
     }
   }
   if (!customElements.get('space-emblem-v2')) customElements.define('space-emblem-v2', SpaceEmblemV2);
