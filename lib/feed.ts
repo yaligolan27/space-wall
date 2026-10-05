@@ -164,7 +164,7 @@ export async function buildFeed() {
     .slice(0, 4).map(e => {
       const d = new Date(e.starts_at), iso = isoDateIL(d), tm = timeIL(d);
       return { day: iso.slice(8, 10), dow: dowOf(iso), mon: MON[Number(iso.slice(5, 7)) - 1], time: tm === '00:00' ? '' : tm, name: e.title, place: e.place || '',
-        start: d.toISOString(), end: new Date(endOf(e)).toISOString() };
+        start: d.toISOString(), end: new Date(endOf(e)).toISOString(), img: e.photo_url || null };
     });
 
   // ---- people: explicit life events + computed birthdays

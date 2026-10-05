@@ -21,7 +21,7 @@ three seconds still. A double-click or the F key does the same. Browser full scr
 | Area | Content | Source |
 | --- | --- | --- |
 | Header | logo, "updated X ago" with a live dot (amber when stale), Israel clock + date, UTC | feed `generatedAt` |
-| Right column, top | אירועים: the week's internal events, the next one highlighted | Telegram → `directorate_events` |
+| Right column, top | אירועים: the week's internal events, the next one highlighted, each with its picture when it has one | Telegram, remote → `directorate_events` |
 | Right column, bottom | אנשי המנהלת: rotating spotlight + six tiles (birthdays, births, weddings, promotions, discharges, new people) | Telegram → `people`, `life_events` |
 | Centre | the 3D emblem (holographic globe, orbits, satellites, wordmark) | — |
 | Left column | ניוזלטר החלל השבועי: rotating feature card with QR to the article, then a scrolling list | weekly newsletter import |
@@ -71,7 +71,7 @@ Example for the lobby: `https://space-wall.vercel.app/?fx=1&noon=1`.
   "catImage": { "ביטחון": "/assets/img/….jpg" }, // category → fallback image when an item has none
   "ticker":   [{ "kind": "אירוע" | "הזדמנות", "date": "5–9.10", "name": "IAC 2026 · אנטליה" }],
   "launches": [{ "vehicle": "Falcon 9 · SpaceX", "mission": "Crew-13", "site": "קייפ קנוורל", "at": "2026-10-01T18:10:00+03:00", "status": "אושר" | "ממתין" }],
-  "directorate": [{ "day": "27", "dow": "א׳", "mon": "ספט׳", "time": "09:00", "name": "…", "place": "…" }],
+  "directorate": [{ "day": "27", "dow": "א׳", "mon": "ספט׳", "time": "09:00", "name": "…", "place": "…", "img": null }],
   "people": [{ "type": "יום הולדת", "color": "#e9b872", "name": "…", "line": "…", "date": "27.9", "photo": null, "celebrate": true }],
   "tracked":  [ … ],                           // SSA objects, reserved for a future panel
   "promoVideo": "/assets/promo.mp4"
@@ -79,7 +79,8 @@ Example for the lobby: `https://space-wall.vercel.app/?fx=1&noon=1`.
 ```
 
 `photo` is a URL when the person has one (`people.photo_url`); otherwise the wall draws an initials badge.
-It never shows a stock portrait next to a real name.
+It never shows a stock portrait next to a real name. A directorate event's `img` is the picture uploaded for it in the
+remote (`directorate_events.photo_url`): a thumbnail beside it in the panel, and large on its full screen.
 
 ## Files
 

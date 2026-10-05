@@ -92,7 +92,7 @@ const INSTRUCTIONS = `את/ה "סוכן הצג" בשלט של צג החלל, ה�
 - הודעת אבל לעולם לא עולה על כל המסך ולא נכתבת כשמחה.
 - אירוע בלוח האירועים בלי שעת סיום נמשך שעה. בלי שעת התחלה: שואלים.
 - רשימת אנשים מקובץ: עד 20 שורות אפשר עם import_people (עם הסכמה להופיע בצג, אם יש עמודה כזו). קובץ גדול יותר, וגם תשובות טופס הסקר, מייבאים במסך "אנשים" בשלט, בכפתור "ייבוא מקובץ", שמראה תצוגה מקדימה לפני השמירה.
-- תמונות שצורפו לשיחה ממוספרות (תמונה 1, תמונה 2...). כדי לשים תמונה לאדם או לשמחה, שולחים את המספר ב-photo_image.
+- תמונות שצורפו לשיחה ממוספרות (תמונה 1, תמונה 2...). כדי לשים תמונה לאדם, לשמחה או לאירוע, שולחים את המספר ב-photo_image.
 - שאלות על מה שיש בצג או ברשימות: עונים מהנתונים, בלי כלים.
 
 מעבר לנתונים:
@@ -139,7 +139,7 @@ export function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string, laun
       id: l.id, person_id: l.personId || undefined, for: l.personId ? byId.get(l.personId)?.name : l.name, type: l.type, date: l.date,
       show_from: l.showFrom !== l.date ? l.showFrom : undefined, note: l.note, photo: l.photo === 'upload' ? 'uploaded' : l.photo === 'none' ? 'none' : undefined,
     })),
-    directorate_events: s.events.map(e => compact({ id: e.id, title: e.title, date: e.date, start: e.start, end: e.end, place: e.place, important: e.big || undefined })),
+    directorate_events: s.events.map(e => compact({ id: e.id, title: e.title, date: e.date, start: e.start, end: e.end, place: e.place, important: e.big || undefined, has_photo: e.photo ? true : undefined })),
     ticker: s.ticker.map(t => compact({ id: t.id, name: t.name, kind: t.kind, start: t.start, end: t.end, place: t.place, url: t.url })),
     newsletter: s.newsletter ? { range: s.newsletter.range, items: s.newsletter.count, imported: s.newsletter.at } : null,
     recent_changes: s.history.slice(0, 12).map(h => ({ id: h.id, at: isoDateIL(new Date(h.at)) + ' ' + timeIL(new Date(h.at)), who: h.who, text: h.text })),
@@ -182,7 +182,7 @@ async function rowOf(table: string, rowId: unknown, what: string): Promise<Row> 
   return r;
 }
 /** A picture attached to the conversation → a public URL in the wall-photos bucket (uploaded once). */
-async function imageUrl(ctx: Ctx, n: unknown, folder: 'people' | 'life' | 'web'): Promise<string> {
+async function imageUrl(ctx: Ctx, n: unknown, folder: 'people' | 'life' | 'events' | 'web'): Promise<string> {
   const i = Number(n), im = Number.isInteger(i) ? ctx.images[i - 1] : undefined;
   if (!im) throw new Error('אין תמונה ' + String(n) + ' בשיחה');
   const k = folder + ':' + i, hit = ctx.uploaded.get(k);
@@ -309,6 +309,7 @@ export const TOOLS: Tool[] = [
       id: id('לעריכת אירוע קיים. בלי id נוצר אירוע חדש'),
       title: str('שם האירוע', 80), date: date('תאריך'), start: time('שעת התחלה'), end: time('שעת סיום. בלי: שעה אחרי ההתחלה'),
       place: str('מקום', 60), important: bool('מודעה מנהלת: האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד בסופו'),
+      photo_image: PHOTO_IMAGE, no_photo: bool('להסיר את התמונה של האירוע'),
     }),
     async run(a, ctx) {
       let b: Row = {}, dur = 60;
@@ -318,6 +319,8 @@ export const TOOLS: Tool[] = [
         dur = toMin(b.end) - toMin(b.start) > 0 ? toMin(b.end) - toMin(b.start) : 60;
       }
       Object.assign(b, defined({ title: a.title, date: a.date, start: a.start, end: a.end, place: a.place, big: a.important }));
+      if (a.photo_image != null) b.photo = await imageUrl(ctx, a.photo_image, 'events');
+      else if (a.no_photo) b.photo = null;
       if (!(b.title || '').trim()) throw new Error('חסר שם לאירוע (title)');
       if (!b.date) throw new Error('חסר תאריך (date)');
       if (!b.start) throw new Error('חסרה שעת התחלה (start)');

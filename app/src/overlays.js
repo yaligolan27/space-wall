@@ -127,12 +127,15 @@ window.makeWallOverlays = (React) => {
 
   // ---------- important directorate event, started from the remote or automatically while it runs ----------
   // `until` is when this screen itself ends (the remote can show an event for less, or after, its own end).
+  // With a picture (event.img), the words take one side and the picture, whole and uncropped, the other.
   const EventTakeover = ({ event, until }) => shell([
     h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'linear-gradient(160deg,#0b1d42 0%,#040914 70%)' } }),
-    h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27, padding: 134, boxSizing: 'border-box' } },
-      h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, tr('עכשיו במנהלת', 'Happening now')),
-      h('span', { style: { fontSize: 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
-      h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, event.start + '–' + event.end + (event.place ? ' · ' + event.place : ''))),
+    h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 80, padding: 134, boxSizing: 'border-box' } },
+      h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27 } },
+        h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, tr('עכשיו במנהלת', 'Happening now')),
+        h('span', { style: { fontSize: event.img ? 84 : 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
+        h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, event.start + '–' + event.end + (event.place ? ' · ' + event.place : ''))),
+      event.img ? h('img', { src: event.img, alt: '', onError: (ev) => { ev.currentTarget.style.display = 'none'; }, style: { flex: 'none', display: 'block', maxWidth: 760, maxHeight: 760, borderRadius: 28, border: '1px solid rgba(150,190,240,.22)', boxShadow: '0 30px 80px rgba(0,0,0,.55)', animation: 'popIn 1s cubic-bezier(.2,1.4,.4,1) .3s both' } }) : null),
     h('span', { key: 'end', style: { position: 'absolute', bottom: 77, [EN() ? 'left' : 'right']: 134, fontSize: 29, color: '#8b9dbd' } }, tr('יורד לבד ב-', 'Until ') + (until ? fmtHM.format(new Date(until)) : event.end))
   ]);
 

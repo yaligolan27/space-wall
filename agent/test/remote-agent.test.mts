@@ -33,6 +33,9 @@ const snap: any = {
 const b = brief(snap, 'יעלי');
 check('the brief has today, the operator and the people', b.includes('(2026-10-04)') && b.includes('יעלי') && b.includes('"name":"דנה שמש"'));
 check('no contact details, notes or survey answers in the brief', !/dana@example\.com|050-1234567|הערה פנימית|תשובה בסקר/.test(b));
+const withPhoto = brief({ ...snap, events: [{ id: 'e1', title: 'השקה', date: '2026-10-04', start: '10:00', end: '11:00', place: '', big: false,
+  photo: 'https://x.supabase.co/storage/v1/object/public/wall-photos/events/a.jpg' }] }, 'יעלי');
+check('an event\'s picture is told as has_photo, without its address', withPhoto.includes('"has_photo":true') && !withPhoto.includes('wall-photos/events/a.jpg'));
 
 // ---- the conversation
 const JPG = (n: number) => ({ name: `p${n}.jpg`, dataUrl: 'data:image/jpeg;base64,' + Buffer.from('img' + n).toString('base64') });
