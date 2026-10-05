@@ -105,7 +105,7 @@ const compact = (o: Row) => Object.fromEntries(Object.entries(o).filter(([, v]) 
 /** The wall and its data as the agent sees them (a second system block, refreshed every request). */
 export function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string): string {
   const now = new Date(s.now), byId = new Map(s.people.map(p => [p.id, p]));
-  const tk = s.takeover as Row | null;
+  const tk = (s.takeover?.leaving ? null : s.takeover) as Row | null;   // a welcome on its way out (the entrance) is over
   const tkText = !tk ? null : (tk.kind === 'noon' ? 'סרטון תדמית' : tk.kind === 'welcome' ? 'מסך ברוכים הבאים, עד שלוחצים "כניסה לצג הבית" (end)' : tk.kind === 'event' ? 'מודעה מנהלת: ' + tk.title : 'מודעה אישית: ' + (tk.person?.name || '') + (tk.type ? ' · ' + tk.type : ''))
     + ' (עד ' + timeIL(new Date(tk.until)) + ')';
   const data = {

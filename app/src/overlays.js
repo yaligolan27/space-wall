@@ -17,6 +17,18 @@ window.wallAvatar = (sz, photo, name) => {
   g.fillStyle = '#e6f1ff'; g.font = '700 ' + Math.round(sz * 0.38) + 'px Heebo, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl'; g.fillText(ini, sz / 2, sz / 2 + sz * 0.03);
   return (cache[key] = c.toDataURL());
 };
+// The home wall's emblem slot and the welcome screen's hero emblem, in stage px (1920×1080). Both wall.js and the welcome use
+// it: the hero lands exactly where the wall's own emblem draws, as a downscale (the emblem's framing depends only on the
+// box's aspect, so equal px-per-unit and globe centre mean an identical picture).
+window.wallGeo = (() => {
+  const SLOT_DATA = { x: 532, y: 102, w: 856, h: 794 }, SLOT_NODATA = { x: 530, y: 88, w: 860, h: 874 };
+  const ppu = (b) => b.h / (2 * Math.max(1.62, 1.62 * b.h / b.w));            // px per emblem unit (emblem-v2 fit())
+  const gc = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 - 0.2 * ppu(b) });   // the globe's centre
+  const HERO = { w: 1027.2, h: 952.8, ppu: 952.8 / 3.24, g: { x: 1376, y: 500 } };   // the slot ×1.2; its globe centre on the stage
+  HERO.gIn = { x: HERO.w / 2, y: HERO.h / 2 - 0.2 * HERO.ppu };                   // …and inside its box
+  const landing = (slot) => { const c = gc(slot); return { s: ppu(slot) / HERO.ppu, tx: c.x - HERO.g.x, ty: c.y - HERO.g.y, gc: c }; };
+  return { SLOT_DATA, SLOT_NODATA, ppu, gc, HERO, landing };
+})();
 window.makeWallOverlays = (React) => {
   const h = React.createElement, { useState, useEffect, useRef } = React;
   const LEX = "'Lexend',sans-serif", MONO = "'IBM Plex Mono',monospace";
@@ -140,99 +152,353 @@ window.makeWallOverlays = (React) => {
   ]);
 
   // ---------- welcome screen for a delegation's visit, until "enter" in the remote ----------
-  // Light on purpose (the lobby computer is weak): one 2D canvas of stars, everything else CSS transform/opacity.
-  // `leaving` (a timestamp) starts the way out: the stars go to warp, the words fly past, and the logo's white disk
-  // grows over the whole screen; the wall then reveals itself under it (wall.js: WELCOME_REVEAL_MS) with its own entrance.
-  const Warp = ({ leaving, fx }) => {
-    const ref = useRef(null), leaveRef = useRef(leaving);
-    leaveRef.current = leaving;
+  // Deep space with the directorate's realistic 3D emblem on the right: it waits at night, the sun rises on its limb and the
+  // logo assembles (emblem-v2 intro="go"), then the title lands on the left. Idle, everything breathes on one 9 s cycle
+  // (sun → limb → glow → words) while the sky slowly wheels. On "enter" (`leaving`, a performance.now() stamp from the wall)
+  // the words drift off and one continuous camera move carries the Earth into the home wall's emblem slot while the wall
+  // assembles around it (wall.js); two rings clamp it, and the hero hands over to the wall's own emblem, drawn on the same
+  // page clock, so nothing visibly changes. 12 s in all. Light on purpose (the lobby computer is weak): one 2D canvas, one
+  // WebGL loop, and otherwise only transform/opacity animations (WAAPI for the way out, so they run on the compositor).
+  const GEO = window.wallGeo, G = GEO.HERO.g, GB = GEO.HERO.gIn, HB = GEO.HERO;
+  const mulberry = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const bez = (x1, y1, x2, y2) => (x) => {   // a CSS cubic-bezier as a function (for the canvas's part of the camera move)
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    let u = x; for (let i = 0; i < 8; i++) { const cx = 3 * u * (1 - u) * (1 - u) * x1 + 3 * u * u * (1 - u) * x2 + u * u * u - x, d = 3 * (1 - u) * (1 - u) * x1 + 6 * u * (1 - u) * (x2 - x1) + 3 * u * u * (1 - x2); if (Math.abs(cx) < 1e-5 || !d) break; u = Math.min(1, Math.max(0, u - cx / d)); }
+    return 3 * u * (1 - u) * (1 - u) * y1 + 3 * u * u * (1 - u) * y2 + u * u * u;
+  };
+  const camEase = bez(0.42, 0, 0.18, 1);
+  // A faint static dither over the gradients: no banding on an 8-bit lobby panel.
+  const dither = () => window.__wlDither || (window.__wlDither = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'), d = g.createImageData(128, 128); for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() < 0.5 ? 0 : 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 4; } g.putImageData(d, 0, 0); return c.toDataURL(); })());
+
+  // The sky: ~1500 seeded stars in three depths on a disc around the Earth, wheeling slowly about it (each depth at its
+  // own rate, the rate itself breathing), twinkling, with a rare satellite pass and shooting star. On the way out it brakes,
+  // then gives the camera move its parallax (near stars streak). fx off: drawn once.
+  const Sky = ({ fx, leaving, target, preview }) => {
+    const ref = useRef(null), io = useRef({});
+    io.current.fx = fx; io.current.leaving = leaving; io.current.target = target;
     useEffect(() => {
-      const c = ref.current, g = c.getContext('2d'), W = c.width = 1920, H = c.height = 1080, cx = W / 2, cy = H * 0.42, F = 900;
-      const N = 520, S = Array.from({ length: N }, () => ({ x: (Math.random() * 2 - 1) * 1.6, y: (Math.random() * 2 - 1) * 1.1, z: Math.random(), c: Math.random() < .14 ? '#bfe6ff' : Math.random() < .08 ? '#f5e6c4' : '#ffffff' }));
-      let raf, last = performance.now();
-      const draw = (now) => {
-        const dt = Math.min(50, now - last) / 16.7; last = now;
-        const L = leaveRef.current, lt = L ? (Date.now() - L) / 1000 : 0;
-        // idle: a slow drift toward the viewer; leaving: an exponential jump to warp
-        const v = (L ? 0.004 + 0.05 * Math.min(1, lt * lt / 1.6) : 0.0011) * (fx || L ? 1 : 0);
-        g.fillStyle = L ? 'rgba(2,6,16,.55)' : '#020611';
-        g.fillRect(0, 0, W, H);
-        for (const s of S) {
-          const z0 = s.z; s.z -= v * dt;
-          if (s.z <= 0.02) { s.x = (Math.random() * 2 - 1) * 1.6; s.y = (Math.random() * 2 - 1) * 1.1; s.z = 1; continue; }
-          const px = cx + (s.x / s.z) * F, py = cy + (s.y / s.z) * F;
-          if (px < -50 || px > W + 50 || py < -50 || py > H + 50) { s.z = 1; continue; }
-          const a = Math.min(1, (1 - s.z) * 1.7 + 0.12), r = (1 - s.z) * 2.2 + 0.3;
-          g.globalAlpha = a;
-          if (L && v > 0.008) {
-            const qx = cx + (s.x / Math.min(1, z0 + v * 3)) * F, qy = cy + (s.y / Math.min(1, z0 + v * 3)) * F;
-            g.strokeStyle = s.c; g.lineWidth = r; g.beginPath(); g.moveTo(qx, qy); g.lineTo(px, py); g.stroke();
-          } else { g.fillStyle = s.c; g.fillRect(px - r / 2, py - r / 2, r, r); }
+      const c = ref.current, g = c.getContext('2d');
+      const st = c.getBoundingClientRect().width / 1920 || 1, k = preview ? 0.5 : Math.min(1, st * (window.devicePixelRatio || 1));
+      c.width = Math.round(1920 * k); c.height = Math.round(1080 * k);
+      const rnd = mulberry(0x5EED), BANDS = [[1024, 0.5, 0.9, 0.22, 0.5, 0.04], [376, 0.8, 1.3, 0.45, 0.8, 0.07], [82, 1.3, 2.0, 0.75, 1, 0.11]];
+      const N = BANDS.reduce((a, b) => a + b[0], 0);
+      const band = new Uint8Array(N), rc = new Float32Array(N), rs = new Float32Array(N), rad = new Float32Array(N), a0 = new Float32Array(N), col = new Uint8Array(N);
+      const tw = new Float32Array(N), om = new Float32Array(N), ph = new Float32Array(N), px = new Float32Array(N), py = new Float32Array(N), qx = new Float32Array(N), qy = new Float32Array(N), bk = new Uint8Array(N), order = new Uint16Array(N), cnt = new Uint16Array(19);
+      let n = 0;
+      BANDS.forEach(([count, r0, r1, al0, al1], b) => { for (let i = 0; i < count; i++, n++) {
+        const r = 1500 * Math.sqrt(rnd()), f = rnd() * Math.PI * 2;
+        band[n] = b; rc[n] = r * Math.cos(f); rs[n] = r * Math.sin(f); rad[n] = r0 + (r1 - r0) * rnd(); a0[n] = al0 + (al1 - al0) * rnd();
+        const cr = rnd(); col[n] = cr < 0.8 ? 0 : cr < 0.92 ? 1 : 2;
+        const tr0 = rnd(); tw[n] = b === 2 && tr0 < 0.05 ? 0.4 : tr0 < 0.3 ? 0.25 : 0; om[n] = tw[n] === 0.4 ? 1.2 + 0.8 * rnd() : 0.25 + 0.65 * rnd(); ph[n] = rnd() * 6.283;
+      } });
+      const COLS = ['#ffffff', '#cfe6ff', '#ffe9c8'];
+      const sprite = document.createElement('canvas'); sprite.width = sprite.height = 16;
+      (() => { const sg = sprite.getContext('2d'), gr = sg.createRadialGradient(8, 8, 0, 8, 8, 8); gr.addColorStop(0, 'rgba(230,242,255,.5)'); gr.addColorStop(0.35, 'rgba(230,242,255,.14)'); gr.addColorStop(1, 'rgba(230,242,255,0)'); sg.fillStyle = gr; sg.fillRect(0, 0, 16, 16); })();
+      const sm = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+      const mask = (x, y) => 1 - 0.7 * sm(60, 100, x) * (1 - sm(960, 1000, x)) * sm(296, 336, y) * (1 - sm(766, 806, y));
+      const theta = [0, 0, 0], RATE = BANDS.map((b) => b[5] * Math.PI / 180);
+      const OFF = [[-40, -5], [-120, -15], [-300, -36]], SC = [1, 0.985, 0.95];
+      let raf = 0, last = performance.now(), t = 0, odd = false, drewLeave = false;
+      let nextMeteor = 6 + rnd() * 10, meteor = null, nextSat = 25 + rnd() * 40, sat = null;
+      const frame = (now) => {
+        const io0 = io.current, L = io0.leaving, T = L ? now - L : -1;   // ms since the way out began (negative: not yet)
+        const dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt;
+        // Rotation, braking to a held breath over 0.8 s once the way out begins.
+        const brake = T < 0 ? 1 : Math.pow(1 - Math.min(1, T / 800), 3), breath = 0.8 + 0.2 * Math.sin(t * 6.283 / 23);
+        if (io0.fx) for (let b = 0; b < 3; b++) theta[b] += RATE[b] * breath * brake * dt;
+        const p = T < 1000 ? 0 : camEase((T - 1000) / 7200), S = (io0.target && io0.target.gc) || { x: 960, y: 450 };
+        g.setTransform(k, 0, 0, k, 0, 0); g.clearRect(0, 0, 1920, 1080);
+        const c0 = Math.cos(theta[0]), c1 = Math.cos(theta[1]), c2 = Math.cos(theta[2]), s0_ = Math.sin(theta[0]), s1_ = Math.sin(theta[1]), s2_ = Math.sin(theta[2]);
+        cnt.fill(0);
+        const streak = p > 0 && p < 1;
+        g.lineCap = 'round';
+        for (let i = 0; i < N; i++) {
+          const b = band[i];
+          const cb_ = b === 0 ? c0 : b === 1 ? c1 : c2, sb_ = b === 0 ? s0_ : b === 1 ? s1_ : s2_;
+          let x = G.x + rc[i] * cb_ + rs[i] * sb_, y = G.y + rs[i] * cb_ - rc[i] * sb_;
+          if (p > 0) { const s = 1 + (SC[b] - 1) * p; x = S.x + (x - S.x) * s + OFF[b][0] * p; y = S.y + (y - S.y) * s + OFF[b][1] * p; }
+          qx[i] = px[i]; qy[i] = py[i]; px[i] = x; py[i] = y;
+          if (x < -8 || x > 1928 || y < -8 || y > 1088) { bk[i] = 255; continue; }
+          let a = a0[i] * mask(x, y);
+          if (tw[i]) a *= 1 + tw[i] * Math.sin(om[i] * t + ph[i]) - (tw[i] === 0.25 ? 0.25 : 0);
+          // On the way out, a moving near or middle star is a short streak (stroked below), not a dot.
+          if (streak && b > 0 && drewLeave && (x - qx[i]) * (x - qx[i]) + (y - qy[i]) * (y - qy[i]) > 1.44) { bk[i] = 254; continue; }
+          const q = Math.min(5, Math.max(0, (a * 6) | 0)); bk[i] = col[i] * 6 + q; cnt[bk[i]]++;
+        }
+        // Batched by colour × alpha (18 fills), no per-star state changes.
+        let acc = 0; for (let j = 0; j < 18; j++) { const c0 = cnt[j]; cnt[j] = acc; acc += c0; }
+        for (let i = 0; i < N; i++) if (bk[i] < 18) order[cnt[bk[i]]++] = i;
+        let s0 = 0;
+        for (let j = 0; j < 18; j++) {
+          const e = cnt[j]; if (e === s0) continue;
+          g.globalAlpha = ((j % 6) + 0.5) / 6; g.fillStyle = COLS[(j / 6) | 0]; g.beginPath();
+          for (let m = s0; m < e; m++) { const i = order[m], r = rad[i]; g.rect(px[i] - r / 2, py[i] - r / 2, r, r); }
+          g.fill(); s0 = e;
+        }
+        for (let i = 0; i < N; i++) if (band[i] === 2 && bk[i] < 18) { g.globalAlpha = 0.6 * a0[i] * mask(px[i], py[i]); g.drawImage(sprite, px[i] - 8, py[i] - 8); }
+        if (streak && drewLeave) for (let b = 1; b < 3; b++) for (let cI = 0; cI < 3; cI++) {
+          g.globalAlpha = b === 2 ? 0.9 : 0.6; g.strokeStyle = COLS[cI]; g.lineWidth = b === 2 ? 1.6 : 1; g.beginPath(); let any = false;
+          for (let i = 0; i < N; i++) if (bk[i] === 254 && band[i] === b && col[i] === cI) {
+            const dx = qx[i] - px[i], dy = qy[i] - py[i], k6 = Math.min(6, 24 / (Math.hypot(dx, dy) || 1));   // six frames' motion, at most 24 px
+            g.moveTo(px[i], py[i]); g.lineTo(px[i] + k6 * dx, py[i] + k6 * dy); any = true;
+          }
+          if (any) g.stroke();
+        }
+        if (p > 0) drewLeave = true;
+        // Rare life (fx, idle only): a satellite crossing slowly, a shooting star.
+        if (io0.fx && T < 0) {
+          if (!sat && t > nextSat) sat = { x: -10, y: 70 + rnd() * 230, v: 60 + rnd() * 15, a: (4 + rnd() * 8) * Math.PI / 180, glint: rnd() < 0.25 ? 6 + rnd() * 14 : -1, t0: t };
+          if (sat) { const u = t - sat.t0; sat.x = -10 + u * sat.v * Math.cos(sat.a); const y = sat.y + u * sat.v * Math.sin(sat.a); const gl = sat.glint > 0 && Math.abs(u - sat.glint) < 0.45;
+            g.globalAlpha = gl ? 1 : 0.8; g.fillStyle = '#eaf4ff'; const r = gl ? 2.4 : 1.3; g.beginPath(); g.arc(sat.x, y, r, 0, 6.283); g.fill();
+            if (sat.x > 1930) { sat = null; nextSat = t + 70 + rnd() * 40; } }
+          if (!meteor && t > nextMeteor) { const a = (195 + rnd() * 10) * Math.PI / 180; meteor = { x: 300 + rnd() * 700, y: 30 + rnd() * 130, dx: Math.cos(a), dy: -Math.sin(a), t0: t }; }
+          if (meteor) { const u = t - meteor.t0, hx = meteor.x + meteor.dx * 900 * u, hy = meteor.y + meteor.dy * 900 * u, len = Math.min(180, 900 * u), fade = 1 - u / 0.55;
+            if (fade <= 0) { meteor = null; nextMeteor = t + 14 + rnd() * 12; }
+            else { const gr = g.createLinearGradient(hx, hy, hx - meteor.dx * len, hy - meteor.dy * len); gr.addColorStop(0, 'rgba(240,248,255,.95)'); gr.addColorStop(1, 'rgba(240,248,255,0)');
+              g.globalAlpha = fade; g.strokeStyle = gr; g.lineWidth = 1.6; g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx - meteor.dx * len, hy - meteor.dy * len); g.stroke(); } }
         }
         g.globalAlpha = 1;
-        raf = requestAnimationFrame(draw);
       };
-      raf = requestAnimationFrame(draw);
+      const loop = (now) => {
+        const io0 = io.current, L = io0.leaving, T = L ? now - L : -1;
+        if (T > 6400) { raf = 0; return; }   // faded out by then
+        if (!io0.fx) { frame(now); raf = 0; return; }   // fx off: one still picture (the way out moves the canvas itself)
+        odd = !odd;
+        if (T >= 0 || odd) frame(now);       // 30 fps idle, 60 on the way out
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+      io.current.kick = () => { if (!raf) raf = requestAnimationFrame(loop); };
       return () => cancelAnimationFrame(raf);
     }, []);
+    useEffect(() => { if (io.current.kick && fx) io.current.kick(); }, [leaving, fx]);
     return h('canvas', { ref, style: { position: 'absolute', inset: 0, width: '100%', height: '100%' } });
   };
-  const WelcomeClock = () => {
-    const now = useNow(1000), d = new Date(now);
-    const il = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(d);
-    const utc = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
-    return h('span', null, il + ' ISRAEL', h('span', { style: { color: '#5d6f8f', margin: '0 14px' } }, '|'), utc + ' UTC');
-  };
-  const WELCOME_DATE = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const Welcome = ({ guest, leaving, fx }) => {
-    const L = !!leaving, ease = 'cubic-bezier(.55,0,.85,.35)';
-    // (an element's entrance animation would hold its transform: on the way out it is dropped for the transition)
-    const away = (delay, extra) => (L ? Object.assign({ opacity: 0, transform: 'scale(1.35)', transition: `opacity .7s ease-in ${delay}s, transform 1s ${ease} ${delay}s` }, extra) : {});
-    let n = 0;
-    const word = (w) => h('span', { key: w + n, style: { display: 'inline-block', whiteSpace: 'nowrap' } }, Array.from(w).map((ch) => h('span', { key: n, style: { display: 'inline-block', animation: `wlLetter 1s cubic-bezier(.2,.9,.3,1) ${(1.5 + (n++) * 0.045).toFixed(3)}s both` } }, ch)));
-    const line = (text) => text.split(' ').reduce((a, w, i) => a.concat(i ? [' ', word(w)] : [word(w)]), []);
-    const corner = (pos, bw) => h('span', { key: JSON.stringify(pos), style: Object.assign({ position: 'absolute', width: 46, height: 46, borderColor: 'rgba(159,220,255,.5)', borderStyle: 'solid', borderWidth: bw, animation: 'ovIn 1.2s ease 3.4s both' }, pos) });
-    const orbit = (w, hgt, tilt, dur, rev, dot, delay) => h('div', { style: { position: 'absolute', left: '50%', top: '50%', width: w, height: w, marginLeft: -w / 2, marginTop: -w / 2, transform: `rotate(${tilt}deg) scaleY(${hgt})`, animation: `ovIn 1.4s ease ${delay}s both` } },
-      h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', border: '1.5px solid rgba(159,220,255,.28)', boxShadow: '0 0 18px rgba(111,214,234,.12)', animation: fx ? `spin ${dur}s linear infinite${rev ? ' reverse' : ''}` : 'none' } },
-        h('span', { style: { position: 'absolute', top: -7, left: '50%', marginLeft: -7, width: 14, height: 14, borderRadius: '50%', background: dot, boxShadow: `0 0 18px ${dot}, 0 0 4px #fff` } })));
-    return shell([
-      h(Warp, { key: 'stars', leaving, fx }),
-      h('div', { key: 'neb', style: { position: 'absolute', inset: 0, pointerEvents: 'none', background: 'radial-gradient(ellipse 900px 520px at 22% 30%, rgba(70,110,220,.16), transparent 70%), radial-gradient(ellipse 800px 500px at 82% 22%, rgba(111,214,234,.10), transparent 70%), radial-gradient(ellipse 1200px 700px at 50% 40%, rgba(20,50,110,.35), transparent 75%)', transition: 'opacity .8s ease', opacity: L ? 0 : 1 } }),
-      // the planet's limb at the bottom, with a sunrise on its edge
-      h('div', { key: 'planet', style: Object.assign({ position: 'absolute', left: '50%', top: 975, width: 3400, height: 3400, marginLeft: -1700, borderRadius: '50%', background: 'radial-gradient(circle at 50% 0%, #10264f 0%, #071431 18%, #020611 40%)', boxShadow: '0 -2px 0 rgba(170,225,255,.85), 0 -10px 40px rgba(111,214,234,.55), 0 -40px 140px rgba(60,130,255,.35), inset 0 30px 60px rgba(111,214,234,.18)', animation: 'wlRise 2.6s cubic-bezier(.2,.8,.2,1) .2s both' }, L ? { animation: 'none', transform: 'translateY(420px)', transition: `transform 1.3s ${ease}` } : {}) }),
-      h('div', { key: 'sun', style: Object.assign({ position: 'absolute', left: '50%', top: 905, width: 900, height: 150, marginLeft: -450, borderRadius: '50%', background: 'radial-gradient(ellipse at 50% 50%, rgba(255,250,235,.95) 0%, rgba(255,226,170,.55) 10%, rgba(140,200,255,.22) 38%, transparent 70%)', animation: 'wlRise 2.6s cubic-bezier(.2,.8,.2,1) .2s both, wlSun 7s ease-in-out 3s infinite' }, L ? { animation: 'none', opacity: 0, transition: 'opacity .6s ease' } : {}) }),
-      // HUD frame
-      h('div', { key: 'hud', style: Object.assign({ position: 'absolute', inset: 40, pointerEvents: 'none' }, away(0)) },
-        corner({ top: 0, left: 0 }, '2px 0 0 2px'), corner({ top: 0, right: 0 }, '2px 2px 0 0'), corner({ bottom: 0, left: 0 }, '0 0 2px 2px'), corner({ bottom: 0, right: 0 }, '0 2px 2px 0'),
-        h('div', { style: { position: 'absolute', top: 18, left: 70, fontFamily: MONO, fontSize: 21, letterSpacing: '.22em', color: '#8fb8dc', animation: 'ovIn 1.2s ease 3.6s both' } }, WELCOME_DATE.format(new Date(clock())).toUpperCase()),
-        h('div', { style: { position: 'absolute', top: 18, right: 70, fontFamily: MONO, fontSize: 21, letterSpacing: '.18em', color: '#8fb8dc', animation: 'ovIn 1.2s ease 3.6s both' } }, h(WelcomeClock)),
-        h('div', { style: { position: 'absolute', bottom: 18, left: 70, display: 'flex', alignItems: 'center', gap: 12, fontFamily: MONO, fontSize: 17, letterSpacing: '.24em', color: '#6f8fb4', animation: 'ovIn 1.2s ease 3.8s both' } },
-          h('span', { style: { width: 10, height: 10, borderRadius: '50%', background: '#d4f25c', boxShadow: '0 0 12px #d4f25c', animation: 'breathe 1.6s ease-in-out infinite' } }), 'ALL SYSTEMS NOMINAL'),
-        h('div', { style: { position: 'absolute', bottom: 18, right: 70, fontFamily: MONO, fontSize: 17, letterSpacing: '.24em', color: '#6f8fb4', animation: 'ovIn 1.2s ease 3.8s both' } }, 'STATE OF ISRAEL')),
-      // the logo in its orbits; on the way out its white disk fills the screen
-      h('div', { key: 'logo', style: { position: 'absolute', left: '50%', top: 275, width: 0, height: 0 } },
-        h('div', { style: Object.assign({ position: 'absolute', left: 0, top: 0 }, away(0, { transform: 'scale(.6)' })) },
-          orbit(620, 0.3, -16, 22, false, '#d4f25c', 1.1), orbit(540, 0.34, 20, 30, true, '#6fd6ea', 1.3),
-          h('div', { style: { position: 'absolute', left: -150, top: -150, width: 300, height: 300, borderRadius: '50%', border: '2px solid rgba(111,214,234,.6)', animation: fx ? 'ping 3.2s ease-out 2s infinite' : 'none', opacity: 0 } }),
-          h('div', { style: { position: 'absolute', left: -150, top: -150, width: 300, height: 300, borderRadius: '50%', border: '2px solid rgba(212,242,92,.45)', animation: fx ? 'ping 3.2s ease-out 3.6s infinite' : 'none', opacity: 0 } }),
-          h('div', { style: { position: 'absolute', left: -260, top: -260, width: 520, height: 520, borderRadius: '50%', background: 'radial-gradient(circle, rgba(111,214,234,.35) 0%, rgba(60,120,220,.12) 40%, transparent 70%)', animation: 'popIn 1.6s ease .5s both' } })),
-        h('div', { style: Object.assign({ position: 'absolute', left: -115, top: -115, width: 230, height: 230, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #ffffff 0%, #e6f0fb 55%, #b5cce8 100%)', boxShadow: '0 0 0 2px rgba(200,230,255,.6), 0 0 60px rgba(111,214,234,.65), 0 0 140px rgba(60,130,255,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'wlLogo 1.6s cubic-bezier(.2,1.3,.4,1) .6s both', willChange: 'transform' },
-          L ? { animation: 'none', transform: 'scale(13)', background: 'radial-gradient(circle, #ffffff 0%, #eaf6ff 60%, #cfe6ff 100%)', transition: `transform 1.6s cubic-bezier(.8,0,.9,.3) .35s, background .8s ease` } : {}) },
-          h('img', { src: '/assets/logo-mark.png', alt: '', style: { width: '80%', height: '80%', objectFit: 'contain', opacity: L ? 0 : 1, transition: 'opacity .35s ease' } }))),
-      // the words
-      h('div', { key: 'words', dir: 'ltr', style: Object.assign({ position: 'absolute', left: 0, right: 0, top: 470, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }, away(0.05)) },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 28, fontFamily: MONO, fontSize: 34, fontWeight: 500, letterSpacing: '.62em', color: '#9fdcff', marginRight: '-.62em', animation: 'rise 1s ease 1.1s both' } },
-          h('span', { style: { width: 120, height: 2, background: 'linear-gradient(90deg, transparent, #9fdcff)', animation: 'grow 1s ease 1.3s both', transformOrigin: 'right' } }),
-          'WELCOME TO',
-          h('span', { style: { width: 120, height: 2, marginLeft: '-.62em', background: 'linear-gradient(270deg, transparent, #9fdcff)', animation: 'grow 1s ease 1.3s both', transformOrigin: 'left' } })),
-        h('div', { style: { position: 'relative', marginTop: 22, fontFamily: LEX, fontSize: 118, fontWeight: 600, lineHeight: 1.06, letterSpacing: '.01em', color: '#f4f9ff', textShadow: '0 0 40px rgba(111,214,234,.45), 0 4px 30px rgba(0,0,0,.6)' } },
-          h('div', null, line('THE SPACE')), h('div', null, line('PROGRAM OFFICE')),
-          fx ? h('div', { 'aria-hidden': true, style: { position: 'absolute', inset: 0, color: 'transparent', textShadow: 'none', backgroundImage: 'linear-gradient(100deg, transparent 40%, rgba(255,255,255,.95) 50%, transparent 60%)', backgroundSize: '250% 100%', WebkitBackgroundClip: 'text', backgroundClip: 'text', animation: 'wlShine 7s ease-in-out 4.5s infinite', pointerEvents: 'none' } },
-            h('div', null, 'THE SPACE'), h('div', null, 'PROGRAM OFFICE')) : null),
-        h('div', { style: { marginTop: 26, width: 760, height: 2, background: 'linear-gradient(90deg, transparent, rgba(212,242,92,.9), transparent)', animation: 'grow 1.2s ease 3s both' } }),
-        guest ? h('div', { dir: 'auto', style: { marginTop: 24, fontFamily: LEX, fontSize: 44, fontWeight: 400, letterSpacing: '.06em', color: '#d4f25c', textShadow: '0 0 24px rgba(212,242,92,.35)', animation: 'rise 1s ease 3.2s both' } }, guest) : null,
-        EN() ? null : h('div', { dir: 'rtl', style: { marginTop: guest ? 14 : 24, fontFamily: 'Heebo', fontSize: 34, fontWeight: 300, color: '#b3c8e6', letterSpacing: '.04em', animation: 'rise 1s ease 3.4s both' } }, 'ברוכים הבאים למנהלת החלל'))
-    ], Object.assign({ direction: 'ltr', background: '#020611' }, L ? { animation: 'enFade 1.1s ease 2s both' } : {}));
+
+  const fmtWlClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const fmtWlUTC = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false });
+  const fmtWlDate = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const WL_TITLE = ['THE SPACE', 'PROGRAM OFFICE'];
+  const abs = (x, y, w, hh, extra) => Object.assign({ position: 'absolute', left: x, top: y, width: w, height: hh }, extra);
+  const circle = (cx, cy, d, extra) => abs(cx - d / 2, cy - d / 2, d, d, Object.assign({ borderRadius: '50%' }, extra));
+
+  /** props: guest, fx, preview, leaving (performance.now() of the way out, maybe still ahead; 0 = not leaving), woke and
+   *  embShown (the wall's steps), mode ('dissolve' | 'scan' | 'none'), target (wallGeo.landing), attrs ({speed, sway, word},
+   *  frozen at mount), onReveal(R, ok), onHeroGone(). */
+  const Welcome = (props) => {
+    const { guest, fx, preview, leaving, woke, embShown, mode, target } = props;
+    const A = useRef(props.attrs).current;
+    const [phase, setPhase] = useState('load');            // 'load' → 'intro' at R (one commit carries every intro and idle animation)
+    const [heroOn, setHeroOn] = useState(!preview);
+    const [heroOk, setHeroOk] = useState(!preview);
+    const r = useRef({}).current;                          // element refs, by name
+    const set = (name) => r['_' + name] || (r['_' + name] = (el) => { r[name] = el; });
+    const letters = useRef([]).current, twins = useRef([]).current, xs = useRef([]).current;
+    const cb = useRef(props); cb.current = props;
+    const leaveRef = useRef(0); leaveRef.current = leaving;
+    const timers = useRef([]).current;
+    const later = (ms, fn) => timers.push(setTimeout(fn, Math.max(0, ms)));
+    useEffect(() => () => timers.forEach(clearTimeout), []);
+
+    // ---- reveal: when the hero has loaded and compiled (no white globe, no late wordmark), at least 1.4 s after the dip
+    useEffect(() => {
+      const t0 = performance.now(), el = r.hero;
+      let done = false;
+      const reveal = (ok) => {
+        if (done) return; done = true;
+        window.__emblemEpoch = performance.now() - 600;      // t(R) = 0.6: every emblem phase is a fixed offset from R
+        letters.forEach((s, i) => { xs[i] = s ? 128 + s.offsetLeft + s.offsetWidth / 2 : 600; });
+        if (ok && r.hero) r.hero.setAttribute('intro', 'go'); else { setHeroOn(false); setHeroOk(false); }
+        setPhase('intro');
+        cb.current.onReveal && cb.current.onReveal(performance.now(), ok);
+        later(3000, () => { if (r.hero && !leaveRef.current) r.hero.setAttribute('events', 'on'); });
+      };
+      if (!el) { later(1400, () => reveal(false)); return; }
+      const onReady = () => later(1400 - (performance.now() - t0), () => reveal(true));
+      const onErr = () => { if (!done) reveal(false); else { setHeroOn(false); setHeroOk(false); cb.current.onReveal && cb.current.onReveal(null, false); } };
+      el.addEventListener('emblem-ready', onReady); el.addEventListener('emblem-error', onErr);
+      if (el.ready) onReady();
+      later(6000, () => reveal(typeof el.getTime === 'function'));
+      return () => { el.removeEventListener('emblem-ready', onReady); el.removeEventListener('emblem-error', onErr); };
+    }, []);
+
+    // ---- the way out: every step from one start time, as compositor animations (WAAPI) on the outer wrappers
+    useEffect(() => {
+      if (!leaving) return;
+      const t0 = leaving, anims = [];
+      const at = (T) => T - (performance.now() - t0);
+      const run = (el, kf, T, dur, easing, origin) => { if (!el) return; if (origin) el.style.transformOrigin = origin; anims.push(el.animate(kf, { delay: at(T), duration: dur, easing: easing || 'linear', fill: 'both' })); };
+      const OUT = [{ opacity: 1, transform: 'none' }, { offset: 0.65, opacity: 0, transform: 'translateX(-104px)' }, { opacity: 0, transform: 'translateX(-160px)' }];
+      ['rigX', 'rigY', 'rigS', 'eyebrowO', 'line1O', 'line2O'].forEach((n) => r[n] && (r[n].style.willChange = 'transform'));
+      later(at(0), () => { if (r.hero) r.hero.setAttribute('events', 'off'); });
+      // the breath held, then the light gathers and the sun sets behind the limb
+      run(r.sunO, [{ transform: 'none', opacity: 1, easing: 'cubic-bezier(.5,0,.75,0)' }, { offset: 0.42, transform: 'scale(1.5)', opacity: 1, easing: 'cubic-bezier(.45,0,.55,1)' }, { transform: 'translate(22px,22px) scale(.6)', opacity: 0 }], 0, 2400);
+      run(r.streakO, [{ transform: 'scaleX(1)', opacity: 1 }, { offset: 0.5, transform: 'scaleX(1.5)', opacity: 1 }, { transform: 'scaleX(2.6)', opacity: 0 }], 0, 2000);
+      run(r.auraO, [{ transform: 'none', opacity: 1 }, { offset: 0.122, transform: 'scale(1.06)', opacity: 1 }, { offset: 0.3, transform: 'none', opacity: 1 }, { offset: 0.793, transform: 'none', opacity: 1 }, { transform: 'none', opacity: 0 }], 0, 8200, 'ease-in-out');
+      run(r.flare, [{ opacity: 0 }, { offset: 0.4, opacity: 0.7 }, { opacity: 0 }], 200, 2000);
+      if (fx) twins.forEach((tw, i) => run(tw, [{ opacity: 0 }, { offset: 0.3, opacity: 0.9 }, { opacity: 0 }], 200 + (1080 - (xs[i] || 600)) / 1.5, 450));
+      // the clock says so, then everything around the words leaves
+      run(r.clockA, [{ opacity: 1 }, { opacity: 0 }], 0, 250);
+      run(r.clockB, [{ opacity: 0 }, { opacity: 1 }], 250, 350);
+      run(r.caption, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-40px)' }], 500, 700, 'ease-in');
+      [['eyebrowO', 600], ['line1O', 750], ['glowO', 825], ['line2O', 900], ['guestO', 1100], ['heO', 1200], ['discO', 1000]].forEach(([n, T]) => run(r[n], OUT, T, 2400, 'cubic-bezier(.45,0,.3,1)'));
+      run(r.ruleO, [{ transform: 'none', opacity: 1 }, { transform: 'scaleX(0)', opacity: 0 }], 1000, 900, 'cubic-bezier(.55,0,.85,.35)', 'left center');
+      // the camera move: three axes, three curves, so the path bends; it lands exactly on the wall's emblem
+      const tg = target || GEO.landing(GEO.SLOT_DATA);
+      if (r.rigFloat) { const cur = getComputedStyle(r.rigFloat).transform; r.rigFloat.style.animation = 'none'; r.rigFloat.style.transform = cur === 'none' ? '' : cur; run(r.rigFloat, [{ transform: cur === 'none' ? 'none' : cur }, { transform: 'none' }], 1000, 1200, 'ease-in-out'); }
+      run(r.rigX, [{ transform: 'none' }, { transform: `translateX(${tg.tx}px)` }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');
+      run(r.rigS, [{ transform: 'none' }, { transform: `scale(${tg.s})` }], 1400, 6600, 'cubic-bezier(.5,0,.2,1)');
+      run(r.rigY, [{ transform: 'none' }, { transform: `translateY(${tg.ty}px)` }], 1600, 6400, 'cubic-bezier(.55,0,.2,1)');
+      if (!fx) run(r.skyO, [{ transform: 'none' }, { transform: 'translateX(-120px)' }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');
+      // English: the name that just left the screen lands in the logo
+      later(at(1600), () => { if (r.hero) r.hero.setAttribute('wordmark', 'up'); });
+      run(r.clockO, [{ opacity: 1 }, { opacity: 0 }], 2400, 600);
+      run(r.veilO, [{ transform: 'none', opacity: 1 }, { transform: 'translateX(-80px)', opacity: 0 }], 2400, 2200, 'cubic-bezier(.45,0,.55,1)');
+      run(r.skyFade, [{ opacity: 1 }, { opacity: 0 }], 3400, 3000, 'ease-in-out');
+      run(r.limbO, [{ opacity: 1 }, { opacity: 0 }], 6500, 1700, 'ease-in-out');
+      // docking: two rings clamp the Earth in its seat, a soft arrival bloom (never a white-out), a ripple
+      const clamp = [{ transform: 'scale(1.3)', opacity: 0 }, { offset: 0.55, transform: 'scale(1.02)', opacity: 0.85 }, { offset: 0.72, transform: 'none', opacity: 0.85 }, { transform: 'none', opacity: 0 }];
+      run(r.clampA, clamp, 7400, 900, 'cubic-bezier(.2,.8,.3,1)');
+      run(r.clampB, clamp, 7500, 900, 'cubic-bezier(.2,.8,.3,1)');
+      run(r.bloom, [{ opacity: 0, transform: 'scale(.5)' }, { offset: 0.35, opacity: 0.42, transform: 'scale(.82)' }, { opacity: 0, transform: 'none' }], 8300, 1200, 'cubic-bezier(.2,.8,.3,1)');
+      run(r.ripple, [{ opacity: 0.4, transform: 'scale(.69)' }, { opacity: 0, transform: 'none' }], 8400, 1200, 'cubic-bezier(.2,.8,.3,1)');
+      return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
+    }, [leaving]);
+    // the welcome's deep space dissolves only once the wall is awake underneath
+    useEffect(() => {
+      if (!leaving || !woke || !r.base) return;
+      const T = Math.max(3000, performance.now() - leaving);
+      const a = r.base.animate([{ opacity: 1 }, { opacity: 0 }], { delay: T - (performance.now() - leaving), duration: 3600, easing: 'cubic-bezier(.45,0,.55,1)', fill: 'both' });
+      return () => a.cancel();
+    }, [leaving, woke]);
+    // the hand-off, once the wall's own emblem is showing (identical) underneath: only the top layer goes
+    useEffect(() => {
+      if (!leaving || !embShown) return;
+      const T = performance.now() - leaving, anims = [];
+      const go = (el, kf, start, dur, easing) => { if (el) anims.push(el.animate(kf, { delay: start - T, duration: dur, easing, fill: 'both' })); };
+      let end;
+      if (mode === 'scan') {
+        const s = Math.max(9200, T + 100), d = 'cubic-bezier(.65,0,.35,1)';
+        go(r.clipOuter, [{ transform: 'none' }, { transform: `translateY(${HB.h}px)` }], s, 1400, d);
+        go(r.clipInner, [{ transform: 'none' }, { transform: `translateY(${-HB.h}px)` }], s, 1400, d);
+        go(r.scanLine, [{ transform: 'none', opacity: 1 }, { offset: 0.9, opacity: 1 }, { transform: `translateY(${HB.h}px)`, opacity: 0 }], s, 1400, d);
+        end = s + 1400;
+      } else if (mode === 'dissolve') { const s = Math.max(8800, T + 100); go(r.heroFade, [{ opacity: 1 }, { opacity: 0 }], s, 1200, 'cubic-bezier(.45,0,.55,1)'); end = s + 1200; }
+      if (end) {
+        later(end + 200 - T, () => { if (r.hero) r.hero.setAttribute('paused', ''); });
+        later(end + 400 - T, () => { setHeroOn(false); cb.current.onHeroGone && cb.current.onHeroGone(); });
+      }
+      return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
+    }, [leaving, embShown]);
+    // the HUD clock, written straight into the page once a second (no re-render of the scene)
+    useEffect(() => {
+      const tick = () => { if (r.clockText) { const d = new Date(clock()); r.clockText.textContent = fmtWlClock.format(d) + ' ISRAEL · ' + fmtWlUTC.format(d) + ' UTC'; } };
+      tick(); const id = setInterval(tick, 1000); return () => clearInterval(id);
+    }, []);
+
+    const on = phase === 'intro';
+    // intro animation (applied at R, delays from R) on an -I wrapper; until then hidden
+    const intro = (name, ms, delay, easing, extra) => (on ? Object.assign({ animation: `${name} ${ms}ms ${easing || 'cubic-bezier(.16,1,.3,1)'} ${delay}ms both` }, extra) : Object.assign({ opacity: 0 }, extra));
+    // idle loop on the innermost element: fx only (or always, for the opacity-only breaths)
+    const idle = (anim, always) => (on && (fx || always) ? { animation: anim } : {});
+    const L = !!leaving, EN0 = EN();
+    let li = 0;
+    const word = (text, line) => Array.from(text).map((ch) => {
+      const i = li++, d = 2600 + i * 30;
+      return h('span', { key: i, ref: (el) => { letters[i] = el; }, style: Object.assign({ position: 'relative', display: 'inline-block', whiteSpace: 'pre' }, intro('wlLetterIn', 1200, d, 'cubic-bezier(.2,.7,.2,1)')) },
+        ch,
+        fx && ch !== ' ' ? h('span', { ref: (el) => { twins[i] = el; }, 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: '#fff', textShadow: '0 0 18px rgba(200,235,255,.9), 0 0 4px #fff', opacity: 0, pointerEvents: 'none' },
+          on ? { animation: `wlGlint 18s linear ${(7.3 + (1080 - (xs[i] || 600)) / 900 - 18).toFixed(3)}s infinite, wlGlintOnce .5s ease-out ${d + 700}ms backwards` } : {}) }, ch) : null);
+    });
+    const tg = target || GEO.landing(GEO.SLOT_DATA), gc = tg.gc;
+    const guestSize = !guest ? 40 : guest.length > 44 ? 30 : guest.length > 30 ? 34 : 40;
+    const heroEl = heroOn ? h('space-emblem-v2', { ref: set('hero'), globe: 'real', speed: A.speed, sway: A.sway, word: A.word, clock: 'page', events: 'off', intro: 'hold', wordmark: EN0 ? 'down' : 'up', maxpr: '1.25', style: { display: 'block', width: '100%', height: '100%' } }) : null;
+    const showDisc = !heroOk;
+
+    return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: 'ltr', pointerEvents: 'none', fontFamily: 'Heebo, sans-serif', color: '#e6f1ff', animation: 'ovIn .7s cubic-bezier(.4,0,.2,1) both' } },
+      // L0 base: deep space, painted once
+      h('div', { key: 'base', ref: set('base'), style: { position: 'absolute', inset: 0, background: `url(${dither()}) 0 0/128px 128px repeat, radial-gradient(ellipse 1500px 1050px at 1376px 500px, rgba(26,62,138,.40) 0%, rgba(14,34,84,.20) 38%, transparent 72%), radial-gradient(circle 620px at 1150px 250px, rgba(255,226,186,.07), transparent 70%), radial-gradient(ellipse 1100px 700px at 300px 880px, rgba(40,70,150,.12), transparent 70%), radial-gradient(ellipse 125% 105% at 62% 48%, transparent 58%, rgba(0,0,0,.55) 100%), #02050f` } }),
+      // L1 nebula veil
+      h('div', { key: 'veil', ref: set('veilO'), style: abs(-220, -180, 1500, 1000) },
+        h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, on ? { animation: 'wlIn 2400ms ease both' } : { opacity: 0 }) },
+          h('div', { style: Object.assign({ position: 'absolute', inset: 0, background: 'radial-gradient(closest-side at 42% 46%, rgba(70,110,220,.16), rgba(70,110,220,.05) 55%, transparent), radial-gradient(closest-side at 74% 70%, rgba(150,120,240,.07), transparent)' }, fx && !preview ? { animation: 'wlVeil 70s ease-in-out infinite alternate', willChange: 'transform' } : {}) }))),
+      // L2 sky
+      h('div', { key: 'sky', ref: set('skyFade'), style: { position: 'absolute', inset: 0 } },
+        h('div', { ref: set('skyO'), style: { position: 'absolute', inset: 0, animation: 'wlIn 2000ms ease 500ms both' } }, h(Sky, { fx: fx && !preview, leaving, target: tg, preview }))),
+      // L3 the hero rig: moved only by transforms on rigX / rigY / rigS (origin at the globe centre)
+      h('div', { key: 'rig', style: abs(G.x - GB.x, G.y - GB.y, HB.w, HB.h) },
+        h('div', { ref: set('rigX'), style: { position: 'absolute', inset: 0 } },
+          h('div', { ref: set('rigY'), style: { position: 'absolute', inset: 0 } },
+            h('div', { ref: set('rigS'), style: { position: 'absolute', inset: 0, transformOrigin: `${GB.x}px ${GB.y}px` } },
+              h('div', { style: Object.assign({ position: 'absolute', inset: 0, transformOrigin: `${GB.x}px ${GB.y}px` }, intro('wlRigIn', 2800, 0)) },
+                h('div', { ref: set('rigFloat'), style: Object.assign({ position: 'absolute', inset: 0 }, idle('wlFloat 14s ease-in-out infinite alternate')) },
+                  // aura: the wall glow's own gradient at ×1.2, so it lands on it
+                  h('div', { ref: set('auraO'), style: circle(GB.x, GB.y + 30.2, 1176) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 2000, 0, 'ease')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.20) 0%, rgba(70,120,210,.08) 32%, transparent 66%)' }, idle('breathe 9s ease-in-out -7.1s infinite', true)) }))),
+                  // the atmosphere's limb (the emblem's own additive glow cannot show over its transparent canvas)
+                  h('div', { ref: set('limbO'), style: circle(GB.x, GB.y, 760) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1600, 0, 'ease')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, transparent 75%, rgba(120,185,255,.40) 78.5%, rgba(70,140,255,.14) 85%, transparent)' }, idle('wlLimb 9s ease-in-out -7.4s infinite', true)) }))),
+                  // first light at the 10:30 limb, where the emblem's key light comes from
+                  h('div', { ref: set('sunO'), style: Object.assign(circle(308.3, 212.3, 220), { transformOrigin: '50% 50%' }) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1200, 500, 'ease')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,244,222,.85) 0%, rgba(255,214,160,.30) 35%, transparent)' }, idle('wlBreathO 9s ease-in-out -7.7s infinite', true)) })),
+                    h('div', { style: Object.assign(circle(110, 110, 28), intro('wlScaleIn', 600, 500, 'cubic-bezier(.2,.9,.3,1)')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, #fff 0 30%, #fff6e4 45%, rgba(255,220,160,.5) 70%, transparent)' }, idle('wlBreathSun 9s ease-in-out -7.7s infinite', true)) }))),
+                  // the realistic emblem (never moved in the page: only its wrappers change)
+                  h('div', { ref: set('heroFade'), style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1200, 0, 'cubic-bezier(.25,.1,.25,1)')) },
+                    h('div', { ref: set('clipOuter'), style: { position: 'absolute', inset: 0, overflow: 'hidden' } },
+                      h('div', { ref: set('clipInner'), style: { position: 'absolute', inset: 0 } }, heroEl)),
+                    h('div', { ref: set('scanLine'), style: { position: 'absolute', left: 0, top: -48, width: HB.w, height: 50, opacity: 0 } },
+                      h('div', { style: { position: 'absolute', left: 0, right: 0, top: 0, height: 48, background: 'linear-gradient(to top, rgba(159,220,255,.22), transparent)' } }),
+                      h('div', { style: { position: 'absolute', left: 0, right: 0, top: 48, height: 2, background: '#bfe8ff' } }))),
+                  // the anamorphic streak through the sun, in front of the emblem
+                  h('div', { ref: set('streakO'), style: Object.assign(abs(308.3 - 380, 212.3 - 8, 760, 16), { transformOrigin: '50% 50%' }) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0, transformOrigin: '50% 50%' }, intro('wlDrawX', 1300, 700)) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, fx ? idle('wlStreak 9s ease-in-out -7.7s infinite') : { opacity: 0.85 }) },
+                        h('div', { style: { position: 'absolute', left: 120, top: 0, width: 520, height: 16, background: 'radial-gradient(ellipse closest-side, rgba(160,210,255,.18), transparent)' } }),
+                        h('div', { style: { position: 'absolute', left: 0, top: 7, width: 760, height: 2, background: 'linear-gradient(90deg, transparent, rgba(140,200,255,.30) 32%, rgba(235,246,255,.9) 50%, rgba(140,200,255,.30) 68%, transparent)' } })))),
+                  L ? h('div', { ref: set('flare'), style: Object.assign(circle(308.3, 212.3, 520), { opacity: 0, background: 'radial-gradient(circle closest-side, rgba(255,250,240,.9) 0, rgba(200,230,255,.35) 30%, transparent 70%)' }) }) : null,
+                  // no hero (it failed, or the remote's preview): the flat logo disc in its place
+                  showDisc ? h('div', { ref: set('discO'), style: circle(GB.x, GB.y, 300) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #fff, #dfeaf7 60%, #a9c3e2)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 60px rgba(111,214,234,.45)' }, intro('wlIn', 1200, 0, 'ease')) },
+                      h('img', { src: '/assets/logo-mark.png', alt: '', style: { width: '80%', height: '80%', objectFit: 'contain' } }))) : null)))))),
+      // L4 the title, left
+      h('div', { key: 'title', dir: 'ltr', style: { position: 'absolute', left: 128, top: 356, width: 820, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' } },
+        h('div', { ref: set('eyebrowO'), style: { display: 'flex', alignItems: 'center', gap: 20, height: 34 } },
+          h('span', { style: Object.assign({ width: 64, height: 1.5, background: 'linear-gradient(90deg, rgba(159,220,255,0), #9fdcff)', transformOrigin: 'left center' }, intro('wlDrawX', 900, 2200)) }),
+          h('span', { style: { fontFamily: MONO, fontSize: 26, fontWeight: 500, letterSpacing: '.46em', color: '#9fdcff', whiteSpace: 'pre' } },
+            Array.from('WELCOME TO').map((ch, i) => h('span', { key: i, style: Object.assign({ display: 'inline-block', whiteSpace: 'pre' }, intro('wlEyebrowIn', 800, 2400 + i * 30)) }, ch)))),
+        h('div', { style: { position: 'relative', marginTop: 18, fontFamily: LEX, fontSize: 84, fontWeight: 500, lineHeight: '92px', letterSpacing: '.005em', color: '#f3f8ff', textShadow: '0 2px 24px rgba(0,0,0,.55)', whiteSpace: 'nowrap' } },
+          h('div', { ref: set('glowO'), 'aria-hidden': true, style: { position: 'absolute', inset: 0 } },
+            h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1200, 2400, 'ease')) },
+              h('div', { style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 26px rgba(111,190,255,.8), 0 0 70px rgba(60,130,255,.45)' }, fx ? idle('wlTitleGlow 9s ease-in-out -6.5s infinite') : { opacity: 0.25 }) },
+                h('div', null, WL_TITLE[0]), h('div', null, WL_TITLE[1])))),
+          h('div', { ref: set('line1O'), style: { position: 'relative' } }, word(WL_TITLE[0], 0)),
+          h('div', { ref: set('line2O'), style: { position: 'relative' } }, word(WL_TITLE[1], 1))),
+        h('div', { ref: set('ruleO'), style: { marginTop: 28, width: 440, height: 2 } },
+          h('div', { style: Object.assign({ width: '100%', height: '100%', background: 'linear-gradient(90deg, rgba(212,242,92,.9), rgba(212,242,92,.35) 55%, transparent)', transformOrigin: 'left center' }, intro('wlDrawX', 1400, 3800)) })),
+        guest ? h('div', { key: 'g:' + guest, ref: set('guestO'), style: { marginTop: 22, maxWidth: 820 } },
+          h('div', { style: intro('wlRiseIn', 1200, 4100) },
+            h('div', { dir: 'auto', style: Object.assign({ fontFamily: LEX, fontSize: guestSize, fontWeight: 400, lineHeight: 1.25, letterSpacing: '.03em', color: '#d4f25c', textShadow: '0 0 24px rgba(212,242,92,.30)', unicodeBidi: 'plaintext', textAlign: 'left' }, fx ? idle('wlGuest 9s ease-in-out -6.5s infinite') : {}) }, guest))) : null,
+        EN0 ? null : h('div', { ref: set('heO'), style: { marginTop: guest ? 12 : 22 } },
+          h('div', { dir: 'rtl', style: Object.assign({ fontFamily: 'Heebo', fontSize: 30, fontWeight: 300, lineHeight: '40px', color: '#b3c8e6', letterSpacing: '.04em', textAlign: 'left' }, intro('wlRiseIn', 1200, 4400)) }, 'ברוכים הבאים למנהלת החלל'))),
+      // L5 HUD: a clock top right, a caption bottom left
+      h('div', { key: 'clock', ref: set('clockO'), style: { position: 'absolute', right: 128, top: 56 } },
+        h('div', { style: Object.assign({ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, fontFamily: MONO, fontSize: 15, letterSpacing: '.24em', whiteSpace: 'nowrap' }, intro('wlIn', 1600, 4800, 'ease')) },
+          h('span', { style: { width: 8, height: 8, borderRadius: '50%', background: '#d4f25c', boxShadow: '0 0 10px #d4f25c', animation: L ? 'caret .5s steps(1) infinite' : 'breathe 3s ease-in-out infinite' } }),
+          h('span', { ref: set('clockA'), style: { color: 'rgba(143,184,220,.62)' } }, h('span', { ref: set('clockText') })),
+          h('span', { ref: set('clockB'), style: { position: 'absolute', left: 22, color: '#d4f25c', opacity: 0 } }, 'ENTERING'))),
+      h('div', { key: 'cap', ref: set('caption'), style: { position: 'absolute', left: 128, bottom: 64 } },
+        h('div', { style: Object.assign({ fontFamily: MONO, fontSize: 15, letterSpacing: '.32em', color: 'rgba(143,184,220,.6)', whiteSpace: 'nowrap' }, intro('wlIn', 1600, 4800, 'ease')) },
+          'STATE OF ISRAEL · ' + fmtWlDate.format(new Date(clock())).replace(',', '').toUpperCase())),
+      // L6 the docking, in stage coordinates around the wall's globe centre (only on the way out)
+      L ? h(React.Fragment, { key: 'dock' },
+        h('div', { ref: set('clampA'), style: circle(gc.x, gc.y, 700, { opacity: 0, border: '1.5px solid rgba(200,235,255,.85)', boxShadow: '0 0 0 6px rgba(200,235,255,.12)' }) }),
+        h('div', { ref: set('clampB'), style: circle(gc.x, gc.y, 560, { opacity: 0, border: '1.5px solid rgba(200,235,255,.85)', boxShadow: '0 0 0 6px rgba(200,235,255,.12)' }) }),
+        h('div', { ref: set('ripple'), style: circle(gc.x, gc.y, 1015, { opacity: 0, border: '1px solid rgba(200,235,255,.5)' }) }),
+        h('div', { ref: set('bloom'), style: circle(gc.x, gc.y, 1400, { opacity: 0, background: 'radial-gradient(circle closest-side, rgba(235,248,255,.55) 0, rgba(159,220,255,.25) 22%, rgba(60,130,255,.08) 48%, transparent 72%)' }) })) : null);
   };
 
   // ---------- small toast (e.g. "שוגר") ----------

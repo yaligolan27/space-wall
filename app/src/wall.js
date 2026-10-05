@@ -108,11 +108,22 @@
   const PANEL = { position: 'relative', overflow: 'hidden', borderRadius: 26, background: 'linear-gradient(180deg,rgba(40,62,104,.42) 0%,rgba(12,22,44,.6) 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)', transition: 'border-color 1s ease' };
   const PILL = { borderRadius: 999, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' };
   const MUTED = '#8b9dbd';
-  // The welcome screen's way out (overlays.js Welcome): the wall wakes under the logo's white disk, then the screen fades off.
-  const WELCOME_REVEAL_MS = 2000, WELCOME_LEAVE_MS = 3400;
+  // The welcome screen's way out (overlays.js Welcome), in ms from its start (T0): the wall wakes under the still-opaque
+  // welcome (WAKE), its emblem starts again on the welcome emblem's clock (EMB_WAKE) and shows under it (EMB_SHOW), the
+  // entrance animations end (SETTLE) and the overlay goes (DONE). A leave starts no earlier than MIN_AFTER_REVEAL after the
+  // logo appeared (its assembly is done by then). While a welcome is up the remote is asked every POLL_FAST ms, so "enter"
+  // starts at once; after one, no local moment for QUIET ms and no reload for NO_RELOAD ms.
+  const WL = { COVER: 800, REVEAL_CAP: 6000, MIN_AFTER_REVEAL: 3200, WAKE: 400, EMB_WAKE: 8200, EMB_SHOW: 8600, SETTLE: 10400, DONE: 12000, POLL_FAST: 1500, QUIET: 20000, NO_RELOAD: 60000 };
+  const isWelcome = (ov) => !!ov && ov.kind === 'welcome';
 
   class Wall extends React.Component {
-    constructor(p) { super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false }; }
+    constructor(p) {
+      super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false, wl: null };
+      this._wlT = [];
+      this.embRef = (el) => { this.embEl = el; };
+      this.onWlReveal = (at, ok) => { if (at) this._wlRevealAt = at; this._wlHeroOk = !!ok; };
+      this.onWlHeroGone = () => { if (this.state.wl) this.setWl({ heroGone: true }, () => this.maybeFinishWl()); };
+    }
 
     // ---- lifecycle ----------------------------------------------------------------------------
     componentDidMount() {
@@ -122,23 +133,34 @@
       this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } }, 1000);
       this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(), ov = this.state.ov;
         if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome');
-        else if ((k === 'enter' || k === ' ') && ov && ov.kind === 'welcome' && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
-        else if (k === 'escape') this.setState({ ov: null }); };
+        else if ((k === 'enter' || k === ' ') && isWelcome(ov) && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
+        else if (k === 'escape') { this.clearLeave(); this.setState({ ov: null, wl: null }); } };
       addEventListener('keydown', this.onKey);
       this.load();
-      this.loadLive(); this.livePoll = setInterval(() => this.loadLive(), CFG.livePoll * 1000);
+      this.pollLive();
     }
-    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); clearTimeout(this.revealT); removeEventListener('resize', this.fit); }
+    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearTimeout(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); this.clearLeave(); removeEventListener('resize', this.fit); }
     /** A full-screen moment covers the wall once it has faded in (`covered`); until it ends the wall under it rests (render). */
     componentDidUpdate(_, prev) {
-      if (!this.state.ov === !prev.ov) return;
+      const ov = this.state.ov;
+      // A welcome just came up: ask the remote often from now on, so "enter" starts at once.
+      if (isWelcome(ov) && !isWelcome(prev.ov) && ov.live && !CFG.preview) this.pollLive();
+      if (!ov && prev.ov && this._pendingData) { const d = this._pendingData; this._pendingData = null; this.resetCaches(); this.setState({ data: d }); }
+      if (!ov === !prev.ov && (!ov || ov.kind === prev.ov.kind)) return;
       clearTimeout(this.coverT);
-      if (this.state.ov) this.coverT = setTimeout(() => this.setState({ covered: true }), 1200);
+      if (ov) this.coverT = setTimeout(() => this.setState({ covered: true }), isWelcome(ov) ? WL.COVER : 1200);
       else if (this.state.covered) this.setState({ covered: false });
     }
 
     // ---- live state from the remote -------------------------------------------------------------
     get liveOk() { return Date.now() - (this._liveOkAt || 0) < 30e3; }   // one missed poll is not an outage
+    /** /api/live now, then again after the usual interval, or every 1.5 s while a welcome waits for "enter". */
+    pollLive() {
+      clearTimeout(this.livePoll);
+      const next = () => { const ov = this.state.ov, fast = isWelcome(ov) && ov.live && !ov.leaving && !CFG.preview;
+        clearTimeout(this.livePoll); this.livePoll = setTimeout(() => this.pollLive(), fast ? WL.POLL_FAST : CFG.livePoll * 1000); };
+      this.loadLive().then(next, next);
+    }
     async loadLive() {
       if (this._liveBusy) return;
       this._liveBusy = true;
@@ -156,33 +178,67 @@
         if (L.build && !this._build) this._build = L.build;
         this._newBuild = L.build && L.build !== this._build ? (this._newBuild || 0) + 1 : 0;
         const lang = CFG.lang;
-        if (L.design && applyDesign(L.design)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ovK = null; }
+        if (L.design && applyDesign(L.design)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ambFx = undefined; this._ovK = null; }
         if (CFG.lang !== lang) { this._lastBody = null; clearTimeout(this.poll); this.poll = setTimeout(() => this.load(), 0); }
         this.setState({ live: L, now: serverNow() }, () => this.syncTakeover());
       } catch (e) { /* liveOk lapses by itself */ } finally { this._liveBusy = false; }
     }
     /** A full-screen moment from the remote (or an important event / the 12:00 show, decided by the server). */
     syncTakeover() {
-      const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow();
+      const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow(), wlUp = isWelcome(ov);
       // Forget what was shown once the server reports none, so the remote's undo of "back to normal" brings it back.
-      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (ov.kind === 'welcome') this.leaveWelcome(); else this.setState({ ov: null }); } return; }
+      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else this.setState({ ov: null }); } return; }
+      // "Enter" from the remote: the server keeps the welcome for a few seconds, marked `leaving`.
+      if (wlUp && ov.live && tk.id === ov.id && tk.leaving) return this.leaveWelcome();
+      if (wlUp && ov.leaving) return;                    // anything new waits (not marked seen) until the entrance is over
       if (tk.id === this._tkSeen) return;                // shown already, maybe ended here first: not again
       this._tkSeen = tk.id;
+      if (tk.kind === 'welcome' && tk.leaving) return;   // opened mid-entrance: just the home wall
       const until = Date.parse(tk.until) || now + 60e3;
       if (until <= now) return;
       if (tk.kind === 'noon') this.setState({ ov: { kind: 'noon', id: tk.id, live: true, until } });
       else if (tk.kind === 'celebrate' && tk.person) this.setState({ ov: { kind: 'celebrate', id: tk.id, live: true, person: tk.person, until } });
       else if (tk.kind === 'event') this.setState({ ov: { kind: 'event', id: tk.id, live: true, event: tk, until } });
-      else if (tk.kind === 'welcome') this.setState({ ov: { kind: 'welcome', id: tk.id, live: true, guest: tk.guest || '', until } });
+      // (a minute past its server end, so the server's "none" leads into the entrance rather than schedule() cutting it)
+      else if (tk.kind === 'welcome') this.welcomeUp({ id: tk.id, live: true, guest: tk.guest || '', until: until + 60e3 });
     }
-    /** "Enter" on the welcome screen: its way out (overlays.js Welcome), then, under the logo's white disk, the wall
-     *  wakes and makes its entrance (render: `entering`) while the welcome screen fades off it. */
+    /** Shows a welcome. One already up only takes the new words (its scene and emblem stay); one on its way out starts over. */
+    welcomeUp(o) {
+      const cur = this.state.ov, keep = isWelcome(cur) && !cur.leaving;
+      this.clearLeave();
+      if (!keep) {
+        this._wlKey = (this._wlKey || 0) + 1; this._wlRevealAt = null; this._wlHeroOk = !CFG.preview;
+        // the welcome emblem draws with the wall emblem's own settings, so the two can be swapped unseen
+        this._wlAttrs = { speed: String(CFG.globeSpeed), sway: CFG.cameraSway ? 'on' : 'off', word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE') };
+      }
+      this.setState({ ov: Object.assign({ kind: 'welcome', shownAt: keep ? cur.shownAt : performance.now() }, o), wl: null });
+    }
+    setWl(patch, then) { this.setState((s) => (s.wl ? { wl: Object.assign({}, s.wl, patch) } : null), then); }
+    clearLeave() { this._wlT.forEach(clearTimeout); this._wlT = []; this._wlDoneDue = false; }
+    /** "Enter" on the welcome screen: its way out (overlays.js Welcome) as one timeline from T0. The wall wakes early
+     *  under the still-opaque welcome and assembles around the arriving emblem (render: `entering`); its own emblem then
+     *  takes over from the welcome's on the same clock (`mode`: dissolve when both are the realistic globe, a scan wipe
+     *  to the hologram, none without a welcome emblem). */
     leaveWelcome() {
       const ov = this.state.ov;
-      if (!ov || ov.kind !== 'welcome' || ov.leaving) return;
-      this.setState({ ov: Object.assign({}, ov, { leaving: Date.now(), until: serverNow() + WELCOME_LEAVE_MS }) });
-      clearTimeout(this.revealT);
-      this.revealT = setTimeout(() => this.setState({ enterAt: Date.now() }), WELCOME_REVEAL_MS);
+      if (!isWelcome(ov) || ov.leaving) return;
+      const now = performance.now(), revealAt = this._wlRevealAt || (ov.shownAt || now) + WL.REVEAL_CAP;
+      const t0 = Math.max(now, revealAt + WL.MIN_AFTER_REVEAL);
+      const target = window.wallGeo.landing(this.D ? window.wallGeo.SLOT_DATA : window.wallGeo.SLOT_NODATA);
+      const A = this._wlAttrs || {}, same = A.speed === String(CFG.globeSpeed) && A.sway === (CFG.cameraSway ? 'on' : 'off') && A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE');
+      const mode = CFG.preview || !this._wlHeroOk ? 'none' : CFG.globeStyle === 'real' && same ? 'dissolve' : 'scan';
+      this.clearLeave();
+      const id = ov.id, at = (ms, fn) => this._wlT.push(setTimeout(() => { const o = this.state.ov; if (isWelcome(o) && o.id === id) fn(); }, Math.max(0, t0 + ms - performance.now())));
+      this.setState({ ov: Object.assign({}, ov, { leaving: t0, until: serverNow() + (t0 - now) + WL.DONE + 8000 }), wl: { id, t0, mode, target } });
+      at(WL.WAKE, () => { this._wlWakeAt = Date.now(); this.setWl({ woke: true }); });
+      at(mode === 'none' ? 2600 : WL.EMB_WAKE, () => this.setWl({ embWake: true }));
+      at(mode === 'none' ? 3000 : WL.EMB_SHOW, () => this.setWl({ embShown: true }));
+      at(WL.SETTLE, () => this.setWl({ settled: true }));
+      at(WL.DONE, () => { this._wlDoneDue = true; this.maybeFinishWl(); });
+    }
+    maybeFinishWl() {
+      const wl = this.state.wl;
+      if (this._wlDoneDue && wl && (wl.heroGone || wl.mode === 'none')) { this.clearLeave(); this.setState({ ov: null, wl: null }); }
     }
 
     async fetchText(url, ms) {
@@ -209,8 +265,14 @@
           for (const k of ['featured', 'ticker', 'launches', 'directorate']) if (!Array.isArray(data[k])) data[k] = [];
           data.issue = data.issue || {}; data.catColor = data.catColor || {}; data.catImage = data.catImage || {};
           this._lastBody = body;
-          this.resetCaches();
-          this.setState({ data });
+          // Not while the welcome's emblem is landing in its slot: the layout (and the slot) must hold still until then.
+          if (isWelcome(this.state.ov) && this.state.ov.leaving) this._pendingData = data;
+          else { this.resetCaches(); this.setState({ data }); }
+          // Once: the realistic globe's textures and the wordmark's font, so a welcome's emblem appears without waiting.
+          if (!this._preloaded && !CFG.preview) { this._preloaded = true; setTimeout(() => {
+            ['earth_atmos_2048.jpg', 'earth_normal_2048.jpg', 'earth_lights_2048.png', 'earth_clouds_1024.png', 'earth_specular_2048.jpg'].forEach((f) => { new Image().src = '/assets/textures/' + f; });
+            try { document.fonts.load("800 condensed 200px 'Open Sans'", tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')); } catch (e) {}
+          }, 5000); }
         }
         this._feedOkAt = Date.now(); this._fails = 0;
         if (this.state.feedErr) this.setState({ feedErr: 0 });
@@ -234,7 +296,11 @@
     celebratable(today) { const D = this.D; return D ? D.people.filter((p) => p.celebrate !== false && p.on && p.on <= today && today <= addDays(p.on, 2)) : []; }
     /** A moment on request (?demo=, keys L/G/N): real content when there is some, else the sample's; it is a demo. */
     async demo(kind) {
-      if (kind === 'welcome') { const t = serverNow(); return this.setState({ ov: { kind: 'welcome', id: t, demo: true, guest: q.get('guest') || '', until: t + 3600e3 } }); }
+      if (kind === 'welcome') {
+        const t = serverNow(); this.welcomeUp({ id: t, demo: true, guest: q.get('guest') || '', until: t + 3600e3 });
+        if (num('enterAfter', 0) > 0) setTimeout(() => { const o = this.state.ov; if (isWelcome(o) && o.id === t) this.leaveWelcome(); }, num('enterAfter', 0) * 1000);   // ?demo=welcome&enterAfter=N
+        return;
+      }
       if (kind === 'noon') { const t = serverNow(); return this.setState({ ov: { kind: 'noon', id: t, demo: true, until: t + 15 * 60e3 } }); }
       if (kind !== 'launch' && kind !== 'greeting') return;
       const pick = (S) => (kind === 'launch' ? S.launches : S.people.filter((p) => p.celebrate !== false)) || [];
@@ -248,11 +314,15 @@
     schedule() {
       const D = this.D, now = serverNow();
       let ov = this.state.ov;
-      if (ov && now > ov.until) { if (ov.kind === 'launch' && !ov.demo) this.setState({ toast: { title: tr('שוגר', 'Liftoff'), line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.setState({ ov: null }); }
+      if (ov && now > ov.until) {
+        if (isWelcome(ov) && !ov.leaving) this.leaveWelcome();   // a forgotten welcome still ends with its entrance
+        else { if (ov.kind === 'launch' && !ov.demo) this.setState({ toast: { title: tr('שוגר', 'Liftoff'), line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.clearLeave(); this.setState({ ov: null, wl: null }); }
+      }
       if (this.state.toast && now > this.state.toast.until) this.setState({ toast: null });
       const T = this.ilParts(now);
       this.maybeReload(T, ov);
       if (ov && (ov.kind === 'noon' || ov.live)) return;
+      if (Date.now() < (this._wlWakeAt || 0) + WL.QUIET) return;   // the wall has just made its entrance: let it be seen
       // The 12:00 show is decided by the server (it can be skipped or stopped from the remote); locally only as a fallback.
       if (!this.liveOk && CFG.noonShow && T.h === 12 && T.m === 0 && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
       if (!D) return;
@@ -267,15 +337,18 @@
     }
     /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment. */
     maybeReload(T, ov) {
-      if (ov || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0)) return;
+      if (ov || this.state.wl || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
       const nightly = T.h === 4 && T.m < 20 && Date.now() - this.t0 > 3600e3;
       if (!nightly && (this._newBuild || 0) < 2) return;
       this._reloadTry = Date.now() + 60e3;
       reloadPage(nightly ? 3600e3 : 10 * 60e3);
     }
+    /** The welcome's way-out state, when it belongs to the welcome on screen. */
+    get wl() { const ov = this.state.ov, wl = this.state.wl; return isWelcome(ov) && wl && wl.id === ov.id ? wl : null; }
     overlay() {
-      const ov = this.state.ov, toast = this.state.toast;
-      const k = (ov ? ov.kind + ov.id + (ov.leaving ? 'L' : '') : '') + '|' + (toast ? toast.until : '');
+      const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
+      const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) : '') + '|' + (toast ? toast.until : '')
+        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, CFG.ambientFx, CFG.lang].join('|') : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
       const O = this._O || (this._O = window.makeWallOverlays(React));
@@ -287,7 +360,9 @@
       // The remote covers its preview with its own card during the server's 12:00 show, so the preview skips the video.
       if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: mk, src: CFG.preview && ov.live ? '' : (this.D && this.D.promoVideo) || '/assets/promo.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.setState({ ov: null }) });
       if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: mk, event: ov.event, until: ov.until });
-      if (ov && ov.kind === 'welcome') el = h(O.Welcome, { key: mk, guest: ov.guest, leaving: ov.leaving || 0, fx: CFG.ambientFx });
+      // Keyed per welcome scene, not per remote press: new words for a welcome already up keep its emblem.
+      if (wlUp) el = h(O.Welcome, { key: 'welcome' + this._wlKey, guest: ov.guest, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, woke: !!(wl && wl.woke), embShown: !!(wl && wl.embShown),
+        mode: (wl && wl.mode) || '', target: wl && wl.target, attrs: this._wlAttrs, onReveal: this.onWlReveal, onHeroGone: this.onWlHeroGone });
       return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
     }
 
@@ -297,21 +372,30 @@
       const fx = CFG.ambientFx, s = [];
       const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
       for (let i = 0; i < 260; i++) { const x = (i * 97.7) % 512, y = (i * 61.3 + (i * i) % 37) % 512, r = 0.4 + ((i * 13) % 7) / 10, a = 0.1 + ((i * 7) % 5) * 0.05; g.fillStyle = `rgba(223,231,245,${a})`; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill(); }
-      s.push(h('div', { key: 'far', style: { position: 'absolute', inset: 0, backgroundImage: `url(${c.toDataURL()})`, backgroundSize: '512px 512px', opacity: .75, animation: fx ? 'parallaxA 240s linear infinite' : 'none' } }));
+      // (moved by transforms on a tile larger than the screen, the same drift as before)
+      s.push(h('div', { key: 'far', style: { position: 'absolute', left: 0, top: -512, width: 2432, height: 1592, opacity: .75, animation: fx ? 'tileX 240s linear infinite' : 'none' } },
+        h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${c.toDataURL()})`, backgroundSize: '512px 512px', animation: fx ? 'tileY 960s linear infinite' : 'none' } })));
       s.push(h('div', { key: 'neb1', style: { position: 'absolute', width: 900, height: 600, left: -200, top: 380, borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(60,120,220,.12), rgba(60,120,220,0))', animation: fx ? 'drift 38s ease-in-out infinite' : 'none' } }));
       s.push(h('div', { key: 'neb2', style: { position: 'absolute', width: 800, height: 520, right: -160, top: -120, borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(111,214,234,.08), rgba(111,214,234,0))', animation: fx ? 'drift 46s ease-in-out -12s infinite reverse' : 'none' } }));
       const near = [];
       for (let i = 0; i < 80; i++) { const size = i % 7 === 0 ? 2.5 : 1.5; near.push(h('span', { key: i, style: { position: 'absolute', left: ((i * 137.5) % 100) + '%', top: ((i * 71.3) % 100) + '%', width: size, height: size, borderRadius: '50%', background: '#e6f1ff', opacity: .3, boxShadow: i % 7 === 0 ? '0 0 6px rgba(230,241,255,.6)' : 'none', animation: `twinkle ${4 + (i % 5)}s ease-in-out ${(i % 9) * .7}s infinite` } })); }
       s.push(h('div', { key: 'near', style: { position: 'absolute', inset: -80, animation: fx ? 'parallaxB 60s ease-in-out infinite alternate' : 'none' } }, near));
-      if (fx) {
+      if (fx) s.push(h('div', { key: 'vig', style: { position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.45) 100%)' } }));
+      return (this._amb = h('div', { style: { position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' } }, s));
+    }
+    /** The ambient extras that blend and blur (flare, grain, scan line): held back while a welcome is up or the wall makes
+     *  its entrance after one, then faded in. */
+    ambientFx() {
+      if (this._ambFx !== undefined) return this._ambFx;
+      const s = [];
+      if (CFG.ambientFx) {
         const n = document.createElement('canvas'); n.width = n.height = 256; const ng = n.getContext('2d'), id = ng.createImageData(256, 256);
         for (let i = 0; i < id.data.length; i += 4) { const v = Math.random() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; } ng.putImageData(id, 0, 0);
         s.push(h('div', { key: 'flare', style: { position: 'absolute', left: 560, top: 300, width: 800, height: 3, borderRadius: 3, background: 'linear-gradient(90deg, rgba(111,190,255,0), rgba(160,215,255,.55) 45%, rgba(230,245,255,.8) 50%, rgba(160,215,255,.55) 55%, rgba(111,190,255,0))', filter: 'blur(1.5px)', mixBlendMode: 'screen', animation: 'flare 11s ease-in-out infinite' } }));
-        s.push(h('div', { key: 'vig', style: { position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.45) 100%)' } }));
         s.push(h('div', { key: 'grain', style: { position: 'absolute', inset: '-10%', backgroundImage: `url(${n.toDataURL()})`, opacity: .045, mixBlendMode: 'overlay', animation: 'grain 1.2s steps(5) infinite' } }));
         s.push(h('div', { key: 'scan', style: { position: 'absolute', left: 0, right: 0, top: 0, height: 2, background: 'linear-gradient(90deg, rgba(111,214,234,0), rgba(111,214,234,.28) 30%, rgba(212,242,92,.22) 50%, rgba(111,214,234,.28) 70%, rgba(111,214,234,0))', boxShadow: '0 0 18px rgba(111,214,234,.25)', animation: 'scan 22s linear 4s infinite', opacity: 0 } }));
       }
-      return (this._amb = h('div', { style: { position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' } }, s));
+      return (this._ambFx = s.length ? h('div', { style: { position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden', animation: 'ovIn 1.6s ease both' } }, s) : null);
     }
     sheen(k, delay) {
       const key = '_sh' + k; if (this[key]) return this[key];
@@ -324,12 +408,20 @@
         corner({ top: 10, right: 10, borderRadius: '0 8px 0 0' }, '1.5px 1.5px 0 0'), corner({ top: 10, left: 10, borderRadius: '8px 0 0 0' }, '1.5px 0 0 1.5px'),
         corner({ bottom: 10, right: 10, borderRadius: '0 0 8px 0' }, '0 1.5px 1.5px 0'), corner({ bottom: 10, left: 10, borderRadius: '0 0 0 8px' }, '0 0 1.5px 1.5px')));
     }
-    emblem(rest) {
-      if (this._emb && this._embRest === rest) return this._emb;
-      this._embRest = rest;
+    /** The 3D emblem in its slot. Under a welcome it waits paused and hidden, on the page clock (clock="page"), and wakes
+     *  under the welcome's emblem as it lands, drawing the same frame (overlays.js Welcome); it then shows, and the welcome's
+     *  goes. Its glow fades in as the welcome emblem's own glow fades out. */
+    emblem(rest, entering) {
+      const ov = this.state.ov, wlUp = isWelcome(ov), wl = this.wl;
+      const paused = rest || (wlUp && !(wl && wl.embWake)), hidden = wlUp && !(wl && wl.embShown), page = wlUp, evOff = wlUp && !(wl && wl.settled);
+      const k = [paused, hidden, page, evOff, entering, CFG.globeStyle, CFG.lang].join('|');
+      if (this._emb && this._embK === k) return this._emb;
+      this._embK = k;
       return (this._emb = h('div', { style: { position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
-        h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } }),
-        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
+        h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, entering ? { animation: 'wlGlowIn 1700ms ease-in-out 6100ms both' } : {}) },
+          h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } })),
+        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, ref: this.embRef, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off',
+          paused: paused ? '' : null, clock: page ? 'page' : null, events: evOff ? 'off' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, opacity: hidden ? 0 : 1 } })));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
@@ -424,21 +516,26 @@
       const D = this.D, now = this.state.now, t = Date.now() - (this.t0 || Date.now()), nd = new Date(now);
       // Under a full-screen moment the wall rests: its layers are not drawn and the 3D emblem stops, so a lobby computer
       // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
-      const ov = this.state.ov, enterAt = this.state.enterAt || 0;
-      const rest = !!ov && this.state.covered && !(ov.leaving && enterAt >= ov.leaving);
-      // Right after the welcome screen: the wall's entrance (each part flies in, the emblem lands with a shock ring).
-      const entering = Date.now() - enterAt < 4500;
-      const en = (name, dur, delay) => (entering ? { animation: `${name} ${dur}s cubic-bezier(.16,1,.3,1) ${delay}s both` } : {});
+      const ov = this.state.ov, wl = this.wl, wlUp = isWelcome(ov);
+      const rest = !!ov && this.state.covered && !(wl && wl.woke);
+      // On the welcome's way out the wall wakes under it and assembles around the arriving emblem: the column the Earth
+      // crosses first, then the other, header, ticker and launches, then light runs down the panels' inner edges as the
+      // emblem docks. All in one commit (the wake), with fixed delays (ms) measured from it.
+      const entering = !!(wl && wl.woke && !wl.settled);
+      const enW = (name, ms, delay) => (entering ? { animation: `${name} ${ms}ms cubic-bezier(.16,1,.3,1) ${delay}ms both` } : {});
+      const seam = (side, delay) => (entering ? h('div', { key: 'seam', style: { position: 'absolute', top: 0, bottom: 0, [side]: 0, width: 2, zIndex: 3, pointerEvents: 'none', transformOrigin: 'top', background: 'linear-gradient(180deg, rgba(212,242,92,0), #d4f25c 20%, #9fdcff 80%, rgba(159,220,255,0))', animation: `wlSeam 1000ms cubic-bezier(.16,1,.3,1) ${delay}ms both` } }) : null);
+      const edgeFlash = (delay) => (entering ? h('div', { key: 'edge', style: { position: 'absolute', inset: 0, borderRadius: 26, border: '1px solid rgba(212,242,92,.8)', zIndex: 3, pointerEvents: 'none', animation: `wlEdge 1000ms ease ${delay}ms both` } }) : null);
+      const rightFirst = EN() ? 3800 : 3200, leftFirst = EN() ? 3200 : 3800;   // the physical right column is "r" in Hebrew, "l" in English
       const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
         h('div', { dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } },
-          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers),
+          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers, h(React.Fragment, { key: 'fx' }, !entering && !wlUp ? this.ambientFx() : null)),
           h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
       const ago = D && this.updatedAgo(D);
       const dot = ago && h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
       const timeBox = (big, small, extra, smallStyle) => h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },
         h('span', { style: Object.assign({ fontSize: 26, letterSpacing: '.03em' }, extra.big) }, big), h('span', { style: Object.assign({ fontSize: 12, color: MUTED }, smallStyle) }, small));
 
-      const header = h('header', { key: 'hdr', style: Object.assign({ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 36px', position: 'relative', zIndex: 2 }, en('enDown', 1.2, 0.5)) },
+      const header = h('header', { key: 'hdr', style: Object.assign({ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 36px', position: 'relative', zIndex: 2 }, enW('wlHeadIn', 2000, 5000)) },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
           h('div', { style: { width: 52, height: 52, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
             h('img', { src: '/assets/logo-mark.png', alt: '', style: { width: 44, height: 44, objectFit: 'contain' } })),
@@ -454,8 +551,8 @@
       if (!D) {
         const denied = this.state.feedErr === 401 || this.state.feedErr === 403;
         return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header,
-          h('div', { key: 'e', style: Object.assign({ gridRow: '2 / 4', display: 'flex', minHeight: 0 }, en('enEmblem', 1.8, 0)) }, this.emblem(rest)),
-          h('div', { key: 'w', style: { gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 } },
+          h('div', { key: 'e', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem(rest, entering)),
+          h('div', { key: 'w', style: Object.assign({ gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 }, enW('wlFootIn', 1800, 5800)) },
             h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, tr('מתחבר לנתונים…', 'Connecting…')),
             denied ? quiet(tr('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת', 'The wall has no access to its data: check the display key (key) in the address')) : null)]);
       }
@@ -484,21 +581,20 @@
       const panelHead = (title, meta) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
         h('span', { style: { fontSize: 20, fontWeight: 700 } }, title), h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: MUTED, letterSpacing: '.08em' } }, meta));
 
-      const right = h('section', { key: 'r', style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }, en(EN() ? 'enFromL' : 'enFromR', 1.3, 0.75)) },
+      const right = h('section', { key: 'r', style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }, enW('wlPanelIn', 2600, rightFirst)) },
         h('div', { style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }) },
-          this.sheen(1, 0), panelHead(tr('אירועים', 'Events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))),
+          this.sheen(1, 0), seam('insetInlineEnd', 8400), edgeFlash(8450), panelHead(tr('אירועים', 'Events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))),
         h('div', { style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
-          this.sheen(2, 4.5),
+          this.sheen(2, 4.5), seam('insetInlineEnd', 8520), edgeFlash(8450),
           panelHead(tr('אנשי המנהלת', 'Our people'), D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),
           D.people.length ? this.spotlight(D, pIdx) : quiet(tr('אין ימי הולדת או רגעים אישיים בימים הקרובים', 'No birthdays or personal moments in the coming days')),
           D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null));
 
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
-        h('div', { style: Object.assign({ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 }, en('enEmblem', 1.8, 0)) }, this.emblem(rest)),
-        entering ? h('div', { key: 'shock', style: { position: 'absolute', left: '50%', top: '47%', width: 600, height: 600, marginLeft: -300, marginTop: -300, borderRadius: '50%', border: '3px solid rgba(190,235,255,.9)', boxShadow: '0 0 60px rgba(111,214,234,.7), inset 0 0 60px rgba(111,214,234,.4)', pointerEvents: 'none', animation: 'enShock 1.6s cubic-bezier(.2,.8,.3,1) .9s both' } }) : null);
+        h('div', { style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest, entering)));
 
-      const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, en(EN() ? 'enFromR' : 'enFromL', 1.3, 0.75)) },
-        this.sheen(3, 9),
+      const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, enW('wlPanelIn', 2600, leftFirst)) },
+        this.sheen(3, 9), seam('insetInlineStart', 8400), edgeFlash(8450),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, tr('ניוזלטר החלל השבועי', 'Weekly space newsletter')), h('span', { style: { fontSize: 13, color: MUTED } }, [tr('רקיע · הפורום הישראלי לחלל', 'Rakia · The Israeli Space Forum'), D.issue.range].filter(Boolean).join(' · '))),
           CFG.showQr && D.issue.url ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
@@ -509,11 +605,11 @@
 
       const main = h('main', { key: 'main', style: { display: 'grid', gridTemplateColumns: '470px minmax(0,1fr) 470px', gap: 26, padding: '14px 36px 16px', minHeight: 0, position: 'relative', zIndex: 2 } }, right, center, left);
 
-      const tickerBar = h('div', { key: 'tk', style: Object.assign({ display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' }, en('enUp', 1.2, 1.0)) },
+      const tickerBar = h('div', { key: 'tk', style: Object.assign({ display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' }, enW('wlFootIn', 2000, 5500)) },
         h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', height: '100%', [EN() ? 'borderRight' : 'borderLeft']: '1px solid rgba(150,190,240,.14)', fontSize: 15, fontWeight: 700 } }, tr('אירועים והזדמנויות', 'Events & opportunities')),
         D.ticker.length ? this.ticker(D) : quiet(tr('אין אירועים או הזדמנויות קרובים', 'No upcoming events or opportunities'), { padding: '0 26px' }));
 
-      const launches = this.launchVals(D.launches, now).slice(0, 4).map((l, i) => h('div', { key: i, style: { height: 84, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '0 14px', borderRadius: 22, background: 'linear-gradient(180deg,rgba(40,62,104,.38),rgba(12,22,44,.6))', border: `1px solid ${l.border}`, boxShadow: l.shadow, minWidth: 0 } },
+      const launches = this.launchVals(D.launches, now).slice(0, 4).map((l, i) => h('div', { key: i, style: Object.assign({ height: 84, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '0 14px', borderRadius: 22, background: 'linear-gradient(180deg,rgba(40,62,104,.38),rgba(12,22,44,.6))', border: `1px solid ${l.border}`, boxShadow: l.shadow, minWidth: 0 }, enW('wlFootIn', 1800, 5900 + 80 * i)) },
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
             h('span', { style: { padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 500, color: l.statusColor, border: `1px solid ${l.statusColor}` } }, l.status),
@@ -522,9 +618,9 @@
           h('span', { style: { fontSize: 12, color: MUTED, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, l.vehicle + ' · ' + l.site)),
         h('div', { dir: 'ltr', style: { display: 'flex', gap: 4, flex: 'none' } }, l.segs.map((s, j) => h('div', { key: j, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 34, padding: '5px 3px', borderRadius: 10, background: 'rgba(6,12,26,.7)', border: '1px solid rgba(150,190,240,.12)' } },
           h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 17, fontWeight: 400, color: l.numColor, lineHeight: 1.1 } }, s.v), h('span', { style: { fontSize: 10, color: '#6f82a6' } }, s.u))))));
-      const footer = h('footer', { key: 'ft', style: Object.assign({ display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 }, en('enUp', 1.2, 1.15)) },
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
-        launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), { gridColumn: '2 / -1' }));
+      const footer = h('footer', { key: 'ft', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
+        h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 3 }, enW('wlFootIn', 1800, 5800)) }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
+        launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), Object.assign({ gridColumn: '2 / -1' }, enW('wlFootIn', 1800, 5900))));
 
       return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer]);
     }

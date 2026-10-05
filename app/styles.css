@@ -24,19 +24,32 @@ a{color:#9fdcff;text-decoration:none}a:hover{color:#e6f1ff}
 @keyframes liftoff{from{transform:scaleY(0);opacity:1}to{transform:scaleY(1);opacity:.2}}
 @keyframes toastIn{from{opacity:0;transform:translate(-50%,-30px)}to{opacity:1;transform:translate(-50%,0)}}
 @keyframes grain{0%{transform:translate(0,0)}20%{transform:translate(-3%,2%)}40%{transform:translate(2%,-3%)}60%{transform:translate(-2%,-1%)}80%{transform:translate(3%,3%)}100%{transform:translate(0,0)}}
-@keyframes parallaxA{from{background-position:0 0}to{background-position:-512px 128px}}
 @keyframes parallaxB{from{transform:translate(0,0)}to{transform:translate(-60px,18px)}}
 @keyframes flare{0%,100%{opacity:.35;transform:translateX(0) scaleX(1)}50%{opacity:.7;transform:translateX(40px) scaleX(1.15)}}
-/* the welcome screen (overlays.js Welcome) and the wall's entrance after it (wall.js) */
-@keyframes wlLetter{from{opacity:0;transform:translateY(46px) scale(.7)}to{opacity:1;transform:none}}
-@keyframes wlLogo{0%{opacity:0;transform:scale(.2) rotate(-40deg)}100%{opacity:1;transform:none}}
-@keyframes wlRise{from{transform:translateY(260px);opacity:0}to{transform:none;opacity:1}}
-@keyframes wlSun{0%,100%{opacity:.85}50%{opacity:1}}
-@keyframes wlShine{0%,55%{background-position:120% 0}100%{background-position:-20% 0}}
-@keyframes enEmblem{0%{opacity:0;transform:scale(1.9)}60%{opacity:1}100%{opacity:1;transform:none}}
-@keyframes enShock{0%{opacity:.9;transform:scale(.3)}100%{opacity:0;transform:scale(2.6)}}
-@keyframes enDown{from{opacity:0;transform:translateY(-90px)}to{opacity:1;transform:none}}
-@keyframes enUp{from{opacity:0;transform:translateY(110px)}to{opacity:1;transform:none}}
-@keyframes enFromR{from{opacity:0;transform:translateX(160px)}to{opacity:1;transform:none}}
-@keyframes enFromL{from{opacity:0;transform:translateX(-160px)}to{opacity:1;transform:none}}
-@keyframes enFade{from{opacity:1}to{opacity:0}}
+/* the welcome screen (overlays.js Welcome): intro (applied at the reveal), idle breathing (9 s), and the wall's entrance after it */
+@keyframes wlIn{from{opacity:0}to{opacity:1}}
+@keyframes wlScaleIn{from{opacity:0;transform:scale(0)}to{opacity:1;transform:none}}
+@keyframes wlDrawX{from{opacity:0;transform:scaleX(0)}30%{opacity:1}to{opacity:1;transform:none}}
+@keyframes wlLetterIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+@keyframes wlEyebrowIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+@keyframes wlRiseIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes wlRigIn{from{transform:translateY(16px) scale(.94)}to{transform:none}}
+@keyframes wlVeil{from{transform:none}to{transform:translate(70px,26px) scale(1.06)}}
+@keyframes wlFloat{from{transform:translateY(-4px)}to{transform:translateY(4px)}}
+@keyframes wlBreathSun{0%,100%{transform:scale(.94)}50%{transform:scale(1.08)}}
+@keyframes wlBreathO{0%,100%{opacity:.75}50%{opacity:1}}
+@keyframes wlLimb{0%,100%{opacity:.6}50%{opacity:1}}
+@keyframes wlTitleGlow{0%,100%{opacity:.12}50%{opacity:.42}}
+@keyframes wlGuest{0%,100%{opacity:.86}50%{opacity:1}}
+@keyframes wlStreak{0%,100%{opacity:.75;transform:scaleX(.92)}50%{opacity:1;transform:scaleX(1.08)}}
+@keyframes wlGlint{0%{opacity:0}2%{opacity:.85}6%,100%{opacity:0}}
+@keyframes wlGlintOnce{0%{opacity:0}25%{opacity:.9}100%{opacity:0}}
+@keyframes wlPanelIn{from{opacity:0;transform:translateY(28px)}to{opacity:1;transform:none}}
+@keyframes wlHeadIn{from{opacity:0;transform:translateY(-18px)}to{opacity:1;transform:none}}
+@keyframes wlFootIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+@keyframes wlGlowIn{from{opacity:0}to{opacity:1}}
+@keyframes wlSeam{0%{opacity:1;transform:scaleY(0)}60%{opacity:1;transform:none}100%{opacity:0;transform:none}}
+@keyframes wlEdge{0%{opacity:0}30%{opacity:.85}100%{opacity:0}}
+/* the wall's far star tile, moved by transforms (a background-position animation repaints the whole screen every frame) */
+@keyframes tileX{from{transform:none}to{transform:translateX(-512px)}}
+@keyframes tileY{from{transform:none}to{transform:translateY(512px)}}
