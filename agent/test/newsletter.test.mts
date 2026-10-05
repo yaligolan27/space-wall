@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { parseIssue, latestFromArchive, compactRange, endDate } from '../../lib/newsletter.js';
 import { NewsletterContent } from '../../lib/wall-ops.js';
+import { storeNewsletterImages } from '../../lib/newsletter-images.js';
 
 const FIX = new URL('fixtures/', import.meta.url).pathname;
 const page = (name: string) => readFileSync(FIX + name, 'utf8');
@@ -31,7 +32,22 @@ check('lead + 19 cards', cur.content.news.length === 20, String(cur.content.news
 const lead = cur.content.news[0];
 check('lead story fields', lead.cat === 'שיגורים' && lead.date === '28.09' && lead.title.startsWith('סטארשיפ הגיעה למסלול') && lead.url.startsWith('https://spacepolicyonline.com/') && lead.dek.length > 20);
 check('every item has a category, title and url', cur.content.news.every(n => n.cat && n.title.length > 3 && /^https?:/.test(n.url)));
-check('no inline images carried over', cur.content.news.every(n => n.image === null));
+check('one inline picture per news item, kept out of the content', cur.images.length === cur.content.news.length && cur.images.every(p => p?.mime === 'image/jpeg' && p.base64.length > 0) && cur.content.news.every(n => n.image === null));
+check('pictures stay aligned with their items', Buffer.from(cur.images[0]!.base64, 'base64').toString() === 'fake-jpeg-1' && Buffer.from(cur.images[19]!.base64, 'base64').toString() === 'fake-jpeg-20');
+{
+  // Storing: every picture is uploaded under the issue's folder and its public URL lands on the item; a failed upload leaves null.
+  const issue = parseIssue(page('rakia-2026-10-08.html'), '2026-10-04');
+  const paths: string[] = [];
+  const store = {
+    async upload(path: string, body: Buffer, o: { contentType: string }) { paths.push(path); return { error: path.startsWith('newsletter/2026-10-08/03-') ? { message: 'boom' } : (o.contentType === 'image/jpeg' && body.length ? null : { message: 'bad' }) }; },
+    getPublicUrl(path: string) { return { data: { publicUrl: 'https://cdn.test/' + path } }; },
+  };
+  const res = await storeNewsletterImages(issue, store);
+  check('uploads every picture', paths.length === 20 && paths.every(p => /^newsletter\/2026-10-08\/\d{2}-[0-9a-f]{10}\.jpg$/.test(p)), paths[0]);
+  check('reports stored and failed', res.stored === 19 && res.failed === 1, JSON.stringify(res));
+  check('items point at their files', issue.content.news[0].image === 'https://cdn.test/' + paths.find(p => p.includes('/00-')) && issue.content.news[3].image === null);
+  check('content with pictures still fits NewsletterContent', NewsletterContent.safeParse(issue.content).success);
+}
 check('six featured, lead first', cur.content.featured.length === 6 && cur.content.featured[0] === 0);
 check('ticker has events and opportunities', cur.content.ticker.some(t => t.kind === 'אירוע') && cur.content.ticker.some(t => t.kind === 'הזדמנות'));
 check('ticker drops what has passed', cur.content.ticker.every(t => endDate(t.date, '2026-10-08')! >= '2026-10-04'));

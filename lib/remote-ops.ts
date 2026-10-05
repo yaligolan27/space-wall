@@ -8,6 +8,7 @@ import { addDays, isoDateIL, timeIL } from './dates.js';
 import { birthdayCard, displayName, lifeCard } from './feed.js';
 import { DATE, TIME, PERSON_KINDS, NewsletterContent, assertRealDate, ilToIso, importNewsletter } from './wall-ops.js';
 import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from './newsletter.js';
+import { storeNewsletterImages } from './newsletter-images.js';
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { headers: { accept: 'text/html', 'user-agent': 'space-wall-remote/1.0' }, signal: AbortSignal.timeout(15000) });
@@ -475,6 +476,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
         if (!page) throw new Error('לא נמצא גיליון באתר הניוזלטר');
       }
       const parsed = parseIssue(await fetchText(`${NEWSLETTER_SITE}/${page}/`), isoDateIL());
+      await storeNewsletterImages(parsed);
       content = NewsletterContent.parse(parsed.content); issueDate = parsed.issue_date; sourceUrl = parsed.source_url;
     } else {
       try {
