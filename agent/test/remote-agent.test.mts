@@ -3,6 +3,7 @@
 //
 //   npm test
 import { AgentInput, ApiError, TOOLS, apiErrorHe, brief, conversation } from '../../lib/remote-agent.js';
+import { DesignPatch, cssProblem, youtubeId } from '../../lib/remote-ops.js';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -48,6 +49,19 @@ check('pictures numbered in order', ctx.images.map(i => i.name).join() === 'p2.j
 check('the request comes last', m[2].content.at(-1)?.text === 'ועכשיו');
 const files = conversation(AgentInput.parse({ text: 'x', files: [{ name: 'a.csv', text: 'שם\nדנה', rows: 2 }] }), { images: [] });
 check('a file goes as text before the request', files[0].content[0].text.startsWith('[קובץ מצורף: a.csv, 2 שורות]\nשם') && files[0].content[1].text === 'x');
+
+// ---- the style layer and streams
+check('a style tweak passes', cssProblem('[data-w="logo-img"]{transform:translate(-2px,1px)!important}') === null);
+check('nothing loaded from outside', ['a{background:url(https://x.y/a.png)}', '@import "x.css";', 'a{b:c}</style><script>', 'a{content:"\\3c"}', 'a{b:expression(alert(1))}']
+  .every(c => cssProblem(c) !== null));
+check('unbalanced braces refused', cssProblem('a{color:red') !== null && cssProblem('a}{') !== null);
+check('the design takes the layer, a headline and hidden panels', DesignPatch.safeParse({ css: 'a{color:red!important}', headline: 'ברוכים הבאים', hide: ['ticker'] }).success
+  && !DesignPatch.safeParse({ hide: ['menu'] }).success && !DesignPatch.safeParse({ css: 'a{background:url(x)}' }).success);
+check('YouTube links → the video id', ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://youtu.be/dQw4w9WgXcQ', 'https://www.youtube.com/live/dQw4w9WgXcQ?si=x', 'dQw4w9WgXcQ']
+  .every(u => youtubeId(u) === 'dQw4w9WgXcQ'));
+check('other links are not streams', youtubeId('https://x.com/SpaceX/status/1') === null && youtubeId('https://evil.com/watch?v=dQw4w9WgXcQ') === null);
+const bLaunch = brief(snap, 'יעלי', [{ id: 'l1', mission: 'Crew-13', vehicle: 'Falcon 9', net: '2026-10-05T10:00:00Z', status: 'Go' }]);
+check('the brief lists the launches', bLaunch.includes('"mission":"Crew-13"') && bLaunch.includes('"id":"l1"'));
 
 // ---- errors in plain Hebrew
 const he = (status: number, kind: string, message = '') => apiErrorHe(new ApiError(message, status, kind));

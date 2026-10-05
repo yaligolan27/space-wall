@@ -18,12 +18,27 @@ async function fetchText(url: string): Promise<string> {
 }
 
 // ---- design (the wall's URL options, now stored) ----------------------------------------------------
-export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en' };
+export const PANELS = ['news', 'events', 'people', 'ticker', 'launches'] as const;
+export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en',
+  css: '', headline: '', headlineEn: '', hide: [] as string[], news: [] as Row[] };
+
+/** The agent's style layer (design.css), which the wall puts in a <style> after its own: it can recolor, resize, move
+ *  or hide, never load anything (no url(), @import or fonts from outside) and never leave its <style>. */
+export function cssProblem(css: string): string | null {
+  if (/<|@import|@font-face|@namespace|url\s*\(|image-set\s*\(|expression\s*\(|javascript:|behavio(u)?r\s*:|-moz-binding|\\/i.test(css))
+    return 'אסור בשכבת העיצוב: תגיות, קישורים או טעינה מבחוץ (url, @import), ו-\\';
+  let depth = 0;
+  for (const ch of css) { if (ch === '{') depth++; else if (ch === '}' && --depth < 0) break; }
+  return depth === 0 ? null : 'סוגריים מסולסלים לא מאוזנים בשכבת העיצוב';
+}
 export const DesignPatch = z.object({
   noon: z.boolean(), qr: z.boolean(), fx: z.boolean(), sway: z.boolean(),
   feature: z.number().int().min(6).max(30), list: z.number().int().min(2).max(10), globe: z.number().int().min(20).max(240),
   globeStyle: z.enum(['holo', 'real']),
   lang: z.enum(['he', 'en']).describe('שפת הצג: en = כל הצג באנגלית (למשלחות), he = עברית'),
+  css: z.string().max(6000).superRefine((v, c) => { const e = cssProblem(v); if (e) c.addIssue({ code: 'custom', message: e }); }),
+  headline: z.string().trim().max(80), headlineEn: z.string().trim().max(80),
+  hide: z.array(z.enum(PANELS)).max(PANELS.length),
 }).partial().strict();
 
 const NOON_MS = 150e3;            // 10 s countdown + the 107 s promo, with a margin
@@ -99,7 +114,9 @@ const BUILD = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT
 export async function live() {
   const now = new Date();
   const [st, big] = await Promise.all([wallState(), bigEventsNow(now)]);
-  return { design: { ...DESIGN_DEFAULTS, ...(st.design || {}) }, brightness: st.brightness ?? 100, urgent: st.urgent || null,
+  const design = { ...DESIGN_DEFAULTS, ...(st.design || {}) };
+  design.news = liveNews(design.news, now.getTime());
+  return { design, brightness: st.brightness ?? 100, urgent: st.urgent || null,
     noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), at: now.toISOString(), build: BUILD };
 }
 
@@ -183,6 +200,52 @@ async function applyUndo(ops: UndoOp[]) {
 
 // ---- actions ------------------------------------------------------------------------------------------
 const UUID = z.string().uuid();
+
+// ---- things from the remote's agent: news items, pictures and streams --------------------------------
+const MAX_NEWS = 6;
+const NewsIn = z.object({
+  title: z.string().trim().min(1).max(160), dek: z.string().trim().max(400).optional(), src: z.string().trim().max(60).optional(),
+  url: z.string().url().max(500).regex(/^https:\/\//).optional().or(z.literal('')), image: z.string().url().max(500).optional().or(z.literal('')),
+  cat: z.string().trim().max(24).optional(), titleEn: z.string().trim().max(160).optional(), dekEn: z.string().trim().max(400).optional(),
+  days: z.number().int().min(1).max(30).default(7),
+});
+/** The remote's news items that haven't expired. */
+export const liveNews = (news: unknown, now = Date.now()): Row[] => (Array.isArray(news) ? news : []).filter((n: Row) => n && Date.parse(n.until) > now);
+const bucketBase = () => db().storage.from('wall-photos').getPublicUrl('x').data.publicUrl.replace(/x$/, '');
+/** The wall shows only pictures kept in its own storage: one from the internet is copied there first (storeWebImage). */
+function assertOurImage(url: string) {
+  if (!url.startsWith(bucketBase())) throw new Error('התמונה צריכה להישמר קודם באחסון של הצג');
+}
+/** A YouTube link (watch, live, shorts, embed or youtu.be) or a bare video id → the video id; null for anything else. */
+export function youtubeId(s: string): string | null {
+  const t = s.trim();
+  if (/^[\w-]{11}$/.test(t)) return t;
+  let u: URL;
+  try { u = new URL(t); } catch { return null; }
+  const host = u.hostname.replace(/^(www\.|m\.)/, '');
+  const id = host === 'youtu.be' ? u.pathname.slice(1)
+    : host === 'youtube.com' || host === 'youtube-nocookie.com' ? (u.searchParams.get('v') || u.pathname.match(/^\/(?:live|shorts|embed)\/([\w-]{11})/)?.[1] || '') : '';
+  return /^[\w-]{11}$/.test(id) ? id : null;
+}
+const IMG_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+/** A picture from the internet → a copy in the wall-photos bucket (web/), so the wall never depends on someone else's site. */
+export async function storeWebImage(url: string): Promise<string> {
+  let u: URL;
+  try { u = new URL(url); } catch { throw new Error('קישור לא תקין לתמונה'); }
+  if (u.protocol !== 'https:' || /^(localhost|\d+\.\d+\.\d+\.\d+|\[.*\])$/i.test(u.hostname) || !u.hostname.includes('.')) throw new Error('אפשר להביא תמונה רק מקישור https רגיל');
+  const res = await fetch(u, { headers: { accept: 'image/*', 'user-agent': 'Mozilla/5.0 (space-wall)' }, redirect: 'follow', signal: AbortSignal.timeout(12000) });
+  if (!res.ok) throw new Error(`התמונה לא נטענה (HTTP ${res.status})`);
+  const type = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase(), ext = IMG_TYPES[type];
+  if (!ext) throw new Error('הקישור לא מוביל לתמונה (JPG, PNG, WEBP או GIF)');
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > 6e6) throw new Error('התמונה גדולה מדי (יותר מ-6MB)');
+  if (buf.length < 2000) throw new Error('התמונה קטנה מדי');
+  const path = `web/${randomUUID()}.${ext}`;
+  const up = await db().storage.from('wall-photos').upload(path, buf, { contentType: type, upsert: false });
+  if (up.error) throw new Error('שמירת התמונה נכשלה: ' + up.error.message);
+  return db().storage.from('wall-photos').getPublicUrl(path).data.publicUrl;
+}
+
 // Who: a person from the list (personId), or just a name for someone who isn't in it.
 const LifeInput = z.object({
   id: UUID.optional(), personId: UUID.nullable().optional(), name: z.string().trim().max(60).optional(), free: z.boolean().optional(), type: z.string().trim().min(1).max(40), date: DATE, showFrom: DATE.optional(),
@@ -526,7 +589,45 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     }
   },
   async resetDesign(_a, who) {
-    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: {} }, who)]);
+    // The news items added from the remote live in design too (design.news), but they aren't the design.
+    const news = (await wallState()).design?.news;
+    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: news?.length ? { news } : {} }, who)]);
+  },
+  /** A news item from the remote (the agent's suggestion, after the operator approved it): first in the newsletter
+   *  panel, as a featured story, until it expires. Hebrew and English, so the English mode needs no translation. */
+  async addNews(a, who) {
+    const f = NewsIn.parse(a);
+    if (f.image) assertOurImage(f.image);
+    const cur = (await wallState()).design || {}, now = Date.now();
+    const item = { id: randomUUID(), title: f.title, dek: f.dek || '', src: f.src || '', url: f.url || '', image: f.image || '', cat: f.cat || '',
+      titleEn: f.titleEn || '', dekEn: f.dekEn || '', added: new Date(now).toISOString(), until: new Date(now + f.days * 864e5).toISOString() };
+    const news = [item, ...liveNews(cur.news, now)].slice(0, MAX_NEWS);
+    await record(who, 'נוספה ידיעה לניוזלטר בצג: ' + f.title.slice(0, 60), [await patchState({ design: { ...cur, news } }, who)]);
+    return { id: item.id };
+  },
+  async removeNews(a, who) {
+    const { id } = z.object({ id: UUID }).parse(a);
+    const cur = (await wallState()).design || {}, old: Row[] = cur.news || [], hit = old.find(n => n.id === id);
+    if (!hit) throw new Error('הידיעה לא נמצאה');
+    await record(who, 'הוסרה ידיעה מהצג: ' + String(hit.title).slice(0, 60), [await patchState({ design: { ...cur, news: old.filter(n => n.id !== id) } }, who)]);
+  },
+  /** A picture on the whole wall, with an optional caption, for some minutes (the remote's "back to normal" ends it). */
+  async showImage(a, who) {
+    const f = z.object({ url: z.string().url(), caption: z.string().trim().max(120).optional(), captionEn: z.string().trim().max(120).optional(),
+      minutes: z.number().int().min(1).max(240).default(2) }).parse(a);
+    assertOurImage(f.url);
+    const now = Date.now();
+    await record(who, 'תמונה על כל המסך' + (f.caption ? ': ' + f.caption.slice(0, 50) : ''), [await patchState({ takeover: { id: 'rt:' + now, kind: 'image',
+      url: f.url, caption: f.caption || '', captionEn: f.captionEn || '', until: new Date(now + f.minutes * 60e3).toISOString() } }, who)]);
+  },
+  /** A live stream (a launch's webcast) on the whole wall: YouTube only, muted, until the remote ends it or `minutes` pass. */
+  async showStream(a, who) {
+    const f = z.object({ url: z.string().max(500), title: z.string().trim().max(120).optional(), minutes: z.number().int().min(5).max(480).default(180) }).parse(a);
+    const videoId = youtubeId(f.url);
+    if (!videoId) throw new Error('אפשר להציג בצג רק שידור מ-YouTube (קישור youtube.com או youtu.be)');
+    const now = Date.now();
+    await record(who, 'שידור חי על כל המסך' + (f.title ? ': ' + f.title.slice(0, 60) : ''), [await patchState({ takeover: { id: 'rt:' + now, kind: 'stream',
+      videoId, title: f.title || '', until: new Date(now + f.minutes * 60e3).toISOString() } }, who)]);
   },
   async eventImportant(a, who) {
     const { id, important } = z.object({ id: UUID, important: z.boolean() }).parse(a);
@@ -546,7 +647,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
   },
   /** A photo for a life event or a person: a shrunk JPEG data URL → public URL in the wall-photos bucket. */
   async photo(a) {
-    const { dataUrl, folder } = z.object({ dataUrl: z.string().regex(/^data:image\/(jpeg|png|webp);base64,/).max(2_000_000), folder: z.enum(['life', 'people']).default('life') }).parse(a);
+    const { dataUrl, folder } = z.object({ dataUrl: z.string().regex(/^data:image\/(jpeg|png|webp);base64,/).max(2_000_000), folder: z.enum(['life', 'people', 'web']).default('life') }).parse(a);
     const [, type, b64] = dataUrl.match(/^data:image\/(\w+);base64,(.*)$/)!;
     const path = `${folder}/${randomUUID()}.${type === 'jpeg' ? 'jpg' : type}`;
     const up = await db().storage.from('wall-photos').upload(path, Buffer.from(b64, 'base64'), { contentType: 'image/' + type, upsert: false });

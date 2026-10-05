@@ -237,5 +237,28 @@ window.makeWallOverlays = (React) => {
     h('span', { style: { width: 12, height: 12, borderRadius: '50%', background: '#e9b872', boxShadow: '0 0 14px #e9b872', animation: 'breathe 1s ease-in-out infinite' } }),
     h('span', { style: { fontSize: 22, fontWeight: 700, color: '#e9b872' } }, title), h('span', { style: { fontSize: 20 } }, line));
 
-  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast };
+  // ---------- a picture on the whole wall (the remote's agent: attached, or from the internet after approval) ----------
+  // Kept light: the picture once, contained on black, a caption on a plain gradient; no blur or moving layers.
+  const ImageMoment = ({ url, caption }) => shell([
+    h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#02050c' } }),
+    h('img', { key: 'img', src: url, alt: caption || '', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', animation: 'ovIn 1.2s ease both' } }),
+    caption ? h('div', { key: 'cap', style: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: '120px 120px 70px', background: 'linear-gradient(0deg, rgba(2,5,12,.92), rgba(2,5,12,0))', fontSize: 52, fontWeight: 700, lineHeight: 1.2, textAlign: 'center', textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, caption) : null
+  ]);
+
+  // ---------- a live stream (a launch's webcast) on the whole wall: YouTube, muted, until the remote ends it ----------
+  // In the remote's preview a card stands in for the player, so a phone never loads the video.
+  const LiveStream = ({ videoId, title, preview }) => {
+    const src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(videoId) + '?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&modestbranding=1&iv_load_policy=3';
+    const tag = h('div', { key: 'tag', style: { position: 'absolute', top: 36, [EN() ? 'left' : 'right']: 40, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 22px', borderRadius: 999, background: 'rgba(6,12,26,.78)', border: '1px solid rgba(255,120,110,.6)', fontSize: 26, fontWeight: 700, whiteSpace: 'nowrap', maxWidth: 1200, overflow: 'hidden', textOverflow: 'ellipsis' } },
+      h('span', { style: { width: 14, height: 14, borderRadius: '50%', background: '#ff5a4f', boxShadow: '0 0 14px #ff5a4f', animation: 'breathe 1.4s ease-in-out infinite' } }), tr('שידור חי', 'LIVE') + (title ? ' · ' + title : ''));
+    if (preview) return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#02050c url(https://i.ytimg.com/vi/' + encodeURIComponent(videoId) + '/hqdefault.jpg) center/cover no-repeat', opacity: .55 } }),
+      h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, fontWeight: 700 } }, tr('השידור מוצג בצג', 'Streaming on the wall')), tag]);
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#000' } }),
+      h('iframe', { key: 'v', src, title: title || 'Live', allow: 'autoplay; encrypted-media; picture-in-picture', referrerPolicy: 'strict-origin-when-cross-origin', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 } }),
+      tag]);
+  };
+
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream };
 };
