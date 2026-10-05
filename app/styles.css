@@ -1,5 +1,6 @@
 /* Space Wall v4 — global styles and keyframes, verbatim from the Claude Design template. */
 html,body{margin:0;padding:0;background:#040914;overflow:hidden}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 a{color:#9fdcff;text-decoration:none}a:hover{color:#e6f1ff}
 *{font-variant-numeric:tabular-nums}
 @keyframes spin{to{transform:rotate(360deg)}}

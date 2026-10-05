@@ -3,6 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+// A phone or tablet lays the wall out 1920 wide and lets the browser zoom the whole page out to fit, instead of the wall
+// shrinking its stage with a CSS scale: Safari keeps every layer of a scaled page at full size times the screen's pixel
+// density, and the welcome screen's layers took more memory than an iPhone has ("A problem repeatedly occurred"). Zoomed
+// out, each layer is kept at about the pixels it covers. Not in a frame (the remote's preview); ?phone=0 / ?phone=1 overrides.
+// window.__pageScale(): how far the browser has zoomed the page out (1 when it has not), for drawing buffers sized by hand.
+(function () {
+  var q = /[?&]phone=([01])/.exec(location.search), big = Math.max(screen.width, screen.height);
+  var on = q ? q[1] === '1' : window.top === window && !!window.matchMedia && matchMedia('(pointer: coarse)').matches && big < 1400;
+  if (on) document.querySelector('meta[name=viewport]').setAttribute('content', 'width=1920, minimum-scale=0.1');
+  window.__pageScale = function () {
+    if (!on) return 1;
+    var vv = window.visualViewport, sw = matchMedia('(orientation: landscape)').matches ? big : Math.min(screen.width, screen.height);
+    var w = (vv && vv.width) || innerWidth, s = w > 0 ? Math.min(1, sw / w) : 1;
+    return vv && vv.scale > 0 ? Math.min(s, vv.scale) : s;   // the screen's width over the page's (the browser's own zoom, where it says)
+  };
+})();
+</script>
 <title>צג חלל · מנהלת החלל</title>
 <link rel="icon" href="/assets/logo-mark.png">
 <link rel="manifest" href="/manifest.webmanifest">
