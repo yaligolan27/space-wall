@@ -261,11 +261,11 @@ function celebrateTakeover(card: Row, personId: string | null, type: string, not
 export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> = {
   async noon(_a, who) {
     const now = Date.now();
-    await record(who, 'הופעל מופע הצהריים', [await patchState({ takeover: { id: 'rt:' + now, kind: 'noon', until: new Date(now + NOON_MS).toISOString() } }, who)]);
+    await record(who, 'הופעל סרטון התדמית', [await patchState({ takeover: { id: 'rt:' + now, kind: 'noon', until: new Date(now + NOON_MS).toISOString() } }, who)]);
   },
   async celebrate(a, who) {
     const { personId, lifeId } = z.object({ personId: UUID.nullable().optional(), lifeId: UUID.optional() })
-      .refine(x => x.personId || x.lifeId, 'חסר למי הברכה').parse(a);
+      .refine(x => x.personId || x.lifeId, 'חסר למי המודעה').parse(a);
     const today = isoDateIL();
     let p: Row, card: Row, type = 'יום הולדת', note = '';
     if (lifeId) {
@@ -280,7 +280,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
       assertOnWall(p);
       card = birthdayCard(p, today, today);
     }
-    await record(who, 'ברכה על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note) }, who)]);
+    await record(who, 'מודעה אישית על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note) }, who)]);
   },
   async showEvent(a, who) {
     const { eventId } = z.object({ eventId: UUID }).parse(a);
@@ -297,7 +297,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
   },
   async noonToday(a, who) {
     const { on } = z.object({ on: z.boolean() }).parse(a);
-    await record(who, on ? 'מופע הצהריים יעלה היום' : 'דילוג על מופע הצהריים היום', [await patchState({ noon_skip: on ? null : isoDateIL() }, who)]);
+    await record(who, on ? 'סרטון התדמית יעלה היום' : 'דילוג על סרטון התדמית היום', [await patchState({ noon_skip: on ? null : isoDateIL() }, who)]);
   },
   async saveLife(a, who) {
     const f = LifeInput.parse(a);
@@ -344,7 +344,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
       const r = must(await db().from('directorate_events').insert({ ...row, type: 'other', created_by: 'remote:' + who }).select('id').single(), 'add event') as Row;
       undo = { op: 'del', table: 'directorate_events', id: r.id }; id = r.id;
     }
-    await record(who, (f.id ? 'עודכן אירוע: ' : 'נוסף אירוע מנהלת: ') + f.title, [undo]);
+    await record(who, (f.id ? 'עודכן אירוע: ' : 'נוסף אירוע: ') + f.title, [undo]);
     return { id };
   },
   async deleteEvent(a, who) {
@@ -524,7 +524,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const prev = await rowOf('directorate_events', id);
     if (!prev) throw new Error('האירוע לא נמצא');
     must(await db().from('directorate_events').update({ takeover: important }).eq('id', id).select('id'), 'event important');
-    await record(who, (important ? 'סומן כאירוע חשוב: ' : 'בוטל סימון אירוע חשוב: ') + prev.title, [{ op: 'put', table: 'directorate_events', row: prev }]);
+    await record(who, (important ? 'סומן כמודעה מנהלת: ' : 'בוטל סימון מודעה מנהלת: ') + prev.title, [{ op: 'put', table: 'directorate_events', row: prev }]);
   },
   /** Undo this change and everything after it. */
   async restore(a) {

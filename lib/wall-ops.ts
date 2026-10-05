@@ -45,7 +45,7 @@ export async function overview() {
     upcoming_directorate_events: (must(dir, 'dir') as any[]).map(onIsraelClock),
     upcoming_life_events: must(life, 'life'),
     ticker_items: (must(ind, 'ind') as any[]).filter(e => (e.ends_on || e.starts_on) >= today),
-    note: 'בבלוק "אירועים במנהלת" מוצגים אירועי 7 הימים הקרובים; בבלוק "אנשים" עד 6 רגעים אישיים מ-3 ימים אחורה עד 10 קדימה, כולל ימי הולדת שמחושבים אוטומטית מתאריך הלידה.',
+    note: 'בבלוק "אירועים" מוצגים אירועי 7 הימים הקרובים; בבלוק "אנשי המנהלת" עד 6 רגעים אישיים מ-3 ימים אחורה עד 10 קדימה, כולל ימי הולדת שמחושבים אוטומטית מתאריך הלידה.',
   };
 }
 
