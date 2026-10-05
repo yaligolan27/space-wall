@@ -1,4 +1,11 @@
 // <space-emblem-v2 speed="90" globe="holo|real" sway="on|off" [word="…"] [paused]> — Space Directorate emblem, v2. While `paused` it keeps its last frame and draws nothing.
+// For the welcome screen's hand-off (overlays.js Welcome), each only when set: clock="page" (t follows window.__emblemEpoch, so
+// two emblems on one page draw the same frame), events="off" (no new data arcs or target locks), intro="hold|go" (the logo
+// waits at night, then assembles: sunrise, orbits, rocket, wordmark), wordmark="down|up" (the 3D name flat, then flipping up),
+// maxpr (a cap on the drawing resolution). el.getTime() / el.setTime(t): its animation clock; el.getLink() / el.setLink(l): its
+// ground-station link.
+// el.ready + 'emblem-ready': fully loaded and compiled. 'emblem-error': it failed or lost its context. 'emblem-frame': the
+// first frame drawn after a pause.
 // Geometry is measured from the original logo (globe radius R = 1 unit): rocket, fins, the two crossing orbits, 4 satellites (original sizes), condensed wordmark.
 // Objects in front of the globe are scaled by (D-z)/D so the straight-on projection keeps the logo proportions exactly.
 // Tech layer: point-cloud continents, lat/long grid, scanning latitude ring, HUD ticks + radar sweep, Israel ground-station pulse with a live satellite link, light sweep across the lacquer.
@@ -6,8 +13,8 @@
   const TEXDIR = '/assets/textures/';
   const res = (f) => (window.__resources && window.__resources[f.replace(/\W/g, '_')]) || (TEXDIR + f);
   class SpaceEmblemV2 extends HTMLElement {
-    static get observedAttributes() { return ['speed', 'sway', 'paused']; }
-    connectedCallback() { if (this._started) return; this._started = true; this.style.display = 'block'; this._init().catch((e) => console.error('space-emblem-v2', e)); }
+    static get observedAttributes() { return ['speed', 'sway', 'paused', 'clock', 'events', 'intro', 'wordmark', 'maxpr']; }
+    connectedCallback() { if (this._started) return; this._started = true; this.style.display = 'block'; this._init().catch((e) => { console.error('space-emblem-v2', e); this.dispatchEvent(new Event('emblem-error')); }); }
     disconnectedCallback() {
       this._alive = false; this._started = false; this._gen = (this._gen || 0) + 1;
       if (this._ro) this._ro.disconnect();
@@ -22,9 +29,14 @@
       const dpr = window.devicePixelRatio || 1;
       let k = this.clientWidth ? this.getBoundingClientRect().width / this.clientWidth : 1;   // the wall's own scaling
       try { const f = window.frameElement; if (f && innerWidth) k *= f.getBoundingClientRect().width / innerWidth; } catch (e) { /* not ours */ }
-      return k > 0 && k < 0.5 ? Math.min(2, Math.max(0.35, dpr * k)) : Math.min(dpr, 2);
+      return Math.min(this._maxpr, k > 0 && k < 0.5 ? Math.min(2, Math.max(0.35, dpr * k)) : Math.min(dpr, 2));
     }
-    attributeChangedCallback() { this._speed = Number(this.getAttribute('speed')) || 90; this._sway = this.getAttribute('sway') !== 'off'; this._paused = this.hasAttribute('paused'); }
+    attributeChangedCallback() {
+      this._speed = Number(this.getAttribute('speed')) || 90; this._sway = this.getAttribute('sway') !== 'off'; this._paused = this.hasAttribute('paused');
+      this._clockPage = this.getAttribute('clock') === 'page'; this._eventsOff = this.getAttribute('events') === 'off';
+      this._intro = this.getAttribute('intro'); this._wordUp = this.getAttribute('wordmark') !== 'down';
+      this._maxpr = Number(this.getAttribute('maxpr')) || 2;
+    }
     async _init() {
       this.attributeChangedCallback();
       const gen = this._gen = (this._gen || 0) + 1;
@@ -43,6 +55,7 @@
       renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.08;
       renderer.domElement.style.cssText = 'width:100%;height:100%;display:block';
       this.appendChild(renderer.domElement);
+      renderer.domElement.addEventListener('webglcontextlost', () => { if (this._alive) this.dispatchEvent(new Event('emblem-error')); });
       const scene = new THREE.Scene();
       const camera = new THREE.PerspectiveCamera(20, w / h, 0.1, 100);
       camera.position.set(0, YC, D); camera.lookAt(0, YC, 0);
@@ -108,19 +121,23 @@
         : new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 });
       spinG.add(new THREE.Mesh(new THREE.SphereGeometry(1, 128, 96), globeMat));
       const loadImg = (f) => new Promise((r) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => r(im); im.onerror = () => r(null); im.src = res(f); });
+      const hash = (i) => { const x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); };   // fixed "random": two emblems match
       const pixels = (img, W, H) => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.drawImage(img, 0, 0, W, H); return { c, g, d: g.getImageData(0, 0, W, H).data }; };
 
+      let cityMat = null; const CITY = 0.6;
+      const pending = [], texs = [];   // what the first full picture waits for (textures, point cloud, wordmark): see `ready` below
       if (mode === 'real') {
         const loader = new THREE.TextureLoader();
-        const lt = (f, srgb) => new Promise((r) => loader.load(res(f), (t) => { if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); r(t); }, undefined, () => r(null)));
+        cityMat = globeMat;
+        const lt = (f, srgb) => { const p = new Promise((r) => loader.load(res(f), (t) => { if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); texs.push(t); r(t); }, undefined, () => r(null))); pending.push(p); return p; };
         const clouds = new THREE.Mesh(new THREE.SphereGeometry(1.012, 96, 64), new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.85, depthWrite: false, roughness: 1 })); spinG.add(clouds); this._clouds = clouds;
         lt('earth_atmos_2048.jpg', true).then((t) => { if (t) { globeMat.map = t; globeMat.needsUpdate = true; } });
         lt('earth_normal_2048.jpg').then((t) => { if (t) { globeMat.normalMap = t; globeMat.normalScale.set(0.55, 0.55); globeMat.needsUpdate = true; } });
-        lt('earth_lights_2048.png', true).then((t) => { if (t) { globeMat.emissiveMap = t; globeMat.emissive.set(0xffd9a0); globeMat.emissiveIntensity = 0.6; globeMat.needsUpdate = true; } });
+        lt('earth_lights_2048.png', true).then((t) => { if (t) { globeMat.emissiveMap = t; globeMat.emissive.set(0xffd9a0); globeMat.emissiveIntensity = CITY; globeMat.needsUpdate = true; } });
         lt('earth_clouds_1024.png', true).then((t) => { if (t) { clouds.material.map = t; clouds.material.needsUpdate = true; } else clouds.visible = false; });
       }
       // point-cloud continents (holo) — land mask from the specular map, city brightness from night lights
-      Promise.all([loadImg('earth_specular_2048.jpg'), loadImg('earth_lights_2048.png')]).then(([spec, lights]) => {
+      pending.push(Promise.all([loadImg('earth_specular_2048.jpg'), loadImg('earth_lights_2048.png')]).then(([spec, lights]) => {
         if (!spec || gen !== this._gen) return;
         const W = 1024, H = 512;
         let S, L = null;
@@ -141,8 +158,8 @@
           if (land[k] < 140) continue;
           const s = Math.sin(th), r = 1.004;
           pos.push(-Math.cos(ph) * s * r, y * r, Math.sin(ph) * s * r);
-          br.push(L ? Math.min(1, (L[k * 4] / 255) * 1.8) : 0); rn.push(Math.random());
-          if (br[br.length - 1] > 0.75 && Math.random() < 0.25) cities.push(new V3(-Math.cos(ph) * s, y, Math.sin(ph) * s));
+          br.push(L ? Math.min(1, (L[k * 4] / 255) * 1.8) : 0); rn.push(hash(i));
+          if (br[br.length - 1] > 0.75 && hash(i + 7.31) < 0.25) cities.push(new V3(-Math.cos(ph) * s, y, Math.sin(ph) * s));
         }
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -159,7 +176,7 @@
             ' vec3 col = mix(uC1, uC2, clamp(vB + vS, 0.0, 1.0)) * (0.5 + vB * 1.6 + vS * 1.8) * uGain; gl_FragColor = vec4(col, a * vA);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}',
         }));
         spinG.add(new THREE.Points(g, mat));
-      });
+      }));
       // lat / long grid
       (() => {
         const p = [], R = 1.006, seg = 128;
@@ -234,14 +251,14 @@
         const sats = [0, 1].map((k) => {
           const s = makeSat(); pivot.add(s.g);
           const trail = makeTrail(r.dir < 0); pivot.add(trail);
-          return Object.assign(s, { k, trail, seed: Math.random() * 10 });
+          return Object.assign(s, { k, trail, seed: (orbits.length * 2 + k) * 0.6 + 0.3 });   // strobes 0.6 s apart in the 2.4 s cycle (same on every emblem)
         });
         scene.add(pivot); orbits.push({ r, pivot, sats });
       }
       const allSats = orbits.flatMap((o) => o.sats);
       // inter-satellite crosslinks (appear when satellites on different rings pass near each other)
       const xlinks = [];
-      for (const a of orbits[0].sats) for (const b of orbits[1].sats) { const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3)); const ln = new THREE.Line(gg, additive(new THREE.LineBasicMaterial({ color: 0x9fe6ff, opacity: 0 }))); scene.add(ln); xlinks.push({ a, b, ln, seed: Math.random() * 10 }); }
+      for (const a of orbits[0].sats) for (const b of orbits[1].sats) { const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3)); const ln = new THREE.Line(gg, additive(new THREE.LineBasicMaterial({ color: 0x9fe6ff, opacity: 0 }))); scene.add(ln); xlinks.push({ a, b, ln, seed: ((a.k * 2 + b.k) * 3.7) % 10 }); }
       // ground-station → satellite link
       const beamGeo = new THREE.BufferGeometry(); beamGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
       const beam = new THREE.Line(beamGeo, additive(new THREE.LineBasicMaterial({ color: 0xa6e2ff, opacity: 0 }))); scene.add(beam);
@@ -281,6 +298,7 @@
       // ---------- Wordmark: condensed ExtraBold (Open Sans Hebrew Condensed), fitted to the logo's box ----------
       const ZW = 0.9, sW = persp(ZW);
       const wordG = new THREE.Group(); wordG.position.set(0, YC * (1 - sW), ZW); wordG.scale.setScalar(sW); scene.add(wordG);
+      const wordP = new THREE.Group(); wordP.position.set(0, -1.508, 0); wordG.add(wordP);   // flips about the name's own line
       const wordmark = async (text, BW, BH) => {
         const fam = "'Open Sans'", spec = '800 condensed 200px ' + fam;
         try { await Promise.race([document.fonts.load(spec, text), new Promise((r) => setTimeout(r, 3000))]); } catch (e) {}
@@ -321,7 +339,7 @@
         return new THREE.Mesh(geo, [M.typeFront, M.typeSide]);
       };
       const word = this.getAttribute('word') || 'מנהלת החלל';
-      wordmark(word, word === 'מנהלת החלל' ? 1.66 : 0, 0.27).then((m) => { if (gen !== this._gen) return; m.position.set(0, -1.508, 0); m.rotation.x = deg(-6); wordG.add(m); }).catch((e) => console.warn('wordmark', e));
+      pending.push(wordmark(word, word === 'מנהלת החלל' ? 1.66 : 0, 0.27).then((m) => { if (gen !== this._gen) return; m.rotation.x = deg(-6); wordP.add(m); }).catch((e) => console.warn('wordmark', e)));
 
       // ---------- Random events: city-to-city data arcs + target-lock reticles ----------
       const cities = [];
@@ -355,7 +373,7 @@
         lock = { grp, br, dot, label, t0: t };
       };
       const events = (t) => {
-        if (cities.length > 10) {
+        if (cities.length > 10 && !this._eventsOff) {
           if (t > nextArc) { if (arcFx.length < 3) spawnArc(); nextArc = t + 1.2 + Math.random() * 3.8; }
           if (!lock && t > nextLock) { spawnLock(); nextLock = t + 7 + Math.random() * 6; }
         }
@@ -380,18 +398,66 @@
       const key = new THREE.DirectionalLight(0xfff0dc, 2.1); key.position.set(-6, 5, 7); scene.add(key);
       const rim = new THREE.DirectionalLight(0x6fa8ff, 1.5); rim.position.set(5, 1.5, -4); scene.add(rim);
       const under = new THREE.DirectionalLight(0x4fb6ff, 0.5); under.position.set(0, -6, 3); scene.add(under);
-      scene.add(new THREE.AmbientLight(0x2a3a6a, 0.4));
-      scene.add(new THREE.HemisphereLight(0x9cc4e4, 0x0a0e20, 0.3));
+      const amb = new THREE.AmbientLight(0x2a3a6a, 0.4); scene.add(amb);
+      const hemi = new THREE.HemisphereLight(0x9cc4e4, 0x0a0e20, 0.3); scene.add(hemi);
 
       // ---------- Loop ----------
       this._alive = true;
       const tmpA = new V3(), tmpB = new V3(), tipW = new V3();
-      let last = performance.now(), t = 0;
+      let last = performance.now(), t = 0, drawn = false, wasPaused = false;
+      // A clock that jumped (a page-clock emblem waking after a pause, setTime): no arc or lock is left half-way, and none
+      // starts for a few seconds (the hand-off happens then).
+      const jumped = () => {
+        for (const f of arcFx) { spinG.remove(f.mesh, f.head); f.mesh.geometry.dispose(); f.mesh.material.dispose(); f.head.material.dispose(); }
+        arcFx.length = 0;
+        if (lock) { spinG.remove(lock.grp); lock.br.material.dispose(); lock.dot.material.dispose(); lock.label.material.map.dispose(); lock.label.material.dispose(); lock = null; }
+        nextArc = t + 2.5; nextLock = t + 6;
+      };
+      // intro="hold|go": the logo at night, then its assembly (u = seconds since "go"); afterwards the exact rest values.
+      const ss = THREE.MathUtils.smoothstep, clamp01 = (x) => Math.min(1, Math.max(0, x));
+      const backOut = (x, k = 1.4) => { x = clamp01(x) - 1; return 1 + (k + 1) * x * x * x + k * x * x; };
+      const cubicOut = (x) => 1 - Math.pow(1 - clamp01(x), 3);
+      let goAt = null, introOn = false, rocketY = 0, glintAdd = 0, wk = 1, wkFrom = 1, wkTo = 1, wkAt = -1;
+      const setLights = (k, a, he, un, city) => { key.intensity = k; amb.intensity = a; hemi.intensity = he; under.intensity = un; if (cityMat && cityMat.emissiveMap) cityMat.emissiveIntensity = city; };
+      const intro = () => {
+        const mode = this._intro;
+        if (mode !== 'hold' && mode !== 'go') { if (introOn) { introOn = false; goAt = null; setLights(2.1, 0.4, 0.3, 0.5, CITY); for (const o of orbits) o.pivot.scale.setScalar(1); rocketY = 0; glintAdd = 0; } return false; }
+        if (mode === 'go' && goAt === null) goAt = t;
+        const u = mode === 'go' ? t - goAt : -1;
+        if (u > 3.2) { if (introOn) { introOn = false; setLights(2.1, 0.4, 0.3, 0.5, CITY); for (const o of orbits) o.pivot.scale.setScalar(1); rocketY = 0; glintAdd = 0; } return false; }
+        introOn = true;
+        const sun = ss(u, 0.4, 2.4);
+        setLights(2.1 * sun, 0.25 + 0.15 * sun, 0.15 + 0.15 * sun, 0.2 + 0.3 * sun, 1.5 - 0.9 * ss(u, 0.6, 2.8));
+        orbits.forEach((o, i) => o.pivot.scale.setScalar(0.62 + 0.38 * backOut((u - 0.7 - 0.2 * i) / 1.3)));
+        rocketY = -0.6 * (1 - cubicOut((u - 0.9) / 1.5));
+        glintAdd = 1.0 * Math.exp(-((u - 2.4) * (u - 2.4)) / 0.02);
+        return true;
+      };
+      // The 3D name: wk 0 = flat and hidden, 1 = standing (rotation about its own line, easeOutBack on the way up).
+      const wordmarkPose = (introActive) => {
+        const want = this._wordUp ? 1 : 0;
+        if (introActive) { const u = this._intro === 'go' && goAt !== null ? t - goAt : -1; wk = want ? backOut((u - 1.6) / 1.0) : 0; wkFrom = wkTo = want; wkAt = -1; }
+        else {
+          if (want !== wkTo) { wkFrom = wk; wkTo = want; wkAt = t; }
+          if (wkAt >= 0) { const x = (t - wkAt) / 1.0; wk = wkTo ? wkFrom + (1 - wkFrom) * backOut(x) : wkFrom * (1 - clamp01(x)); if (x >= 1) { wk = wkTo; wkAt = -1; } }
+          else wk = wkTo;
+        }
+        wordP.visible = wk > 0.01; wordP.rotation.x = deg(-80) * (1 - wk); wordP.scale.y = Math.max(0.01, wk);
+      };
       const loop = (now) => {
         if (!this._alive || gen !== this._gen) return;
-        if (this._paused) { last = now; setTimeout(() => loop(performance.now()), 250); return; }
-        const dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt;
+        // Paused: keep the last picture. The very first one is still drawn, so shaders are compiled and textures uploaded
+        // now, not when the emblem is shown (an emblem created under a full-screen moment would otherwise stall then).
+        if (this._paused && drawn) { last = now; wasPaused = true; setTimeout(() => loop(performance.now()), 250); return; }
+        drawn = true;
+        const dt = Math.min(0.1, (now - last) / 1000); last = now;
+        // clock="page": the page's clock from a shared epoch (the welcome screen sets it), else this emblem's own.
+        const ep = window.__emblemEpoch;
+        if (this._clockPage && Number.isFinite(ep)) { const nt = (now - ep) / 1000; if (Math.abs(nt - t) > 1) { t = nt; jumped(); } else t = nt; }
+        else t += dt;
         U.time.value = t;
+        const introActive = intro();
+        wordmarkPose(introActive);
         spinG.rotation.y = EARTH0 + TAU / this._speed * t;
         if (this._clouds) this._clouds.rotation.y = TAU / this._speed * 0.06 * t;
         // scan ring: top→bottom in 5s, every 11s
@@ -402,7 +468,7 @@
         const sw = (t + 4) % 9; U.sweep.value = sw < 2.6 ? -2.4 + sw / 2.6 * 4.4 : 99;
         rocket.localToWorld(tipW.set(0, 1.26, 0));
         const gd = tipW.y + tipW.x * 0.4 - U.sweep.value;
-        glint.material.opacity = 0.18 + 0.1 * Math.sin(t * 1.7) + 1.1 * Math.exp(-gd * gd * 10);
+        glint.material.opacity = 0.18 + 0.1 * Math.sin(t * 1.7) + 1.1 * Math.exp(-gd * gd * 10) + glintAdd;
         glint.scale.setScalar(0.24 + 0.3 * Math.exp(-gd * gd * 10));
         // HUD
         ticks.rotation.z = t * 0.03; arcs.rotation.z = -t * 0.06; radar.material.uniforms.uAng.value = t * 0.7;
@@ -437,15 +503,29 @@
         if (link) { link.g.getWorldPosition(tmpB); const arr = beamGeo.attributes.position.array; arr.set([tmpA.x, tmpA.y, tmpA.z, tmpB.x, tmpB.y, tmpB.z]); beamGeo.attributes.position.needsUpdate = true; const k = (t * 0.9) % 1; packet.position.lerpVectors(tmpA, tmpB, k); }
         beam.material.opacity = linkOp * (0.75 + 0.25 * Math.sin(t * 9)); packet.material.opacity = linkOp * 1.6;
         // life
-        rocket.position.y = YC * (1 - sR) + 0.014 * Math.sin(t * 0.8);
+        rocket.position.y = YC * (1 - sR) + 0.014 * Math.sin(t * 0.8) + rocketY * sR;
         if (this._sway) { camera.position.x = 0.45 * Math.sin(t * 0.11); camera.position.y = YC + 0.14 * Math.sin(t * 0.083); }
         else { camera.position.x = 0; camera.position.y = YC; }
         camera.lookAt(0, YC, 0);
         renderer.render(scene, camera);
+        if (wasPaused) { wasPaused = false; this.dispatchEvent(new Event('emblem-frame')); }
         if (document.hidden) setTimeout(() => loop(performance.now()), 250); else requestAnimationFrame(loop);
       };
       setTimeout(() => loop(performance.now()), 0);
       this.renderOnce = () => renderer.render(scene, camera);
+      // The emblem's own clock (globe turn, orbits, scans, camera sway all follow it). Two emblems on the same clock, speed
+      // and sway draw the same picture: the welcome screen hands its emblem over to the wall's this way, with no jump.
+      // `ready` (and the 'emblem-ready' event): everything has arrived and is compiled and uploaded, so the emblem can be
+      // shown without pieces popping in (a white globe before its map, the wordmark late). At most ~7 s after start.
+      Promise.race([Promise.allSettled(pending), new Promise((r) => setTimeout(r, 6000))])
+        // (compile, not compileAsync: r160's async check trips over a material disposed meanwhile, e.g. a finished data arc)
+        .then(() => { if (gen !== this._gen) return null; if (renderer.initTexture) texs.forEach((x) => { try { renderer.initTexture(x); } catch (e) {} }); try { renderer.compile(scene, camera); } catch (e) {} return new Promise((r) => setTimeout(r, 50)); })
+        .then(() => { if (gen !== this._gen || !this._renderer) return; renderer.render(scene, camera); this.ready = true; this.dispatchEvent(new Event('emblem-ready')); });
+      this.getTime = () => t;
+      this.setTime = (v) => { if (Number.isFinite(v)) { const j = Math.abs(v - t) > 1; t = v; last = performance.now(); if (j) jumped(); } };
+      // the ground-station link keeps its satellite while it can (it depends on the past, not on t alone): copied at a hand-off
+      this.getLink = () => ({ i: link ? allSats.indexOf(link) : -1, op: linkOp });
+      this.setLink = (o) => { if (o && Number.isFinite(o.op)) { link = allSats[o.i] || null; linkOp = o.op; } };
       // A new size or sharpness only on a real change: setting one clears the picture, and a wall coming back from rest
       // (not displayed, nothing to measure) must still show it.
       let cw = w, ch = h;

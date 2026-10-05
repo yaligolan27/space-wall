@@ -39,7 +39,7 @@ export async function overview() {
   ]);
   return {
     today,
-    live_controls: { fullscreen_now: liveState.takeover, urgent_message: liveState.urgent, brightness: liveState.brightness, design: liveState.design, noon_show_today: liveState.design.noon && liveState.noonToday },
+    live_controls: { fullscreen_now: liveState.takeover?.leaving ? null : liveState.takeover, urgent_message: liveState.urgent, brightness: liveState.brightness, design: liveState.design, noon_show_today: liveState.design.noon && liveState.noonToday },
     on_screen_now: { directorate: feed.directorate, people: feed.people, ticker_count: feed.ticker.length, newsletter: feed.issue,
       launches: feed.launches.map((l: any) => { const d = new Date(l.at); return `${l.mission} · ${Number.isFinite(d.getTime()) ? isoDateIL(d) + ' ' + timeIL(d) : l.at}`; }) },
     upcoming_directorate_events: (must(dir, 'dir') as any[]).map(onIsraelClock),

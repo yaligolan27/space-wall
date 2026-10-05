@@ -422,7 +422,8 @@
         .filter((x) => x.person && onWall(x.person));
       return [...b, ...l];
     }
-    takeover() { const tk = this.D && this.D.takeover; return tk && Date.parse(tk.until) > this.state.now.getTime() ? tk : null; }
+    // (a welcome after "כניסה לצג הבית" stays on the server for the wall's entrance, marked `leaving`: here it is over)
+    takeover() { const tk = this.D && this.D.takeover; return tk && !tk.leaving && Date.parse(tk.until) > this.state.now.getTime() ? tk : null; }
     tkTitle(tk) {
       if (!tk) return '';
       if (tk.kind === 'noon') return 'סרטון תדמית';

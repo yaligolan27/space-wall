@@ -46,6 +46,7 @@ const CELEBRATE_MS = 60e3;
 const EVENT_FALLBACK_MS = 30 * 60e3;
 const EVENT_PREVIEW_MS = 10 * 60e3;
 const WELCOME_MS = 12 * 3600e3;   // the welcome screen waits for "enter" (endTakeover); a forgotten one still ends
+const WELCOME_LEAVE_MS = 20e3;    // after "enter": the wall's entrance (about 12 s), during which nothing else takes the screen
 export const HE_TYPE: Record<string, string> = { birthday: 'יום הולדת', wedding: 'חתונה', birth: 'לידה', bereavement: 'אבל', promotion: 'העלאה בדרגה', discharge: 'שחרור', joined: 'קליטה', other: 'אירוע' };
 
 /** Mourning words as whole words (with a ו/ב/ה/ל prefix), so "חתימות" or "השלמות" aren't read as "מות". Same list as the remote's tpl(). */
@@ -365,7 +366,11 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const now = new Date(), [st, big] = await Promise.all([wallState(), bigEventsNow(now)]);
     const tk = effectiveTakeover(st, big, now);
     if (!tk) return;
-    const patch: Row = tk.auto ? { dismissed: [...(st.dismissed || []), tk.id].slice(-20) } : { takeover: null };
+    // "Enter" on the welcome screen: kept a few seconds more, marked `leaving`, so every wall plays the entrance (and one
+    // opened meanwhile goes straight to the home wall). Pressed again meanwhile: ended at once.
+    const patch: Row = tk.auto ? { dismissed: [...(st.dismissed || []), tk.id].slice(-20) }
+      : tk.kind === 'welcome' && !tk.leaving ? { takeover: { ...tk, leaving: now.toISOString(), until: new Date(now.getTime() + WELCOME_LEAVE_MS).toISOString() } }
+      : { takeover: null };
     await record(who, tk.kind === 'welcome' ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה', [await patchState(patch, who)]);
   },
   async noonToday(a, who) {
