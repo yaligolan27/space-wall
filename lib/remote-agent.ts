@@ -344,7 +344,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'show_fullscreen',
-    description: 'הצגה עכשיו על כל המסך. welcome: מסך "WELCOME TO THE ISRAEL SPACE PROGRAM OFFICE" לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה (guest: שורה אופציונלית מתחת לכותרת, למשל "Delegation of Japan"). noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. end: חזרה לתצוגה הרגילה.',
+    description: 'הצגה עכשיו על כל המסך. welcome: מסך "WELCOME TO THE SPACE PROGRAM OFFICE" לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה (guest: שורה אופציונלית מתחת לכותרת, למשל "Delegation of Japan"). noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. end: חזרה לתצוגה הרגילה.',
     input_schema: obj({
       what: { type: 'string', enum: ['welcome', 'noon', 'celebration', 'event', 'end'] },
       guest: { type: 'string', description: 'למסך ברוכים הבאים: למי (לא חובה)' },
