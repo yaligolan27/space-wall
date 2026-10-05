@@ -536,7 +536,7 @@
         cw = nw; ch = nh; renderer.setPixelRatio(pr); renderer.setSize(nw, nh); fit(nw, nh); renderer.render(scene, camera);
       };
       this._ro = new ResizeObserver(resize); this._ro.observe(this);
-      addEventListener('resize', this._onResize = resize);
+      addEventListener('resize', this._onResize = () => { resize(); setTimeout(resize, 120); });   // again once the wall has re-fitted its stage
     }
   }
   if (!customElements.get('space-emblem-v2')) customElements.define('space-emblem-v2', SpaceEmblemV2);

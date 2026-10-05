@@ -712,6 +712,9 @@
       const celRow = (x) => ({ key: x.key, name: dn(x.person), type: x.type, color: x.tpl.color, av: this.avatar(x.person, x.noPhoto ? null : x.photoSrc),
         show: () => this.showCeleb(x), showClose: () => { this.showCeleb(x); this.closeSheet(); } });
       const tk = this.takeover(), tkK = tk ? tk.kind : '';
+      // On a phone or tablet the welcome's card stands in for the live wall: the welcome running inside the preview takes more
+      // memory than a phone gives a page (the wall comes back in the preview once "enter" is pressed).
+      const wlPhone = tkK === 'welcome' && touchOnly();
       const tkP = tk && tk.personId ? this.P(tk.personId) : null, tkT = tk && tk.kind === 'celebrate' ? tpl(tk.type || tk.person.type) : null;
       const remain = tk ? Math.max(0, (Date.parse(tk.until) - now.getTime()) / 1000) : 0;
       const t0 = tk ? (tk.kind === 'noon' ? Date.parse(tk.until) - 150e3 : Date.parse(tk.until) - 60e3) : 0;
@@ -819,8 +822,8 @@
         clearUrClose: () => { this.run('urgent', { text: '' }, 'הוסרה ההודעה הדחופה').catch(() => {}); this.closeSheet(); },
 
         nowLabel: tk ? this.tkTitle(tk) : (s.studio ? 'תצוגה מקדימה חיה' : 'תצוגה רגילה'),
-        wallHref: '/' + (D && D.config && D.config.displayKey ? '?key=' + encodeURIComponent(D.config.displayKey) : ''), wallSrc: s.wallSrc, livePreview: !!s.wallSrc && (s.liveView || s.studio),
-        offerLive: !!s.wallSrc && !s.liveView && !s.studio, showLive: () => this.setState({ liveView: true }),
+        wallHref: '/' + (D && D.config && D.config.displayKey ? '?key=' + encodeURIComponent(D.config.displayKey) : ''), wallSrc: s.wallSrc, livePreview: !!s.wallSrc && (s.liveView || s.studio) && !wlPhone,
+        offerLive: !!s.wallSrc && !s.liveView && !s.studio && !wlPhone, showLive: () => this.setState({ liveView: true }),
         previewTransform: 'scale(' + ((s.pw || 560) / 1920).toFixed(4) + ')',
         previewFilter: brightness < 100 ? 'brightness(' + (brightness / 100).toFixed(2) + ')' : 'none',   // a filter, even a neutral one, redraws the whole preview each frame
         brightness, setBrightness: (e) => { const v = +e.target.value; this.setState({ brightness: v }); this.burst('br', () => this.run('brightness', { value: v }, null, { quiet: true }).catch(() => {}).finally(() => this.setState({ brightness: null }))); },

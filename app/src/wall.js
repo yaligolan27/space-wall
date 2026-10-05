@@ -746,7 +746,8 @@
     }, []);
     useEffect(() => { document.documentElement.classList.toggle('idle', !awake); }, [awake]);
     const label = full ? tr('יציאה ממסך מלא', 'Exit full screen') : tr('מסך מלא', 'Full screen');
-    return h('button', { type: 'button', dir: EN() ? 'ltr' : 'rtl', title: label, onClick: toggleFullscreen, style: { position: 'fixed', left: 24, bottom: 24, zIndex: 100, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px 10px 16px', borderRadius: 999, background: 'rgba(14,26,50,.88)', border: '1px solid rgba(150,190,240,.3)', boxShadow: '0 10px 30px rgba(0,0,0,.45)', color: '#e6f1ff', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 16, fontWeight: 500, cursor: 'pointer', opacity: awake ? 1 : 0, pointerEvents: awake ? 'auto' : 'none', transition: 'opacity .5s ease' } },
+    const z = 1 / (window.__pageScale ? window.__pageScale() : 1);   // its own size on a phone, where the browser zooms the page out (index.html)
+    return h('button', { type: 'button', dir: EN() ? 'ltr' : 'rtl', title: label, onClick: toggleFullscreen, style: { position: 'fixed', left: 24 * z, bottom: 24 * z, transform: z > 1 ? `scale(${z})` : undefined, transformOrigin: 'left bottom', zIndex: 100, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px 10px 16px', borderRadius: 999, background: 'rgba(14,26,50,.88)', border: '1px solid rgba(150,190,240,.3)', boxShadow: '0 10px 30px rgba(0,0,0,.45)', color: '#e6f1ff', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 16, fontWeight: 500, cursor: 'pointer', opacity: awake ? 1 : 0, pointerEvents: awake ? 'auto' : 'none', transition: 'opacity .5s ease' } },
       h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: '#9fdcff', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
         h('path', { d: full ? 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6' : 'M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6' })),
       label);
