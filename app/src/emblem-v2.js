@@ -2,7 +2,8 @@
 // For the welcome screen's hand-off (overlays.js Welcome), each only when set: clock="page" (t follows window.__emblemEpoch, so
 // two emblems on one page draw the same frame), events="off" (no new data arcs or target locks), intro="hold|go" (the logo
 // waits at night, then assembles: sunrise, orbits, rocket, wordmark), wordmark="down|up" (the 3D name flat, then flipping up),
-// maxpr (a cap on the drawing resolution). el.getTime() / el.setTime(t): its animation clock.
+// maxpr (a cap on the drawing resolution). el.getTime() / el.setTime(t): its animation clock; el.getLink() / el.setLink(l): its
+// ground-station link.
 // el.ready + 'emblem-ready': fully loaded and compiled. 'emblem-error': it failed or lost its context. 'emblem-frame': the
 // first frame drawn after a pause.
 // Geometry is measured from the original logo (globe radius R = 1 unit): rocket, fins, the two crossing orbits, 4 satellites (original sizes), condensed wordmark.
@@ -250,7 +251,7 @@
         const sats = [0, 1].map((k) => {
           const s = makeSat(); pivot.add(s.g);
           const trail = makeTrail(r.dir < 0); pivot.add(trail);
-          return Object.assign(s, { k, trail, seed: ((orbits.length * 2 + k) * 2.3999) % 10 });
+          return Object.assign(s, { k, trail, seed: (orbits.length * 2 + k) * 0.6 + 0.3 });   // strobes 0.6 s apart in the 2.4 s cycle (same on every emblem)
         });
         scene.add(pivot); orbits.push({ r, pivot, sats });
       }
@@ -522,6 +523,9 @@
         .then(() => { if (gen !== this._gen || !this._renderer) return; renderer.render(scene, camera); this.ready = true; this.dispatchEvent(new Event('emblem-ready')); });
       this.getTime = () => t;
       this.setTime = (v) => { if (Number.isFinite(v)) { const j = Math.abs(v - t) > 1; t = v; last = performance.now(); if (j) jumped(); } };
+      // the ground-station link keeps its satellite while it can (it depends on the past, not on t alone): copied at a hand-off
+      this.getLink = () => ({ i: link ? allSats.indexOf(link) : -1, op: linkOp });
+      this.setLink = (o) => { if (o && Number.isFinite(o.op)) { link = allSats[o.i] || null; linkOp = o.op; } };
       // A new size or sharpness only on a real change: setting one clears the picture, and a wall coming back from rest
       // (not displayed, nothing to measure) must still show it.
       let cw = w, ch = h;

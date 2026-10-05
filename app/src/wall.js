@@ -40,6 +40,9 @@
     livePoll: Math.max(3, num('livePoll', 5)),
     preview: bool('preview', false),               // embedded in the remote: muted, no keyboard
     lang: q.get('lang') === 'en' ? 'en' : 'he',    // en: the whole wall in English (the remote's switch, for delegations)
+    // From the remote's agent (design): a style layer, a headline in the header, hidden panels, news items. ?css=0 skips the layer.
+    css: '', headline: '', headlineEn: '', hide: [], news: [],
+    noCss: q.has('css') && /^(0|false|no|off)$/i.test(q.get('css')),
   };
   // Stored design (from the remote) → CFG, except where the URL sets the option explicitly.
   const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang' };
@@ -49,8 +52,21 @@
       if (q.has(k) || d[k] === undefined) continue;
       if (CFG[DESIGN_KEYS[k]] !== d[k]) { CFG[DESIGN_KEYS[k]] = d[k]; changed = true; }
     }
+    for (const k of ['headline', 'headlineEn']) { const v = typeof d[k] === 'string' ? d[k] : ''; if (CFG[k] !== v) { CFG[k] = v; changed = true; } }
+    for (const k of ['hide', 'news']) { const v = Array.isArray(d[k]) ? d[k] : []; if (JSON.stringify(CFG[k]) !== JSON.stringify(v)) { CFG[k] = v; changed = true; } }
+    styleLayer(typeof d.css === 'string' ? d.css : '');
     window.wallLang = CFG.lang;                    // overlays.js reads it
     return changed;
+  }
+  /** The agent's CSS (checked on the server: nothing loaded from outside) in a <style> after the wall's own. The wall's
+   *  elements carry data-w="…" names for it; their styles are inline, so its rules use !important. */
+  function styleLayer(css) {
+    if (CFG.noCss) css = '';
+    if (css === CFG.css) return;
+    CFG.css = css;
+    let el = document.getElementById('wall-style');
+    if (!el) { el = document.createElement('style'); el.id = 'wall-style'; document.head.appendChild(el); }
+    el.textContent = css;
   }
   window.wallLang = CFG.lang;
   // English (CFG.lang 'en'): the wall's own words here; what changes comes translated from /api/feed?lang=en.
@@ -111,9 +127,9 @@
   // The welcome screen's way out (overlays.js Welcome), in ms from its start (T0): the wall wakes under the still-opaque
   // welcome (WAKE), its emblem starts again on the welcome emblem's clock (EMB_WAKE) and shows under it (EMB_SHOW), the
   // entrance animations end (SETTLE) and the overlay goes (DONE). A leave starts no earlier than MIN_AFTER_REVEAL after the
-  // logo appeared (its assembly is done by then). While a welcome is up the remote is asked every POLL_FAST ms, so "enter"
-  // starts at once; after one, no local moment for QUIET ms and no reload for NO_RELOAD ms.
-  const WL = { COVER: 800, REVEAL_CAP: 6000, MIN_AFTER_REVEAL: 3200, WAKE: 400, EMB_WAKE: 8200, EMB_SHOW: 8600, SETTLE: 10400, DONE: 12000, POLL_FAST: 1500, QUIET: 20000, NO_RELOAD: 60000 };
+  // logo appeared (its assembly and the guest's name are in by then). While a welcome is up the remote is asked every
+  // POLL_FAST ms, so "enter" starts at once; after one, no local moment for QUIET ms and no reload for NO_RELOAD ms.
+  const WL = { COVER: 800, REVEAL_CAP: 6000, MIN_AFTER_REVEAL: 4400, WAKE: 400, EMB_WAKE: 8200, EMB_SHOW: 8600, EMB_SHOW_CAP: 1500, SETTLE: 10400, DONE: 12000, POLL_FAST: 1500, QUIET: 20000, NO_RELOAD: 60000 };
   const isWelcome = (ov) => !!ov && ov.kind === 'welcome';
 
   class Wall extends React.Component {
@@ -121,7 +137,7 @@
       super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false, wl: null };
       this._wlT = [];
       this.embRef = (el) => { this.embEl = el; };
-      this.onWlReveal = (at, ok) => { if (at) this._wlRevealAt = at; this._wlHeroOk = !!ok; };
+      this.onWlReveal = (at, ok, hero) => { if (at) this._wlRevealAt = at; this._wlHeroOk = !!ok; this._wlHero = ok ? hero : null; };
       this.onWlHeroGone = () => { if (this.state.wl) this.setWl({ heroGone: true }, () => this.maybeFinishWl()); };
     }
 
@@ -143,9 +159,12 @@
     /** A full-screen moment covers the wall once it has faded in (`covered`); until it ends the wall under it rests (render). */
     componentDidUpdate(_, prev) {
       const ov = this.state.ov;
+      // A welcome's way out that something else cut short (a key, a launch): drop its steps.
+      if (this.state.wl && !this.wl) { this.clearLeave(); this.setState({ wl: null }); }
       // A welcome just came up: ask the remote often from now on, so "enter" starts at once.
       if (isWelcome(ov) && !isWelcome(prev.ov) && ov.live && !CFG.preview) this.pollLive();
-      if (!ov && prev.ov && this._pendingData) { const d = this._pendingData; this._pendingData = null; this.resetCaches(); this.setState({ data: d }); }
+      // Data held back during the entrance, once it is over (or cut short).
+      if (this._pendingData && !(isWelcome(ov) && ov.leaving)) { const d = this._pendingData; this._pendingData = null; this.resetCaches(); this.setState({ data: d }); }
       if (!ov === !prev.ov && (!ov || ov.kind === prev.ov.kind)) return;
       clearTimeout(this.coverT);
       if (ov) this.coverT = setTimeout(() => this.setState({ covered: true }), isWelcome(ov) ? WL.COVER : 1200);
@@ -188,11 +207,14 @@
       const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow(), wlUp = isWelcome(ov);
       // Forget what was shown once the server reports none, so the remote's undo of "back to normal" brings it back.
       if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else this.setState({ ov: null }); } return; }
+      // A welcome's way out counts as its own state, so the remote's undo of "enter" (the same welcome, no longer
+      // leaving) brings it back once the entrance is over.
+      const seen = tk.id + (tk.leaving ? '|leaving' : '');
       // "Enter" from the remote: the server keeps the welcome for a few seconds, marked `leaving`.
-      if (wlUp && ov.live && tk.id === ov.id && tk.leaving) return this.leaveWelcome();
+      if (wlUp && ov.live && tk.id === ov.id && tk.leaving) { this._tkSeen = seen; return this.leaveWelcome(); }
       if (wlUp && ov.leaving) return;                    // anything new waits (not marked seen) until the entrance is over
-      if (tk.id === this._tkSeen) return;                // shown already, maybe ended here first: not again
-      this._tkSeen = tk.id;
+      if (seen === this._tkSeen) return;                 // shown already, maybe ended here first: not again
+      this._tkSeen = seen;
       if (tk.kind === 'welcome' && tk.leaving) return;   // opened mid-entrance: just the home wall
       const until = Date.parse(tk.until) || now + 60e3;
       if (until <= now) return;
@@ -201,13 +223,15 @@
       else if (tk.kind === 'event') this.setState({ ov: { kind: 'event', id: tk.id, live: true, event: tk, until } });
       // (a minute past its server end, so the server's "none" leads into the entrance rather than schedule() cutting it)
       else if (tk.kind === 'welcome') this.welcomeUp({ id: tk.id, live: true, guest: tk.guest || '', until: until + 60e3 });
+      else if (tk.kind === 'image' && tk.url) this.setState({ ov: { kind: 'image', id: tk.id, live: true, url: tk.url, caption: tk.caption || '', captionEn: tk.captionEn || '', until } });
+      else if (tk.kind === 'stream' && tk.videoId) this.setState({ ov: { kind: 'stream', id: tk.id, live: true, videoId: tk.videoId, title: tk.title || '', until } });
     }
     /** Shows a welcome. One already up only takes the new words (its scene and emblem stay); one on its way out starts over. */
     welcomeUp(o) {
       const cur = this.state.ov, keep = isWelcome(cur) && !cur.leaving;
       this.clearLeave();
       if (!keep) {
-        this._wlKey = (this._wlKey || 0) + 1; this._wlRevealAt = null; this._wlHeroOk = !CFG.preview;
+        this._wlKey = (this._wlKey || 0) + 1; this._wlRevealAt = null; this._wlHeroOk = !CFG.preview; this._wlHero = null;
         // the welcome emblem draws with the wall emblem's own settings, so the two can be swapped unseen
         this._wlAttrs = { speed: String(CFG.globeSpeed), sway: CFG.cameraSway ? 'on' : 'off', word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE') };
       }
@@ -224,15 +248,29 @@
       if (!isWelcome(ov) || ov.leaving) return;
       const now = performance.now(), revealAt = this._wlRevealAt || (ov.shownAt || now) + WL.REVEAL_CAP;
       const t0 = Math.max(now, revealAt + WL.MIN_AFTER_REVEAL);
-      const target = window.wallGeo.landing(this.D ? window.wallGeo.SLOT_DATA : window.wallGeo.SLOT_NODATA);
+      // the emblem's slot as the wall will lay it out (panels the remote's design hid give their room to the emblem)
+      const hid = (k) => CFG.hide.includes(k), pR = !hid('events') || !hid('people'), pN = !hid('news');
+      const target = window.wallGeo.landing(window.wallGeo.slot({ data: !!this.D, pl: EN() ? pR : pN, pr: EN() ? pN : pR, ticker: !hid('ticker'), launches: !hid('launches') }));
       const A = this._wlAttrs || {}, same = A.speed === String(CFG.globeSpeed) && A.sway === (CFG.cameraSway ? 'on' : 'off') && A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE');
       const mode = CFG.preview || !this._wlHeroOk ? 'none' : CFG.globeStyle === 'real' && same ? 'dissolve' : 'scan';
       this.clearLeave();
       const id = ov.id, at = (ms, fn) => this._wlT.push(setTimeout(() => { const o = this.state.ov; if (isWelcome(o) && o.id === id) fn(); }, Math.max(0, t0 + ms - performance.now())));
       this.setState({ ov: Object.assign({}, ov, { leaving: t0, until: serverNow() + (t0 - now) + WL.DONE + 8000 }), wl: { id, t0, mode, target } });
       at(WL.WAKE, () => { this._wlWakeAt = Date.now(); this.setWl({ woke: true }); });
-      at(mode === 'none' ? 2600 : WL.EMB_WAKE, () => this.setWl({ embWake: true }));
-      at(mode === 'none' ? 3000 : WL.EMB_SHOW, () => this.setWl({ embShown: true }));
+      // The wall's emblem shows once it has drawn a fresh frame (a slow computer may need a moment), at EMB_SHOW at the
+      // earliest and EMB_SHOW_CAP after it at the latest; the welcome's hand-off starts from whenever that is.
+      let fresh = false, due = false;
+      const show = () => { if (due) { due = false; this.setWl({ embShown: true }); } };
+      at(mode === 'none' ? 2600 : WL.EMB_WAKE, () => {
+        const e = this.embEl, hero = this._wlHero;
+        // the one thing the clock does not carry: which satellite the ground station is linked to
+        if (mode !== 'none' && e && e.setLink && hero && hero.getLink) e.setLink(hero.getLink());
+        if (e) e.addEventListener('emblem-frame', () => { fresh = true; const o = this.state.ov; if (isWelcome(o) && o.id === id) show(); }, { once: true });
+        else fresh = true;
+        this.setWl({ embWake: true });
+      });
+      at(mode === 'none' ? 3000 : WL.EMB_SHOW, () => { due = true; if (fresh) show(); });
+      at((mode === 'none' ? 3000 : WL.EMB_SHOW) + WL.EMB_SHOW_CAP, () => { fresh = true; show(); });
       at(WL.SETTLE, () => this.setWl({ settled: true }));
       at(WL.DONE, () => { this._wlDoneDue = true; this.maybeFinishWl(); });
     }
@@ -267,7 +305,7 @@
           this._lastBody = body;
           // Not while the welcome's emblem is landing in its slot: the layout (and the slot) must hold still until then.
           if (isWelcome(this.state.ov) && this.state.ov.leaving) this._pendingData = data;
-          else { this.resetCaches(); this.setState({ data }); }
+          else { this._pendingData = null; this.resetCaches(); this.setState({ data }); }
           // Once: the realistic globe's textures and the wordmark's font, so a welcome's emblem appears without waiting.
           if (!this._preloaded && !CFG.preview) { this._preloaded = true; setTimeout(() => {
             ['earth_atmos_2048.jpg', 'earth_normal_2048.jpg', 'earth_lights_2048.png', 'earth_clouds_1024.png', 'earth_specular_2048.jpg'].forEach((f) => { new Image().src = '/assets/textures/' + f; });
@@ -290,7 +328,19 @@
     async sample() { return this._sample || (this._sample = JSON.parse(await this.fetchText('/data/feed.json', 20e3))); }
 
     // ---- moments --------------------------------------------------------------------------------
-    get D() { return this.state.data; }
+    /** The feed, with the news items added from the remote first (featured, in the newsletter panel). */
+    get D() {
+      const d = this.state.data, extra = CFG.news;
+      if (!d || !extra.length) return d;
+      if (this._mSrc === d && this._mNews === extra && this._mLang === CFG.lang) return this._mD;
+      const NEW = tr('חדש', 'New'), dm = (iso) => { const t = new Date(iso); return isNaN(t) ? '' : String(t.getDate()).padStart(2, '0') + '.' + String(t.getMonth() + 1).padStart(2, '0'); };
+      const items = extra.map((n) => ({ cat: n.cat || NEW, il: false, date: dm(n.added), src: n.src || '', url: n.url || '', image: n.image || '',
+        title: (EN() && n.titleEn) || n.title, dek: (EN() && n.dekEn) || n.dek || '' }));
+      const catColor = Object.assign({}, d.catColor);
+      items.forEach((n) => { if (!catColor[n.cat]) catColor[n.cat] = '#d4f25c'; });
+      this._mSrc = d; this._mNews = extra; this._mLang = CFG.lang;
+      return (this._mD = Object.assign({}, d, { news: [...items, ...d.news], featured: [...items.map((_, i) => i), ...d.featured.map((i) => i + items.length)], catColor }));
+    }
     ilParts(now) { const o = {}; fmtParts.formatToParts(new Date(now)).forEach((p) => (o[p.type] = p.value)); return { day: o.year + o.month + o.day, iso: o.year + '-' + o.month + '-' + o.day, h: +o.hour, m: +o.minute, s: +o.second }; }
     /** People greeted full-screen today: from the day of their moment to two days after it, never mourning. */
     celebratable(today) { const D = this.D; return D ? D.people.filter((p) => p.celebrate !== false && p.on && p.on <= today && today <= addDays(p.on, 2)) : []; }
@@ -337,7 +387,7 @@
     }
     /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment. */
     maybeReload(T, ov) {
-      if (ov || this.state.wl || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
+      if (ov || this.wl || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
       const nightly = T.h === 4 && T.m < 20 && Date.now() - this.t0 > 3600e3;
       if (!nightly && (this._newBuild || 0) < 2) return;
       this._reloadTry = Date.now() + 60e3;
@@ -363,6 +413,9 @@
       // Keyed per welcome scene, not per remote press: new words for a welcome already up keep its emblem.
       if (wlUp) el = h(O.Welcome, { key: 'welcome' + this._wlKey, guest: ov.guest, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, woke: !!(wl && wl.woke), embShown: !!(wl && wl.embShown),
         mode: (wl && wl.mode) || '', target: wl && wl.target, attrs: this._wlAttrs, onReveal: this.onWlReveal, onHeroGone: this.onWlHeroGone });
+      if (ov && ov.kind === 'image') el = h(O.ImageMoment, { key: mk, url: ov.url, caption: (EN() && ov.captionEn) || ov.caption });
+      // The remote's preview (often a phone) shows a card for a stream instead of loading the video player.
+      if (ov && ov.kind === 'stream') el = h(O.LiveStream, { key: mk, videoId: ov.videoId, title: ov.title, preview: CFG.preview });
       return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
     }
 
@@ -413,7 +466,9 @@
      *  goes. Its glow fades in as the welcome emblem's own glow fades out. */
     emblem(rest, entering) {
       const ov = this.state.ov, wlUp = isWelcome(ov), wl = this.wl;
-      const paused = rest || (wlUp && !(wl && wl.embWake)), hidden = wlUp && !(wl && wl.embShown), page = wlUp, evOff = wlUp && !(wl && wl.settled);
+      // (only once the welcome has faded in over the wall: until then the wall shows as it was)
+      const cov = wlUp && (this.state.covered || !!ov.leaving);
+      const paused = rest || (cov && !(wl && wl.embWake)), hidden = cov && !(wl && wl.embShown), page = cov, evOff = cov && !(wl && wl.settled);
       const k = [paused, hidden, page, evOff, entering, CFG.globeStyle, CFG.lang].join('|');
       if (this._emb && this._embK === k) return this._emb;
       this._embK = k;
@@ -432,7 +487,7 @@
       const n = D.news[D.featured[idx]] || D.news[0], col = D.catColor[n.cat] || '#9fdcff', total = D.featured.length;
       const img = n.image || D.catImage[n.cat] || Object.values(D.catImage)[0];
       const chip = (t, c, fill) => h('span', { style: { padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 500, color: fill ? '#0a1224' : c, background: fill ? c : 'rgba(6,12,26,.6)', border: `1px solid ${c}` } }, t);
-      return (this._feat = h('article', { key: idx, style: { position: 'relative', zIndex: 1, borderRadius: 22, overflow: 'hidden', background: 'rgba(8,16,34,.55)', border: '1px solid rgba(150,190,240,.16)', flex: 'none', animation: 'rise .8s ease both' } },
+      return (this._feat = h('article', { key: idx, 'data-w': 'featured', style: { position: 'relative', zIndex: 1, borderRadius: 22, overflow: 'hidden', background: 'rgba(8,16,34,.55)', border: '1px solid rgba(150,190,240,.16)', flex: 'none', animation: 'rise .8s ease both' } },
         h('div', { style: { height: 150, position: 'relative', overflow: 'hidden' } },
           h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', animation: `zoomBg ${sec}s linear both` } }),
           h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(6,12,26,.15) 0%, rgba(6,12,26,.35) 55%, rgba(8,16,34,.98) 100%)' } }),
@@ -456,7 +511,7 @@
           h('span', { style: { color: D.catColor[n.cat], fontWeight: 500 } }, n.cat),
           h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", color: '#6f82a6' } }, n.date + ' · ' + n.src)),
         h('div', { style: { fontSize: 17, fontWeight: 500, lineHeight: 1.3, textWrap: 'pretty' } }, n.title));
-      return (this._list = h('div', { style: { flex: 1, minHeight: 0, position: 'relative', zIndex: 1, overflow: 'hidden', WebkitMaskImage: 'linear-gradient(180deg,transparent 0,#000 8%,#000 88%,transparent 100%)', maskImage: 'linear-gradient(180deg,transparent 0,#000 8%,#000 88%,transparent 100%)' } },
+      return (this._list = h('div', { 'data-w': 'news-list', style: { flex: 1, minHeight: 0, position: 'relative', zIndex: 1, overflow: 'hidden', WebkitMaskImage: 'linear-gradient(180deg,transparent 0,#000 8%,#000 88%,transparent 100%)', maskImage: 'linear-gradient(180deg,transparent 0,#000 8%,#000 88%,transparent 100%)' } },
         h('div', { style: { animation: `scrollY ${Math.max(1, D.news.length) * sec}s linear infinite` } }, [...D.news, ...D.news].map(row))));
     }
     spotlight(D, idx) {
@@ -514,6 +569,7 @@
     // ---- the template -----------------------------------------------------------------------------
     render() {
       const D = this.D, now = this.state.now, t = Date.now() - (this.t0 || Date.now()), nd = new Date(now);
+      const hidden = (k) => CFG.hide.includes(k), headline = (EN() && CFG.headlineEn) || CFG.headline;
       // Under a full-screen moment the wall rests: its layers are not drawn and the 3D emblem stops, so a lobby computer
       // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
       const ov = this.state.ov, wl = this.wl, wlUp = isWelcome(ov);
@@ -527,22 +583,24 @@
       const edgeFlash = (delay) => (entering ? h('div', { key: 'edge', style: { position: 'absolute', inset: 0, borderRadius: 26, border: '1px solid rgba(212,242,92,.8)', zIndex: 3, pointerEvents: 'none', animation: `wlEdge 1000ms ease ${delay}ms both` } }) : null);
       const rightFirst = EN() ? 3800 : 3200, leftFirst = EN() ? 3200 : 3800;   // the physical right column is "r" in Hebrew, "l" in English
       const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
-        h('div', { dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } },
-          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers, h(React.Fragment, { key: 'fx' }, !entering && !wlUp ? this.ambientFx() : null)),
+        h('div', { 'data-w': 'stage', dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) ' + (hidden('ticker') ? '0px ' : '50px ') + (hidden('launches') ? '16px' : '118px') } },
+          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers, h(React.Fragment, { key: 'fx' }, !entering && !(wlUp && this.state.covered) ? this.ambientFx() : null)),
           h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
       const ago = D && this.updatedAgo(D);
       const dot = ago && h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
-      const timeBox = (big, small, extra, smallStyle) => h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },
+      const timeBox = (big, small, extra, smallStyle) => h('div', { 'data-w': 'clock', style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },
         h('span', { style: Object.assign({ fontSize: 26, letterSpacing: '.03em' }, extra.big) }, big), h('span', { style: Object.assign({ fontSize: 12, color: MUTED }, smallStyle) }, small));
 
-      const header = h('header', { key: 'hdr', style: Object.assign({ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 36px', position: 'relative', zIndex: 2 }, enW('wlHeadIn', 2000, 5000)) },
+      const header = h('header', { key: 'hdr', 'data-w': 'header', style: Object.assign({ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 36px', position: 'relative', zIndex: 2 }, enW('wlHeadIn', 2000, 5000)) },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
-          h('div', { style: { width: 52, height: 52, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' } },
-            h('img', { src: '/assets/logo-mark.png', alt: '', style: { width: 44, height: 44, objectFit: 'contain' } })),
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Space Program Office')))),
-        h('div'),
+          // The mark alone, its emblem centred in the disc: the file also has the name under the emblem (cut off here),
+          // and the emblem sits a little right of the file's middle.
+          h('div', { 'data-w': 'logo', style: { position: 'relative', width: 52, height: 52, flex: 'none', borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', overflow: 'hidden' } },
+            h('img', { 'data-w': 'logo-img', src: '/assets/logo-mark.png', alt: '', style: { position: 'absolute', left: '50%', top: '50%', width: 54, height: 'auto', marginLeft: -28.4, marginTop: -23.3, clipPath: 'inset(0 0 23% 0)' } })),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { 'data-w': 'title', style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Space Program Office')))),
+        headline ? h('div', { 'data-w': 'headline', style: { padding: '8px 28px', borderRadius: 999, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(212,242,92,.35)', fontSize: 26, fontWeight: 700, color: '#e6f1ff', whiteSpace: 'nowrap', maxWidth: 820, overflow: 'hidden', textOverflow: 'ellipsis' } }, headline) : h('div'),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, fontFamily: "'Lexend',sans-serif" } },
-          ago ? h('div', { style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, ago.text)) : null,
+          ago ? h('div', { 'data-w': 'updated', style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, ago.text)) : null,
           timeBox(fmtIL.format(nd), (EN() ? fmtDateEn : fmtDateHe).format(nd), { box: { padding: '6px 20px' }, big: { fontWeight: 400 } }, { fontFamily: 'Heebo' }),
           timeBox(fmtUTC.format(nd), 'UTC', { box: { padding: '6px 18px' }, big: { fontWeight: 300, color: '#9fdcff' } }, { letterSpacing: '.12em' })));
       const quiet = (text, extra) => h('span', { style: Object.assign({ fontSize: 15, color: MUTED, lineHeight: 1.4 }, extra) }, text);
@@ -551,7 +609,7 @@
       if (!D) {
         const denied = this.state.feedErr === 401 || this.state.feedErr === 403;
         return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header,
-          h('div', { key: 'e', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem(rest, entering)),
+          h('div', { key: 'e', 'data-w': 'emblem', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem(rest, entering)),
           h('div', { key: 'w', style: Object.assign({ gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 }, enW('wlFootIn', 1800, 5800)) },
             h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, tr('מתחבר לנתונים…', 'Connecting…')),
             denied ? quiet(tr('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת', 'The wall has no access to its data: check the display key (key) in the address')) : null)]);
@@ -581,19 +639,20 @@
       const panelHead = (title, meta) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
         h('span', { style: { fontSize: 20, fontWeight: 700 } }, title), h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: MUTED, letterSpacing: '.08em' } }, meta));
 
-      const right = h('section', { key: 'r', style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }, enW('wlPanelIn', 2600, rightFirst)) },
-        h('div', { style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }) },
-          this.sheen(1, 0), seam('insetInlineEnd', 8400), edgeFlash(8450), panelHead(tr('אירועים', 'Events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))),
-        h('div', { style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
-          this.sheen(2, 4.5), seam('insetInlineEnd', 8520), edgeFlash(8450),
+      const showEvents = !hidden('events'), showPeople = !hidden('people'), showNews = !hidden('news');
+      const right = !showEvents && !showPeople ? null : h('section', { key: 'r', style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }, enW('wlPanelIn', 2600, rightFirst)) },
+        showEvents ? h('div', { 'data-w': 'events', style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }, showPeople ? {} : { flex: 1, minHeight: 0 }) },
+          this.sheen(1, 0), seam('insetInlineEnd', 8400), edgeFlash(8450), panelHead(tr('אירועים', 'Events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))) : null,
+        showPeople ? h('div', { 'data-w': 'people', style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
+          this.sheen(2, 4.5), seam('insetInlineEnd', showEvents ? 8520 : 8400), edgeFlash(8450),
           panelHead(tr('אנשי המנהלת', 'Our people'), D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),
           D.people.length ? this.spotlight(D, pIdx) : quiet(tr('אין ימי הולדת או רגעים אישיים בימים הקרובים', 'No birthdays or personal moments in the coming days')),
-          D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null));
+          D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null) : null);
 
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
-        h('div', { style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest, entering)));
+        h('div', { 'data-w': 'emblem', style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest, entering)));
 
-      const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, enW('wlPanelIn', 2600, leftFirst)) },
+      const left = !showNews ? null : h('section', { key: 'l', 'data-w': 'news', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, enW('wlPanelIn', 2600, leftFirst)) },
         this.sheen(3, 9), seam('insetInlineStart', 8400), edgeFlash(8450),
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, tr('ניוזלטר החלל השבועי', 'Weekly space newsletter')), h('span', { style: { fontSize: 13, color: MUTED } }, [tr('רקיע · הפורום הישראלי לחלל', 'Rakia · The Israeli Space Forum'), D.issue.range].filter(Boolean).join(' · '))),
@@ -603,13 +662,14 @@
         D.news.length ? this.featured(D, fIdx, fsec) : quiet(tr('הגיליון השבועי יופיע כאן אחרי שייקלט', 'The weekly issue will appear here once it is imported')),
         D.news.length ? this.newsList(D) : null);
 
-      const main = h('main', { key: 'main', style: { display: 'grid', gridTemplateColumns: '470px minmax(0,1fr) 470px', gap: 26, padding: '14px 36px 16px', minHeight: 0, position: 'relative', zIndex: 2 } }, right, center, left);
+      // A hidden side panel gives its column to the emblem.
+      const main = h('main', { key: 'main', style: { display: 'grid', gridTemplateColumns: [right ? '470px' : '', 'minmax(0,1fr)', left ? '470px' : ''].filter(Boolean).join(' '), gap: 26, padding: '14px 36px 16px', minHeight: 0, position: 'relative', zIndex: 2 } }, right, center, left);
 
-      const tickerBar = h('div', { key: 'tk', style: Object.assign({ display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' }, enW('wlFootIn', 2000, 5500)) },
+      const tickerBar = hidden('ticker') ? h('div', { key: 'tk' }) : h('div', { key: 'tk', 'data-w': 'ticker', style: Object.assign({ display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' }, enW('wlFootIn', 2000, 5500)) },
         h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', height: '100%', [EN() ? 'borderRight' : 'borderLeft']: '1px solid rgba(150,190,240,.14)', fontSize: 15, fontWeight: 700 } }, tr('אירועים והזדמנויות', 'Events & opportunities')),
         D.ticker.length ? this.ticker(D) : quiet(tr('אין אירועים או הזדמנויות קרובים', 'No upcoming events or opportunities'), { padding: '0 26px' }));
 
-      const launches = this.launchVals(D.launches, now).slice(0, 4).map((l, i) => h('div', { key: i, style: Object.assign({ height: 84, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '0 14px', borderRadius: 22, background: 'linear-gradient(180deg,rgba(40,62,104,.38),rgba(12,22,44,.6))', border: `1px solid ${l.border}`, boxShadow: l.shadow, minWidth: 0 }, enW('wlFootIn', 1800, 5900 + 80 * i)) },
+      const launches = this.launchVals(D.launches, now).slice(0, 4).map((l, i) => h('div', { key: i, 'data-w': 'launch', style: Object.assign({ height: 84, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '0 14px', borderRadius: 22, background: 'linear-gradient(180deg,rgba(40,62,104,.38),rgba(12,22,44,.6))', border: `1px solid ${l.border}`, boxShadow: l.shadow, minWidth: 0 }, enW('wlFootIn', 1800, 5900 + 80 * i)) },
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
             h('span', { style: { padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 500, color: l.statusColor, border: `1px solid ${l.statusColor}` } }, l.status),
@@ -618,7 +678,7 @@
           h('span', { style: { fontSize: 12, color: MUTED, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, l.vehicle + ' · ' + l.site)),
         h('div', { dir: 'ltr', style: { display: 'flex', gap: 4, flex: 'none' } }, l.segs.map((s, j) => h('div', { key: j, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 34, padding: '5px 3px', borderRadius: 10, background: 'rgba(6,12,26,.7)', border: '1px solid rgba(150,190,240,.12)' } },
           h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 17, fontWeight: 400, color: l.numColor, lineHeight: 1.1 } }, s.v), h('span', { style: { fontSize: 10, color: '#6f82a6' } }, s.u))))));
-      const footer = h('footer', { key: 'ft', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
+      const footer = hidden('launches') ? h('div', { key: 'ft' }) : h('footer', { key: 'ft', 'data-w': 'launches', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
         h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 3 }, enW('wlFootIn', 1800, 5800)) }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
         launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), Object.assign({ gridColumn: '2 / -1' }, enW('wlFootIn', 1800, 5900))));
 

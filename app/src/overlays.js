@@ -21,13 +21,23 @@ window.wallAvatar = (sz, photo, name) => {
 // it: the hero lands exactly where the wall's own emblem draws, as a downscale (the emblem's framing depends only on the
 // box's aspect, so equal px-per-unit and globe centre mean an identical picture).
 window.wallGeo = (() => {
-  const SLOT_DATA = { x: 532, y: 102, w: 856, h: 794 }, SLOT_NODATA = { x: 530, y: 88, w: 860, h: 874 };
+  // The slot follows the wall's layout (wall.js render): stage rows 88 / 1fr / ticker 50 (0 when hidden) / launches 118
+  // (16 when hidden); with data, the emblem's column lies between the side panels (470 + a 26 gap each, 36 padding), and
+  // without data it spans the stage. The emblem is at most 860 wide, centred. pl/pr: a panel on the physical left/right.
+  const slot = ({ data, pl, pr, ticker, launches }) => {
+    const p = data ? { x: 36 + (pl ? 496 : 0), y: 102, w: 1848 - (pl ? 496 : 0) - (pr ? 496 : 0), h: 1080 - 88 - (ticker ? 50 : 0) - (launches ? 118 : 16) - 30 }
+      : { x: 0, y: 88, w: 1920, h: 1080 - 88 - (launches ? 118 : 16) };
+    const w = Math.min(p.w, 860);
+    return { x: p.x + (p.w - w) / 2, y: p.y, w, h: p.h };
+  };
+  const ALL = { pl: true, pr: true, ticker: true, launches: true };
+  const SLOT_DATA = slot(Object.assign({ data: true }, ALL)), SLOT_NODATA = slot(Object.assign({ data: false }, ALL));
   const ppu = (b) => b.h / (2 * Math.max(1.62, 1.62 * b.h / b.w));            // px per emblem unit (emblem-v2 fit())
   const gc = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 - 0.2 * ppu(b) });   // the globe's centre
   const HERO = { w: 1027.2, h: 952.8, ppu: 952.8 / 3.24, g: { x: 1376, y: 500 } };   // the slot ×1.2; its globe centre on the stage
   HERO.gIn = { x: HERO.w / 2, y: HERO.h / 2 - 0.2 * HERO.ppu };                   // …and inside its box
   const landing = (slot) => { const c = gc(slot); return { s: ppu(slot) / HERO.ppu, tx: c.x - HERO.g.x, ty: c.y - HERO.g.y, gc: c }; };
-  return { SLOT_DATA, SLOT_NODATA, ppu, gc, HERO, landing };
+  return { slot, SLOT_DATA, SLOT_NODATA, ppu, gc, HERO, landing };
 })();
 window.makeWallOverlays = (React) => {
   const h = React.createElement, { useState, useEffect, useRef } = React;
@@ -282,11 +292,16 @@ window.makeWallOverlays = (React) => {
   const abs = (x, y, w, hh, extra) => Object.assign({ position: 'absolute', left: x, top: y, width: w, height: hh }, extra);
   const circle = (cx, cy, d, extra) => abs(cx - d / 2, cy - d / 2, d, d, Object.assign({ borderRadius: '50%' }, extra));
 
+  // how the words (and a flat disc in the emblem's place) leave: drift left and fade
+  const WL_OUT = [{ opacity: 1, transform: 'none' }, { offset: 0.65, opacity: 0, transform: 'translateX(-104px)' }, { opacity: 0, transform: 'translateX(-160px)' }];
+  const WL_OUT_EASE = 'cubic-bezier(.45,0,.3,1)';
+
   /** props: guest, fx, preview, leaving (performance.now() of the way out, maybe still ahead; 0 = not leaving), woke and
    *  embShown (the wall's steps), mode ('dissolve' | 'scan' | 'none'), target (wallGeo.landing), attrs ({speed, sway, word},
-   *  frozen at mount), onReveal(R, ok), onHeroGone(). */
+   *  frozen at mount), onReveal(R, ok, hero element), onHeroGone(). */
   const Welcome = (props) => {
     const { guest, fx, preview, leaving, woke, embShown, mode, target } = props;
+    const skyFx = fx && !preview;                          // the remote's preview draws one still sky
     const A = useRef(props.attrs).current;
     const [phase, setPhase] = useState('load');            // 'load' → 'intro' at R (one commit carries every intro and idle animation)
     const [heroOn, setHeroOn] = useState(!preview);
@@ -306,11 +321,12 @@ window.makeWallOverlays = (React) => {
       let done = false;
       const reveal = (ok) => {
         if (done) return; done = true;
+        r.g0 = cb.current.guest;                             // the name the intro brings in (a later one comes in at once)
         window.__emblemEpoch = performance.now() - 600;      // t(R) = 0.6: every emblem phase is a fixed offset from R
         letters.forEach((s, i) => { xs[i] = s ? 128 + s.offsetLeft + s.offsetWidth / 2 : 600; });
         if (ok && r.hero) r.hero.setAttribute('intro', 'go'); else { setHeroOn(false); setHeroOk(false); }
         setPhase('intro');
-        cb.current.onReveal && cb.current.onReveal(performance.now(), ok);
+        cb.current.onReveal && cb.current.onReveal(performance.now(), ok, r.hero);
         later(3000, () => { if (r.hero && !leaveRef.current) r.hero.setAttribute('events', 'on'); });
       };
       if (!el) { later(1400, () => reveal(false)); return; }
@@ -327,8 +343,8 @@ window.makeWallOverlays = (React) => {
       if (!leaving) return;
       const t0 = leaving, anims = [];
       const at = (T) => T - (performance.now() - t0);
-      const run = (el, kf, T, dur, easing, origin) => { if (!el) return; if (origin) el.style.transformOrigin = origin; anims.push(el.animate(kf, { delay: at(T), duration: dur, easing: easing || 'linear', fill: 'both' })); };
-      const OUT = [{ opacity: 1, transform: 'none' }, { offset: 0.65, opacity: 0, transform: 'translateX(-104px)' }, { opacity: 0, transform: 'translateX(-160px)' }];
+      // (fill 'both' holds a layer at its first keyframe until its step: 'forwards' for one whose first keyframe is not how it rests)
+      const run = (el, kf, T, dur, easing, origin, fill) => { if (!el) return; if (origin) el.style.transformOrigin = origin; anims.push(el.animate(kf, { delay: at(T), duration: dur, easing: easing || 'linear', fill: fill || 'both' })); };
       ['rigX', 'rigY', 'rigS', 'eyebrowO', 'line1O', 'line2O'].forEach((n) => r[n] && (r[n].style.willChange = 'transform'));
       later(at(0), () => { if (r.hero) r.hero.setAttribute('events', 'off'); });
       // the breath held, then the light gathers and the sun sets behind the limb
@@ -341,7 +357,7 @@ window.makeWallOverlays = (React) => {
       run(r.clockA, [{ opacity: 1 }, { opacity: 0 }], 0, 250);
       run(r.clockB, [{ opacity: 0 }, { opacity: 1 }], 250, 350);
       run(r.caption, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-40px)' }], 500, 700, 'ease-in');
-      [['eyebrowO', 600], ['line1O', 750], ['glowO', 825], ['line2O', 900], ['guestO', 1100], ['heO', 1200], ['discO', 1000]].forEach(([n, T]) => run(r[n], OUT, T, 2400, 'cubic-bezier(.45,0,.3,1)'));
+      [['eyebrowO', 600], ['line1O', 750], ['glowO', 825], ['line2O', 900], ['guestO', 1100], ['heO', 1200]].forEach(([n, T]) => run(r[n], WL_OUT, T, 2400, WL_OUT_EASE));
       run(r.ruleO, [{ transform: 'none', opacity: 1 }, { transform: 'scaleX(0)', opacity: 0 }], 1000, 900, 'cubic-bezier(.55,0,.85,.35)', 'left center');
       // the camera move: three axes, three curves, so the path bends; it lands exactly on the wall's emblem
       const tg = target || GEO.landing(GEO.SLOT_DATA);
@@ -349,9 +365,9 @@ window.makeWallOverlays = (React) => {
       run(r.rigX, [{ transform: 'none' }, { transform: `translateX(${tg.tx}px)` }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');
       run(r.rigS, [{ transform: 'none' }, { transform: `scale(${tg.s})` }], 1400, 6600, 'cubic-bezier(.5,0,.2,1)');
       run(r.rigY, [{ transform: 'none' }, { transform: `translateY(${tg.ty}px)` }], 1600, 6400, 'cubic-bezier(.55,0,.2,1)');
-      if (!fx) run(r.skyO, [{ transform: 'none' }, { transform: 'translateX(-120px)' }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');
-      // English: the name that just left the screen lands in the logo
-      later(at(1600), () => { if (r.hero) r.hero.setAttribute('wordmark', 'up'); });
+      if (!skyFx) run(r.skyO, [{ transform: 'none' }, { transform: 'translateX(-120px)' }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');   // a still sky moves as one
+      // English: the name that just left the screen lands in the logo (if the emblem has the English name: see wordFits)
+      later(at(1600), () => { if (r.hero && EN() && A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')) r.hero.setAttribute('wordmark', 'up'); });
       run(r.clockO, [{ opacity: 1 }, { opacity: 0 }], 2400, 600);
       run(r.veilO, [{ transform: 'none', opacity: 1 }, { transform: 'translateX(-80px)', opacity: 0 }], 2400, 2200, 'cubic-bezier(.45,0,.55,1)');
       run(r.skyFade, [{ opacity: 1 }, { opacity: 0 }], 3400, 3000, 'ease-in-out');
@@ -361,9 +377,14 @@ window.makeWallOverlays = (React) => {
       run(r.clampA, clamp, 7400, 900, 'cubic-bezier(.2,.8,.3,1)');
       run(r.clampB, clamp, 7500, 900, 'cubic-bezier(.2,.8,.3,1)');
       run(r.bloom, [{ opacity: 0, transform: 'scale(.5)' }, { offset: 0.35, opacity: 0.42, transform: 'scale(.82)' }, { opacity: 0, transform: 'none' }], 8300, 1200, 'cubic-bezier(.2,.8,.3,1)');
-      run(r.ripple, [{ opacity: 0.4, transform: 'scale(.69)' }, { opacity: 0, transform: 'none' }], 8400, 1200, 'cubic-bezier(.2,.8,.3,1)');
+      run(r.ripple, [{ opacity: 0.4, transform: 'scale(.69)' }, { opacity: 0, transform: 'none' }], 8400, 1200, 'cubic-bezier(.2,.8,.3,1)', undefined, 'forwards');
       return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
     }, [leaving]);
+    // the flat disc (no hero) leaves with the words; one that came up after the way out began (the hero failed) too
+    useEffect(() => {
+      if (!leaving || heroOk || !r.discO || r.discO._out) return;
+      r.discO._out = r.discO.animate(WL_OUT, { delay: 1000 - (performance.now() - leaving), duration: 2400, easing: WL_OUT_EASE, fill: 'both' });
+    }, [leaving, heroOk]);
     // the welcome's deep space dissolves only once the wall is awake underneath
     useEffect(() => {
       if (!leaving || !woke || !r.base) return;
@@ -375,13 +396,13 @@ window.makeWallOverlays = (React) => {
     useEffect(() => {
       if (!leaving || !embShown) return;
       const T = performance.now() - leaving, anims = [];
-      const go = (el, kf, start, dur, easing) => { if (el) anims.push(el.animate(kf, { delay: start - T, duration: dur, easing, fill: 'both' })); };
+      const go = (el, kf, start, dur, easing, fill) => { if (el) anims.push(el.animate(kf, { delay: start - T, duration: dur, easing, fill: fill || 'both' })); };
       let end;
       if (mode === 'scan') {
         const s = Math.max(9200, T + 100), d = 'cubic-bezier(.65,0,.35,1)';
         go(r.clipOuter, [{ transform: 'none' }, { transform: `translateY(${HB.h}px)` }], s, 1400, d);
         go(r.clipInner, [{ transform: 'none' }, { transform: `translateY(${-HB.h}px)` }], s, 1400, d);
-        go(r.scanLine, [{ transform: 'none', opacity: 1 }, { offset: 0.9, opacity: 1 }, { transform: `translateY(${HB.h}px)`, opacity: 0 }], s, 1400, d);
+        go(r.scanLine, [{ transform: 'none', opacity: 1 }, { offset: 0.9, opacity: 1 }, { transform: `translateY(${HB.h}px)`, opacity: 0 }], s, 1400, d, 'forwards');
         end = s + 1400;
       } else if (mode === 'dissolve') { const s = Math.max(8800, T + 100); go(r.heroFade, [{ opacity: 1 }, { opacity: 0 }], s, 1200, 'cubic-bezier(.45,0,.55,1)'); end = s + 1200; }
       if (end) {
@@ -412,7 +433,10 @@ window.makeWallOverlays = (React) => {
     });
     const tg = target || GEO.landing(GEO.SLOT_DATA), gc = tg.gc;
     const guestSize = !guest ? 40 : guest.length > 44 ? 30 : guest.length > 30 ? 34 : 40;
-    const heroEl = heroOn ? h('space-emblem-v2', { ref: set('hero'), globe: 'real', speed: A.speed, sway: A.sway, word: A.word, clock: 'page', events: 'off', intro: 'hold', wordmark: EN0 ? 'down' : 'up', maxpr: '1.25', style: { display: 'block', width: '100%', height: '100%' } }) : null;
+    // The emblem's name: up in Hebrew; in English down, until the title flies into it. The name is fixed when the scene
+    // starts, so after a language switch it stays down (and the wall's own emblem brings the right one at the hand-off).
+    const wordFits = A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE');
+    const heroEl = heroOn ? h('space-emblem-v2', { ref: set('hero'), globe: 'real', speed: A.speed, sway: A.sway, word: A.word, clock: 'page', events: 'off', intro: 'hold', wordmark: !EN0 && wordFits ? 'up' : 'down', maxpr: '1.25', style: { display: 'block', width: '100%', height: '100%' } }) : null;
     const showDisc = !heroOk;
 
     return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: 'ltr', pointerEvents: 'none', fontFamily: 'Heebo, sans-serif', color: '#e6f1ff', animation: 'ovIn .7s cubic-bezier(.4,0,.2,1) both' } },
@@ -424,7 +448,7 @@ window.makeWallOverlays = (React) => {
           h('div', { style: Object.assign({ position: 'absolute', inset: 0, background: 'radial-gradient(closest-side at 42% 46%, rgba(70,110,220,.16), rgba(70,110,220,.05) 55%, transparent), radial-gradient(closest-side at 74% 70%, rgba(150,120,240,.07), transparent)' }, fx && !preview ? { animation: 'wlVeil 70s ease-in-out infinite alternate', willChange: 'transform' } : {}) }))),
       // L2 sky
       h('div', { key: 'sky', ref: set('skyFade'), style: { position: 'absolute', inset: 0 } },
-        h('div', { ref: set('skyO'), style: { position: 'absolute', inset: 0, animation: 'wlIn 2000ms ease 500ms both' } }, h(Sky, { fx: fx && !preview, leaving, target: tg, preview }))),
+        h('div', { ref: set('skyO'), style: { position: 'absolute', inset: 0, animation: 'wlIn 2000ms ease 500ms both' } }, h(Sky, { fx: skyFx, leaving, target: tg, preview }))),
       // L3 the hero rig: moved only by transforms on rigX / rigY / rigS (origin at the globe centre)
       h('div', { key: 'rig', style: abs(G.x - GB.x, G.y - GB.y, HB.w, HB.h) },
         h('div', { ref: set('rigX'), style: { position: 'absolute', inset: 0 } },
@@ -480,8 +504,8 @@ window.makeWallOverlays = (React) => {
         h('div', { ref: set('ruleO'), style: { marginTop: 28, width: 440, height: 2 } },
           h('div', { style: Object.assign({ width: '100%', height: '100%', background: 'linear-gradient(90deg, rgba(212,242,92,.9), rgba(212,242,92,.35) 55%, transparent)', transformOrigin: 'left center' }, intro('wlDrawX', 1400, 3800)) })),
         guest ? h('div', { key: 'g:' + guest, ref: set('guestO'), style: { marginTop: 22, maxWidth: 820 } },
-          h('div', { style: intro('wlRiseIn', 1200, 4100) },
-            h('div', { dir: 'auto', style: Object.assign({ fontFamily: LEX, fontSize: guestSize, fontWeight: 400, lineHeight: 1.25, letterSpacing: '.03em', color: '#d4f25c', textShadow: '0 0 24px rgba(212,242,92,.30)', unicodeBidi: 'plaintext', textAlign: 'left' }, fx ? idle('wlGuest 9s ease-in-out -6.5s infinite') : {}) }, guest))) : null,
+          h('div', { style: on && guest !== r.g0 ? intro('wlRiseIn', 700, 0) : intro('wlRiseIn', 1200, 4100) },
+            h('div', { dir: 'auto', style: Object.assign({ fontFamily: "'Lexend', Heebo, sans-serif", fontSize: guestSize, fontWeight: 400, lineHeight: 1.25, letterSpacing: '.03em', color: '#d4f25c', textShadow: '0 0 24px rgba(212,242,92,.30)', unicodeBidi: 'plaintext', textAlign: 'left' }, fx ? idle('wlGuest 9s ease-in-out -6.5s infinite') : {}) }, guest))) : null,
         EN0 ? null : h('div', { ref: set('heO'), style: { marginTop: guest ? 12 : 22 } },
           h('div', { dir: 'rtl', style: Object.assign({ fontFamily: 'Heebo', fontSize: 30, fontWeight: 300, lineHeight: '40px', color: '#b3c8e6', letterSpacing: '.04em', textAlign: 'left' }, intro('wlRiseIn', 1200, 4400)) }, 'ברוכים הבאים למנהלת החלל'))),
       // L5 HUD: a clock top right, a caption bottom left
@@ -506,5 +530,28 @@ window.makeWallOverlays = (React) => {
     h('span', { style: { width: 12, height: 12, borderRadius: '50%', background: '#e9b872', boxShadow: '0 0 14px #e9b872', animation: 'breathe 1s ease-in-out infinite' } }),
     h('span', { style: { fontSize: 22, fontWeight: 700, color: '#e9b872' } }, title), h('span', { style: { fontSize: 20 } }, line));
 
-  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast };
+  // ---------- a picture on the whole wall (the remote's agent: attached, or from the internet after approval) ----------
+  // Kept light: the picture once, contained on black, a caption on a plain gradient; no blur or moving layers.
+  const ImageMoment = ({ url, caption }) => shell([
+    h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#02050c' } }),
+    h('img', { key: 'img', src: url, alt: caption || '', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', animation: 'ovIn 1.2s ease both' } }),
+    caption ? h('div', { key: 'cap', style: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: '120px 120px 70px', background: 'linear-gradient(0deg, rgba(2,5,12,.92), rgba(2,5,12,0))', fontSize: 52, fontWeight: 700, lineHeight: 1.2, textAlign: 'center', textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, caption) : null
+  ]);
+
+  // ---------- a live stream (a launch's webcast) on the whole wall: YouTube, muted, until the remote ends it ----------
+  // In the remote's preview a card stands in for the player, so a phone never loads the video.
+  const LiveStream = ({ videoId, title, preview }) => {
+    const src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(videoId) + '?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&modestbranding=1&iv_load_policy=3';
+    const tag = h('div', { key: 'tag', style: { position: 'absolute', top: 36, [EN() ? 'left' : 'right']: 40, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 22px', borderRadius: 999, background: 'rgba(6,12,26,.78)', border: '1px solid rgba(255,120,110,.6)', fontSize: 26, fontWeight: 700, whiteSpace: 'nowrap', maxWidth: 1200, overflow: 'hidden', textOverflow: 'ellipsis' } },
+      h('span', { style: { width: 14, height: 14, borderRadius: '50%', background: '#ff5a4f', boxShadow: '0 0 14px #ff5a4f', animation: 'breathe 1.4s ease-in-out infinite' } }), tr('שידור חי', 'LIVE') + (title ? ' · ' + title : ''));
+    if (preview) return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#02050c url(https://i.ytimg.com/vi/' + encodeURIComponent(videoId) + '/hqdefault.jpg) center/cover no-repeat', opacity: .55 } }),
+      h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, fontWeight: 700 } }, tr('השידור מוצג בצג', 'Streaming on the wall')), tag]);
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#000' } }),
+      h('iframe', { key: 'v', src, title: title || 'Live', allow: 'autoplay; encrypted-media; picture-in-picture', referrerPolicy: 'strict-origin-when-cross-origin', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 } }),
+      tag]);
+  };
+
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream };
 };
