@@ -103,7 +103,7 @@
   const MUTED = '#8b9dbd';
 
   class Wall extends React.Component {
-    constructor(p) { super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0 }; }
+    constructor(p) { super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false }; }
 
     // ---- lifecycle ----------------------------------------------------------------------------
     componentDidMount() {
@@ -116,7 +116,14 @@
       this.load();
       this.loadLive(); this.livePoll = setInterval(() => this.loadLive(), CFG.livePoll * 1000);
     }
-    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); removeEventListener('resize', this.fit); }
+    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearInterval(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); removeEventListener('resize', this.fit); }
+    /** A full-screen moment covers the wall once it has faded in (`covered`); until it ends the wall under it rests (render). */
+    componentDidUpdate(_, prev) {
+      if (!this.state.ov === !prev.ov) return;
+      clearTimeout(this.coverT);
+      if (this.state.ov) this.coverT = setTimeout(() => this.setState({ covered: true }), 1200);
+      else if (this.state.covered) this.setState({ covered: false });
+    }
 
     // ---- live state from the remote -------------------------------------------------------------
     get liveOk() { return Date.now() - (this._liveOkAt || 0) < 30e3; }   // one missed poll is not an outage
@@ -242,11 +249,14 @@
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
       const O = this._O || (this._O = window.makeWallOverlays(React));
+      // Keyed by the moment alone: a toast coming or going must not start it over (the 12:00 video from the top).
+      const mk = ov ? ov.kind + ov.id : '';
       let el = null;
-      if (ov && ov.kind === 'launch') el = h(O.LaunchMode, { key: k, launch: ov.launch });
-      if (ov && ov.kind === 'celebrate') el = h(O.Celebration, { key: k, person: ov.person });
-      if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: k, src: (this.D && this.D.promoVideo) || '/assets/promo.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.setState({ ov: null }) });
-      if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: k, event: ov.event, until: ov.until });
+      if (ov && ov.kind === 'launch') el = h(O.LaunchMode, { key: mk, launch: ov.launch });
+      if (ov && ov.kind === 'celebrate') el = h(O.Celebration, { key: mk, person: ov.person });
+      // The remote covers its preview with its own card during the server's 12:00 show, so the preview skips the video.
+      if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: mk, src: CFG.preview && ov.live ? '' : (this.D && this.D.promoVideo) || '/assets/promo.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.setState({ ov: null }) });
+      if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: mk, event: ov.event, until: ov.until });
       return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
     }
 
@@ -283,11 +293,12 @@
         corner({ top: 10, right: 10, borderRadius: '0 8px 0 0' }, '1.5px 1.5px 0 0'), corner({ top: 10, left: 10, borderRadius: '8px 0 0 0' }, '1.5px 0 0 1.5px'),
         corner({ bottom: 10, right: 10, borderRadius: '0 0 8px 0' }, '0 1.5px 1.5px 0'), corner({ bottom: 10, left: 10, borderRadius: '0 0 0 8px' }, '0 0 1.5px 1.5px')));
     }
-    emblem() {
-      if (this._emb) return this._emb;
+    emblem(rest) {
+      if (this._emb && this._embRest === rest) return this._emb;
+      this._embRest = rest;
       return (this._emb = h('div', { style: { position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
         h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } }),
-        h('space-emblem-v2', { key: CFG.globeStyle, speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
+        h('space-emblem-v2', { key: CFG.globeStyle, speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off', paused: rest ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, filter: 'drop-shadow(0 30px 40px rgba(0,0,0,.55))' } })));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
@@ -377,8 +388,13 @@
     // ---- the template -----------------------------------------------------------------------------
     render() {
       const D = this.D, now = this.state.now, t = Date.now() - (this.t0 || Date.now()), nd = new Date(now);
-      const stage = (children) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
-        h('div', { dir: 'rtl', style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } }, children));
+      // Under a full-screen moment the wall rests: its layers are not drawn and the 3D emblem stops, so a lobby computer
+      // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
+      const rest = !!this.state.ov && this.state.covered;
+      const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
+        h('div', { dir: 'rtl', style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) 50px 118px' } },
+          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers),
+          h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
       const ago = D && this.updatedAgo(D);
       const dot = ago && h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
       const timeBox = (big, small, extra, smallStyle) => h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },
@@ -400,11 +416,10 @@
       if (!D) {
         const denied = this.state.feedErr === 401 || this.state.feedErr === 403;
         return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header,
-          h('div', { key: 'e', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem()),
+          h('div', { key: 'e', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem(rest)),
           h('div', { key: 'w', style: { gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 } },
             h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, 'מתחבר לנתונים…'),
-            denied ? quiet('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת') : null),
-          h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()]);
+            denied ? quiet('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת') : null)]);
       }
 
       const fsec = CFG.featureSeconds, fIdx = D.featured.length ? Math.floor(t / (fsec * 1000)) % D.featured.length : 0;
@@ -440,7 +455,7 @@
           D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null));
 
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
-        h('div', { style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem()));
+        h('div', { style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest)));
 
       const left = h('section', { key: 'l', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }) },
         this.sheen(3, 9),
@@ -471,7 +486,7 @@
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3 } }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, 'שיגורים קרובים'), h('span', { style: { fontSize: 12, color: MUTED } }, 'שעון ישראל · Launch Library')),
         launches.length ? launches : quiet('אין כרגע נתוני שיגורים', { gridColumn: '2 / -1' }));
 
-      return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer, h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()]);
+      return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer]);
     }
     /** From the remote: the urgent banner on top, and brightness as a dimming layer over everything. */
     liveLayers() {

@@ -227,14 +227,33 @@
     window.XLSX.writeFile(wb, 'אנשי המנהלת ' + iso(new Date()) + '.xlsx');
   }
 
+  /** A phone or tablet: a touch screen with no mouse. */
+  const touchOnly = () => { try { return matchMedia('(hover: none) and (pointer: coarse)').matches; } catch (e) { return false; } };
+
   // ---- access: the private link /remote/?t=<REMOTE_TOKEN>, kept in this browser --------------------
   const store = {
     get: (k) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
     set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) { /* private mode */ } },
   };
+  /** The access code as pasted: the code itself or the whole private link, with whatever came along from a chat (spaces,
+   *  quotes, a period, the invisible direction marks of Hebrew text, the words around it). */
+  const codeOf = (text) => {
+    const raw = String(text || '').replace(/[\s\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, ''), m = /[?&#]t=([^&#]+)/.exec(raw);
+    if (m) { try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; } }
+    const bare = raw.replace(/^[`'"“”‘’«»]+|[`'"“”‘’«».,]+$/g, '');
+    if (/^[\x21-\x7e]*$/.test(bare)) return bare;
+    const runs = bare.match(/[A-Za-z0-9_-]{16,}/g);
+    return runs ? runs.sort((x, y) => y.length - x.length)[0] : bare;
+  };
+  /** The address bar keeps the private link: a reload (also the one a phone's browser does after dropping the page), a
+   *  bookmark or a home-screen icon then opens the remote again, and the address copied from it works on another device. */
+  const keepLink = (t) => { try { const u = new URL(location.href); if (u.searchParams.get('t') !== t) { u.searchParams.set('t', t); history.replaceState(null, '', u.pathname + u.search + u.hash); } } catch (e) {} };
+  /** The code in use: this browser's, else the address bar's (a browser that keeps nothing, like an old private mode). */
+  const token = () => store.get('sw-remote-token') || codeOf(new URL(location.href).searchParams.get('t'));
   (() => {
-    const u = new URL(location.href), t = u.searchParams.get('t');
-    if (t) { store.set('sw-remote-token', t); u.searchParams.delete('t'); history.replaceState(null, '', u.pathname + (u.search || '') + u.hash); }
+    const t = codeOf(new URL(location.href).searchParams.get('t'));
+    if (t) store.set('sw-remote-token', t);
+    if (token()) keepLink(token());
   })();
 
   async function api(method, body) {
@@ -242,7 +261,7 @@
     try {
       res = await fetch('/api/remote', {
         method, cache: 'no-store',
-        headers: Object.assign({ 'x-remote-token': store.get('sw-remote-token'), 'x-remote-who': encodeURIComponent(store.get('sw-remote-who')) }, body ? { 'content-type': 'application/json' } : {}),
+        headers: Object.assign({ 'x-remote-token': token(), 'x-remote-who': encodeURIComponent(store.get('sw-remote-who')) }, body ? { 'content-type': 'application/json' } : {}),
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (e) { throw new Error('אין חיבור לשרת. בדקו את האינטרנט ונסו שוב.'); }
@@ -259,12 +278,14 @@
       const who = store.get('sw-remote-who');
       this.state = {
         now: new Date(), vw: window.innerWidth, pw: 0,
-        data: null, loadErr: '', auth: !!store.get('sw-remote-token'), who, whoDraft: '', tokenDraft: '',
+        data: null, loadErr: '', auth: !!token(), who, whoDraft: '', tokenDraft: '',
         design: null, brightness: null,   // optimistic local values while a slider is being dragged
         demo: 'off',
         tab: 'today', studio: false, sheet: null, toast: null, nlBusy: false, photoBusy: false, busyAct: false, impBusy: false,
         pq: '', showInactive: false, gateErr: '',
-        wallSrc: '',
+        // The live preview runs the whole wall inside the page. A phone or tablet shows it on a tap (or while the design is
+        // being edited): loaded by itself it took more memory than some phones give a page, and the remote crashed on opening.
+        wallSrc: '', liveView: !touchOnly(),
         chatOpen: false, chatInput: '', attach: [], dragging: false,
         messages: [], agentBusy: false, agentAt: 0,
         keyDraft: '', keyBusy: false, keyErr: '', keyOpen: false,
@@ -753,9 +774,10 @@
         clearUrClose: () => { this.run('urgent', { text: '' }, 'הוסרה ההודעה הדחופה').catch(() => {}); this.closeSheet(); },
 
         nowLabel: tk ? this.tkTitle(tk) : (s.studio ? 'תצוגה מקדימה חיה' : 'תצוגה רגילה'),
-        wallHref: '/' + (D && D.config && D.config.displayKey ? '?key=' + encodeURIComponent(D.config.displayKey) : ''), wallSrc: s.wallSrc, livePreview: !!s.wallSrc,
+        wallHref: '/' + (D && D.config && D.config.displayKey ? '?key=' + encodeURIComponent(D.config.displayKey) : ''), wallSrc: s.wallSrc, livePreview: !!s.wallSrc && (s.liveView || s.studio),
+        offerLive: !!s.wallSrc && !s.liveView && !s.studio, showLive: () => this.setState({ liveView: true }),
         previewTransform: 'scale(' + ((s.pw || 560) / 1920).toFixed(4) + ')',
-        previewFilter: 'brightness(' + (brightness / 100).toFixed(2) + ')',
+        previewFilter: brightness < 100 ? 'brightness(' + (brightness / 100).toFixed(2) + ')' : 'none',   // a filter, even a neutral one, redraws the whole preview each frame
         brightness, setBrightness: (e) => { const v = +e.target.value; this.setState({ brightness: v }); this.burst('br', () => this.run('brightness', { value: v }, null, { quiet: true }).catch(() => {}).finally(() => this.setState({ brightness: null }))); },
 
         showToday: !s.studio,
@@ -926,7 +948,7 @@
       const s = this.state, needToken = !s.auth;
       const input = (value, onChange, placeholder, extra) => el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:16px', Object.assign({ value, onChange, placeholder }, extra));
       const submit = () => {
-        if (needToken) { const t = s.tokenDraft.trim(); if (!t) return this.setState({ gateErr: 'הדביקו את קוד הגישה' }); store.set('sw-remote-token', t); this.setState({ auth: true, tokenDraft: '', gateErr: '' }, () => this.refresh()); }
+        if (needToken) { const t = codeOf(s.tokenDraft); if (!t) return this.setState({ gateErr: 'הדביקו את קוד הגישה' }); store.set('sw-remote-token', t); keepLink(t); this.setState({ auth: true, tokenDraft: '', gateErr: '' }, () => this.refresh()); }
         const w = s.whoDraft.trim();
         if (!s.who && w) { store.set('sw-remote-who', w); this.setState({ who: w }); }
       };
@@ -935,8 +957,8 @@
           el('div', 'display:flex;align-items:center;gap:12px',
             el('img', 'width:42px;height:42px;border-radius:50%;background:#e6f1ff;object-fit:contain;padding:3px;box-sizing:border-box;flex:none', { src: '/assets/logo-mark.png', alt: '' }),
             el('h1', 'margin:0;font-size:20px;font-weight:800', null, 'שלט צג החלל')),
-          needToken ? el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'פתחו את השלט מהקישור הפרטי שקיבלתם, או הדביקו כאן את קוד הגישה.') : null,
-          needToken ? input(s.tokenDraft, (e) => this.setState({ tokenDraft: e.target.value }), 'קוד גישה', { dir: 'ltr', autoComplete: 'off' }) : null,
+          needToken ? el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'פתחו את השלט מהקישור הפרטי שקיבלתם, או הדביקו כאן את הקישור או את קוד הגישה.') : null,
+          needToken ? input(s.tokenDraft, (e) => this.setState({ tokenDraft: e.target.value }), 'קוד גישה או קישור', { dir: 'ltr', autoComplete: 'off', autoCapitalize: 'off', autoCorrect: 'off', spellCheck: false }) : null,
           s.gateErr ? el('span', 'font-size:14px;color:#ffb4a8;text-wrap:pretty', { role: 'alert' }, s.gateErr) : null,
           !s.who ? el('span', 'font-size:14px;color:#8b9dbd', null, 'איך לקרוא לך? השם מופיע בהיסטוריית השינויים.') : null,
           !s.who ? input(s.whoDraft, (e) => this.setState({ whoDraft: e.target.value }), 'השם שלך', { maxLength: 40 }) : null,
@@ -1020,7 +1042,8 @@
               el('span', 'font-size:5.6cqw;font-weight:800;line-height:1.1;text-wrap:balance', null, v.tkEvTitle),
               el('span', 'font-size:2.3cqw;color:#cfe0f7', null, v.tkEvMeta),
               el('span', 'position:absolute;bottom:4cqw;right:7cqw;font-size:1.5cqw;color:#8b9dbd', null, v.tkEvEnd)) : null,
-            v.urgentOn ? el('div', 'position:absolute;top:0;left:0;right:0;direction:rtl;padding:1cqw 2cqw;background:#b3261e;color:#fff;font-size:1.9cqw;font-weight:700;text-align:center', null, v.urgentText) : null)),
+            v.urgentOn ? el('div', 'position:absolute;top:0;left:0;right:0;direction:rtl;padding:1cqw 2cqw;background:#b3261e;color:#fff;font-size:1.9cqw;font-weight:700;text-align:center', null, v.urgentText) : null),
+          v.offerLive ? el('button', 'position:absolute;left:10px;bottom:10px;direction:rtl;min-height:36px;padding:0 14px;border-radius:999px;border:1px solid rgba(150,190,240,.35);background:rgba(6,12,26,.82);color:#e6f1ff;font-size:14px;font-weight:600;cursor:pointer', { type: 'button', onClick: v.showLive }, '▶ תצוגה חיה') : null),
         el('div', 'display:flex;align-items:center;gap:12px', null,
           el('span', 'font-size:14px;color:#8b9dbd;flex:none', null, 'בהירות'),
           el('input', 'flex:1;min-width:0;height:28px', { type: 'range', min: 10, max: 100, value: v.brightness, onChange: v.setBrightness, 'aria-label': 'בהירות' }),
