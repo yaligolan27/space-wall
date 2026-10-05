@@ -223,9 +223,9 @@ window.makeWallOverlays = (React) => {
           'WELCOME TO',
           h('span', { style: { width: 120, height: 2, marginLeft: '-.62em', background: 'linear-gradient(270deg, transparent, #9fdcff)', animation: 'grow 1s ease 1.3s both', transformOrigin: 'left' } })),
         h('div', { style: { position: 'relative', marginTop: 22, fontFamily: LEX, fontSize: 118, fontWeight: 600, lineHeight: 1.06, letterSpacing: '.01em', color: '#f4f9ff', textShadow: '0 0 40px rgba(111,214,234,.45), 0 4px 30px rgba(0,0,0,.6)' } },
-          h('div', null, line('THE ISRAELI SPACE')), h('div', null, line('PROGRAM OFFICE')),
+          h('div', null, line('THE ISRAEL SPACE')), h('div', null, line('PROGRAM OFFICE')),
           fx ? h('div', { 'aria-hidden': true, style: { position: 'absolute', inset: 0, color: 'transparent', textShadow: 'none', backgroundImage: 'linear-gradient(100deg, transparent 40%, rgba(255,255,255,.95) 50%, transparent 60%)', backgroundSize: '250% 100%', WebkitBackgroundClip: 'text', backgroundClip: 'text', animation: 'wlShine 7s ease-in-out 4.5s infinite', pointerEvents: 'none' } },
-            h('div', null, 'THE ISRAELI SPACE'), h('div', null, 'PROGRAM OFFICE')) : null),
+            h('div', null, 'THE ISRAEL SPACE'), h('div', null, 'PROGRAM OFFICE')) : null),
         h('div', { style: { marginTop: 26, width: 760, height: 2, background: 'linear-gradient(90deg, transparent, rgba(212,242,92,.9), transparent)', animation: 'grow 1.2s ease 3s both' } }),
         guest ? h('div', { dir: 'auto', style: { marginTop: 24, fontFamily: LEX, fontSize: 44, fontWeight: 400, letterSpacing: '.06em', color: '#d4f25c', textShadow: '0 0 24px rgba(212,242,92,.35)', animation: 'rise 1s ease 3.2s both' } }, guest) : null,
         EN() ? null : h('div', { dir: 'rtl', style: { marginTop: guest ? 14 : 24, fontFamily: 'Heebo', fontSize: 34, fontWeight: 300, color: '#b3c8e6', letterSpacing: '.04em', animation: 'rise 1s ease 3.4s both' } }, 'ברוכים הבאים למנהלת החלל'))
