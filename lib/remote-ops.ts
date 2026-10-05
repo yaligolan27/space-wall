@@ -69,12 +69,12 @@ function evTakeover(e: Row, auto: boolean, now = Date.now()): Row {
   const start = new Date(e.starts_at), end = e.ends_at ? Date.parse(e.ends_at) : start.getTime() + 60 * 60e3;
   const until = end <= now ? now + EVENT_FALLBACK_MS : start.getTime() - now > 30 * 60e3 ? now + EVENT_PREVIEW_MS : end;
   return { id: (auto ? 'event:' : 'rt:' + now + ':') + e.id, kind: 'event', auto, eventId: e.id, title: e.title, place: e.place || '',
-    start: timeIL(start), end: timeIL(new Date(end)), until: new Date(until).toISOString() };
+    start: timeIL(start), end: timeIL(new Date(end)), img: e.photo_url || null, until: new Date(until).toISOString() };
 }
 
 /** Important events running right now. */
 async function bigEventsNow(now: Date): Promise<Row[]> {
-  const rows = must(await db().from('directorate_events').select('id,title,place,starts_at,ends_at').eq('takeover', true).eq('approved', true)
+  const rows = must(await db().from('directorate_events').select('id,title,place,starts_at,ends_at,photo_url').eq('takeover', true).eq('approved', true)
     .lte('starts_at', now.toISOString()).gte('starts_at', new Date(now.getTime() - 864e5).toISOString()), 'big events') as Row[];
   return rows.filter(e => (e.ends_at ? Date.parse(e.ends_at) : Date.parse(e.starts_at) + 60 * 60e3) > now.getTime());
 }
@@ -121,7 +121,7 @@ export async function snapshot() {
     s.from('people').select(PERSON_COLS).order('display_name'),
     s.from('life_events').select('id,person_id,name,type,label,event_date,show_from,show_until,text_he,photo_mode,photo_url')
       .gte('event_date', addDays(today, -30)).lte('event_date', addDays(today, 365)).order('event_date'),
-    s.from('directorate_events').select('id,title,starts_at,ends_at,place,takeover').eq('approved', true)
+    s.from('directorate_events').select('id,title,starts_at,ends_at,place,takeover,photo_url').eq('approved', true)
       .gte('starts_at', ilToIso(today, '00:00')).lt('starts_at', ilToIso(addDays(today, EVENTS_DAYS + 1), '00:00')).order('starts_at'),
     s.from('industry_events').select('id,name,kind,starts_on,ends_on,place_he,url').eq('approved', true)
       .gte('starts_on', addDays(today, -120)).lte('starts_on', addDays(today, EVENTS_DAYS)).order('starts_on'),
@@ -135,7 +135,7 @@ export async function snapshot() {
     life: (must(life, 'life') as Row[]).map(l => ({ id: l.id, personId: l.person_id || null, name: l.name || '', kind: l.type, type: l.label || HE_TYPE[l.type] || 'אירוע', date: l.event_date,
       showFrom: l.show_from || addDays(l.event_date, -10), showUntil: l.show_until || addDays(l.event_date, 3), note: l.text_he || '', photo: l.photo_mode || 'crm', photoSrc: l.photo_url || null })),
     events: (must(events, 'events') as Row[]).map(e => { const st0 = new Date(e.starts_at), en = e.ends_at ? new Date(e.ends_at) : new Date(st0.getTime() + 60 * 60e3);
-      return { id: e.id, title: e.title, date: isoDateIL(st0), start: timeIL(st0), end: timeIL(en), place: e.place || '', big: !!e.takeover }; }),
+      return { id: e.id, title: e.title, date: isoDateIL(st0), start: timeIL(st0), end: timeIL(en), place: e.place || '', big: !!e.takeover, photo: e.photo_url || null }; }),
     // The wall's ticker ("אירועים והזדמנויות") items kept in the database; the newsletter adds its own on top.
     ticker: (must(ticker, 'ticker') as Row[]).filter(t => (t.ends_on || t.starts_on) >= today)
       .map(t => ({ id: t.id, name: t.name, kind: t.kind || 'אירוע', start: t.starts_on, end: t.ends_on || null, place: t.place_he || '', url: t.url || '' })),
@@ -190,6 +190,7 @@ const LifeInput = z.object({
 });
 const EventInput = z.object({
   id: UUID.optional(), title: z.string().trim().min(2).max(80), date: DATE, start: TIME, end: TIME, place: z.string().trim().max(60).optional(), big: z.boolean().optional(),
+  photo: z.string().url().nullable().optional(),   // left out: an edit keeps the event's picture
 });
 const TickerInput = z.object({
   id: UUID.optional(), name: z.string().trim().min(2, 'כתבו שם').max(120), kind: z.enum(['אירוע', 'הזדמנות']).default('אירוע'),
@@ -343,6 +344,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     assertRealDate(f.date);
     if (f.end <= f.start) throw new Error('שעת הסיום צריכה להיות אחרי שעת ההתחלה');
     const row: Row = { title: f.title, starts_at: ilToIso(f.date, f.start), ends_at: ilToIso(f.date, f.end), place: f.place || null, takeover: !!f.big };
+    if (f.photo !== undefined) row.photo_url = f.photo;
     let undo: UndoOp, id: string;
     if (f.id) {
       const prev = await rowOf('directorate_events', f.id);
@@ -544,9 +546,9 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     must(await db().from('remote_history').update({ undone_at: new Date().toISOString() }).in('id', rows.map(r => r.id)).select('id'), 'history');
     return { label: rows[rows.length - 1].label };
   },
-  /** A photo for a life event or a person: a shrunk JPEG data URL → public URL in the wall-photos bucket. */
+  /** A photo for a life event, a person or a directorate event: a shrunk JPEG data URL → public URL in the wall-photos bucket. */
   async photo(a) {
-    const { dataUrl, folder } = z.object({ dataUrl: z.string().regex(/^data:image\/(jpeg|png|webp);base64,/).max(2_000_000), folder: z.enum(['life', 'people']).default('life') }).parse(a);
+    const { dataUrl, folder } = z.object({ dataUrl: z.string().regex(/^data:image\/(jpeg|png|webp);base64,/).max(2_000_000), folder: z.enum(['life', 'people', 'events']).default('life') }).parse(a);
     const [, type, b64] = dataUrl.match(/^data:image\/(\w+);base64,(.*)$/)!;
     const path = `${folder}/${randomUUID()}.${type === 'jpeg' ? 'jpg' : type}`;
     const up = await db().storage.from('wall-photos').upload(path, Buffer.from(b64, 'base64'), { contentType: 'image/' + type, upsert: false });

@@ -469,9 +469,10 @@
       let nextTagged = false;
       const directorate = D.directorate.filter((d) => !d.end || Date.parse(d.end) > now).map((d, i) => {
         const tag = d.start && Date.parse(d.start) <= now ? tr('עכשיו', 'NOW') : nextTagged ? '' : ((nextTagged = true), tr('הבא', 'NEXT'));
-        return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
+        return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: d.img ? '62px 58px minmax(0,1fr) auto' : '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
           h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } },
             h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
+          d.img ? h('img', { src: d.img, alt: '', onError: (ev) => { ev.currentTarget.style.visibility = 'hidden'; }, style: { width: 58, height: 58, borderRadius: 14, objectFit: 'cover', background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } }) : null,
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } }, h('span', { style: { fontSize: 17, fontWeight: 500, lineHeight: 1.25, textWrap: 'pretty' } }, d.name), h('span', { style: { fontSize: 13, color: MUTED } }, d.place)),
           h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), h('span', { style: { fontSize: 12, fontWeight: 500, color: '#d4f25c' } }, tag)));
       });
