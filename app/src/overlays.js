@@ -159,7 +159,8 @@ window.makeWallOverlays = (React) => {
       h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27 } },
         h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, tr('עכשיו במנהלת', 'Happening now')),
         h('span', { style: { fontSize: event.img ? 84 : 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
-        h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, event.start + '–' + event.end + (event.place ? ' · ' + event.place : ''))),
+        // `when`: its hours, or its days for an event of several days ('' all day); older moments carry only start/end
+        h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, [event.when != null ? event.when : event.start + '–' + event.end, event.place].filter(Boolean).join(' · '))),
       event.img ? h('img', { src: event.img, alt: '', onError: (ev) => { ev.currentTarget.style.display = 'none'; }, style: { flex: 'none', display: 'block', maxWidth: 760, maxHeight: 760, borderRadius: 28, border: '1px solid rgba(150,190,240,.22)', boxShadow: '0 30px 80px rgba(0,0,0,.55)', animation: 'popIn 1s cubic-bezier(.2,1.4,.4,1) .3s both' } }) : null),
     h('span', { key: 'end', style: { position: 'absolute', bottom: 77, [EN() ? 'left' : 'right']: 134, fontSize: 29, color: '#8b9dbd' } }, tr('יורד לבד ב-', 'Until ') + (until ? fmtHM.format(new Date(until)) : event.end))
   ]);

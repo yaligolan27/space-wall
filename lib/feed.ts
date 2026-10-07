@@ -3,21 +3,26 @@
 //   newsletter part  (issue, summary, featured, news, catColor, catImage, ticker)
 //                    ← latest row in newsletter_issues; empty until the first import (the bundled sample lends only
 //                      the category colours and images, which are style, not content)
-//   directorate      ← directorate_events in the next 7 days that have not ended
-//   people           ← life_events + birthdays computed from people, next 10 days (and 3 back);
+//   directorate      ← directorate_events in the next 7 days that have not ended (the panel's first four)
+//   people           ← life_events in their window + birthdays computed from people, next 10 days (and 3 back);
 //                      only people on the wall (on_wall) and birthdays they agreed to (show_birthday); a life event
-//                      can also name someone outside the people list
+//                      can also name someone outside the people list. The panel's six nearest.
 //   ticker           ← newsletter ticker + industry_events, one item per event, by date, nothing that has ended
 //   launches         ← launches table, empty until the cron has filled it; refreshed here when stale near a launch
+//
+// The people and events panels are worked out by peopleTiles and eventTiles, which the remote uses too (lib/remote-ops.ts
+// snapshot), so it lists exactly what the wall shows.
 import { db, must } from './db.js';
 import { addDays, dayDiff, ilToIso, isoDateIL, nextYearly, shortDate, timeIL } from './dates.js';
 import { endDate } from './newsletter.js';
 import sample from '../app/data/feed.json' with { type: 'json' };
 
-type Settings = { peopleHorizonDays: number; peopleBackDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
+export type Settings = { peopleHorizonDays: number; peopleBackDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
 const DEFAULTS: Settings = { peopleHorizonDays: 10, peopleBackDays: 3, directorateDays: 7, eventsHorizonDays: 120, launchCount: 4 };
+/** Tiles in the wall's people panel and rows in its events panel. */
+export const PEOPLE_TILES = 6, EVENT_ROWS = 4;
 /** settings.feed over the defaults. Production's row calls the people horizon lifeEventsHorizonDays. */
-function feedSettings(raw: any): Settings {
+export function feedSettings(raw: any): Settings {
   const given = { peopleHorizonDays: raw?.lifeEventsHorizonDays, ...raw }, cfg = { ...DEFAULTS };
   for (const k of Object.keys(cfg) as (keyof Settings)[]) { const v = Number(given[k] ?? NaN); if (Number.isFinite(v)) cfg[k] = v; }
   return cfg;
@@ -58,13 +63,91 @@ export function lifeCard(e: any, p: any, today: string) {
   return { type: e.type === 'other' && e.label ? e.label : L.type, color: L.color, name: displayName(p), line: e.text_he || L.line(p, whenWord(e.event_date, today), dayDiff(today, e.event_date)),
     date: shortDate(e.event_date), on: e.event_date, photo, celebrate: e.type !== 'bereavement' };
 }
-/** A life event is on the wall from show_from (default 10 days before) until show_until (default 3 days after). */
+/** How far ahead of its day a life event can start showing. */
+export const LIFE_LEAD_MAX = 60;
+/** A life event is on the wall from show_from (default 10 days before) until show_until (default 3 days after), and
+ *  never more than LIFE_LEAD_MAX days ahead of its day (a show_from left from a date moved a year on). */
+export function lifeWindow(e: any): { from: string; until: string } {
+  const from = e.show_from || addDays(e.event_date, -10), lead = addDays(e.event_date, -LIFE_LEAD_MAX);
+  return { from: from < lead ? lead : from, until: e.show_until || addDays(e.event_date, 3) };
+}
 export function lifeShown(e: any, today: string): boolean {
-  return (e.show_from || addDays(e.event_date, -10)) <= today && today <= (e.show_until || addDays(e.event_date, 3));
+  const w = lifeWindow(e);
+  return w.from <= today && today <= w.until;
 }
 export function birthdayCard(p: any, date: string, today: string) {
   const L = LIFE.birthday;
   return { type: L.type, color: L.color, name: displayName(p), line: L.line(p, whenWord(date, today), dayDiff(today, date)), date: shortDate(date), on: date, photo: p.photo_url || null, celebrate: true };
+}
+/** The wall greets a tile on the full screen (every half hour) from its day to two days after it (app/src/wall.js). */
+export const greetsToday = (c: { celebrate: boolean; on: string }, today: string) => c.celebrate && c.on <= today && today <= addDays(c.on, 2);
+
+// ---- the people and events panels -------------------------------------------------------------------------
+type Db = ReturnType<typeof db>;
+/** What a tile is, for the remote's edit and delete: a life event, a birthday from the people list, or an event. */
+export type WallRef = { kind: 'life'; id: string; personId: string | null } | { kind: 'bday'; personId: string } | { kind: 'event'; id: string };
+export type PeopleTile = ReturnType<typeof lifeCard> & { sort: string; until: string; ref: WallRef };
+
+/** Life events whose time on the wall hasn't passed, with their person; each one's own window decides (lifeShown). */
+export const lifeQuery = (s: Db, today: string) => s.from('life_events').select('*, people(display_name,rank,unit,photo_url,active,on_wall)').eq('approved', true)
+  .or(`show_until.gte.${today},and(show_until.is.null,event_date.gte.${addDays(today, -30)})`).lte('event_date', addDays(today, 400)).order('event_date');
+/** The people whose birthdays the wall celebrates. */
+export const rosterQuery = (s: Db) => s.from('people').select('id,display_name,rank,unit,photo_url,birthday')
+  .eq('active', true).eq('on_wall', true).eq('show_birthday', true).not('birthday', 'is', null);
+/** Directorate events not over yet (one without an end time lasts an hour) that start in the next two months. */
+export const eventsQuery = (s: Db, now: Date, today: string) => s.from('directorate_events').select('*').eq('approved', true)
+  .or(`ends_at.gt.${now.toISOString()},and(ends_at.is.null,starts_at.gt.${new Date(now.getTime() - 3600e3).toISOString()})`)
+  .lt('starts_at', ilToIso(addDays(today, 61), '00:00')).order('starts_at');
+
+/** The people panel: life events in their window and birthdays from the list, nearest first (today's before
+ *  tomorrow's). `shown` fill the panel's tiles and `waiting` are due too but don't fit; `doubles` are life events
+ *  entered twice (same person, wording and day), which show once. */
+export function peopleTiles(life: any[], roster: any[], today: string, cfg: Settings) {
+  const from = addDays(today, -cfg.peopleBackDays), until = addDays(today, cfg.peopleHorizonDays);
+  const all: PeopleTile[] = [], seen = new Set<string>(), doubles: string[] = [];
+  for (const e of life) {
+    // Someone outside the people list carries just a name (life_events.name): no rank or unit, a photo only if uploaded.
+    const named = !e.people && typeof e.name === 'string' && e.name.trim();
+    const p = e.people || (named ? { display_name: named } : null);
+    if (!p || (e.people && (p.active === false || p.on_wall === false))) continue;
+    const windowed = e.show_from || e.show_until;
+    if (windowed ? !lifeShown(e, today) : (e.event_date < from || e.event_date > until)) continue;
+    const key = `${e.type}|${p.display_name}|${e.event_date}`, same = key + '|' + (e.label || '');
+    if (seen.has(same)) { doubles.push(e.id); continue; }
+    seen.add(key); seen.add(same);
+    all.push({ ...lifeCard(e, p, today), sort: e.event_date, until: windowed ? lifeWindow(e).until : addDays(e.event_date, cfg.peopleBackDays),
+      ref: { kind: 'life', id: e.id, personId: e.person_id || null } });
+  }
+  for (const p of roster) {
+    const next = nextYearly(p.birthday.slice(5), from, cfg.peopleHorizonDays + cfg.peopleBackDays);
+    if (!next || seen.has(`birthday|${p.display_name}|${next}`)) continue;
+    all.push({ ...birthdayCard(p, next, today), sort: next, until: addDays(next, cfg.peopleBackDays), ref: { kind: 'bday', personId: p.id } });
+  }
+  all.sort((a, b) => Math.abs(dayDiff(today, a.sort)) - Math.abs(dayDiff(today, b.sort)) || a.sort.localeCompare(b.sort));
+  return { shown: all.slice(0, PEOPLE_TILES), waiting: all.slice(PEOPLE_TILES), doubles };
+}
+
+/** When a directorate event ends: its end time, else an hour after it starts. */
+export const eventEnd = (e: any) => (e.ends_at ? Date.parse(e.ends_at) : Date.parse(e.starts_at) + 3600e3);
+/** The events panel: events of the next `directorateDays` days that haven't ended (within their own show_from and
+ *  show_until, when set). `shown` are the panel's rows and `waiting` don't fit. */
+export function eventTiles(rows: any[], t: number, today: string, cfg: Settings) {
+  const until = Date.parse(ilToIso(addDays(today, cfg.directorateDays + 1), '00:00'));
+  const due = rows.filter(e => eventEnd(e) > t && Date.parse(e.starts_at) < until && (!e.show_from || e.show_from <= today) && (!e.show_until || e.show_until >= today));
+  return { shown: due.slice(0, EVENT_ROWS), waiting: due.slice(EVENT_ROWS) };
+}
+
+/** The people and events panels as the wall shows them now, with what each tile is: for the remote. */
+export async function wallPanels(now = new Date()) {
+  const s = db(), today = isoDateIL(now);
+  const [setR, lifeR, rosterR, dirR] = await Promise.all([
+    s.from('settings').select('value').eq('key', 'feed').maybeSingle(), lifeQuery(s, today), rosterQuery(s), eventsQuery(s, now, today)]);
+  const cfg = feedSettings((must(setR, 'settings') as { value?: unknown } | null)?.value);
+  return {
+    today,
+    people: peopleTiles(must(lifeR, 'life_events') as any[], must(rosterR, 'people') as any[], today, cfg),
+    events: eventTiles(must(dirR, 'directorate_events') as any[], now.getTime(), today, cfg),
+  };
 }
 
 // ---- ticker -----------------------------------------------------------------------------------------
@@ -125,15 +208,7 @@ export async function buildFeed() {
   const [settingsR, issueR, dirR, lifeR, rosterR, indR, launchR, newestR, runR] = await Promise.all([
     s.from('settings').select('key,value,updated_at'),
     s.from('newsletter_issues').select('content,imported_at').order('issue_date', { ascending: false }).limit(1),
-    // Not over yet; an event without an end time lasts an hour.
-    s.from('directorate_events').select('*').eq('approved', true)
-      .or(`ends_at.gt.${now.toISOString()},and(ends_at.is.null,starts_at.gt.${new Date(t - 3600e3).toISOString()})`)
-      .lt('starts_at', ilToIso(addDays(today, 61), '00:00')).order('starts_at'),
-    // Wide fetch, then each event's own window decides (events added from the remote carry show_from/show_until).
-    s.from('life_events').select('*, people(display_name,rank,unit,photo_url,active,on_wall)').eq('approved', true)
-      .gte('event_date', addDays(today, -30)).lte('event_date', addDays(today, 60)).order('event_date'),
-    s.from('people').select('display_name,rank,unit,photo_url,birthday').eq('active', true).eq('on_wall', true).eq('show_birthday', true)
-      .not('birthday', 'is', null),
+    eventsQuery(s, now, today), lifeQuery(s, today), rosterQuery(s),
     s.from('industry_events').select('*').eq('approved', true).or(`ends_on.gte.${today},starts_on.gte.${today}`).order('starts_on'),
     launchQuery(),
     s.from('launches').select('updated_at').order('updated_at', { ascending: false }).limit(1),
@@ -156,40 +231,17 @@ export async function buildFeed() {
   };
   if (!base.featured.length) base.featured = base.news.slice(0, 6).map((_: unknown, i: number) => i);
 
-  // ---- directorate events, next 7 days: the ones still to come or running, filtered before the panel's four
-  const endOf = (e: any) => (e.ends_at ? Date.parse(e.ends_at) : Date.parse(e.starts_at) + 3600e3);
-  const dirUntil = Date.parse(ilToIso(addDays(today, cfg.directorateDays + 1), '00:00'));
-  const directorate = (must(dirR, 'directorate_events') as any[])
-    .filter(e => endOf(e) > t && Date.parse(e.starts_at) < dirUntil && (!e.show_from || e.show_from <= today) && (!e.show_until || e.show_until >= today))
-    .slice(0, 4).map(e => {
-      const d = new Date(e.starts_at), iso = isoDateIL(d), tm = timeIL(d);
-      return { day: iso.slice(8, 10), dow: dowOf(iso), mon: MON[Number(iso.slice(5, 7)) - 1], time: tm === '00:00' ? '' : tm, name: e.title, place: e.place || '',
-        start: d.toISOString(), end: new Date(endOf(e)).toISOString(), img: e.photo_url || null };
-    });
+  // ---- directorate events, next 7 days: the ones still to come or running, the panel's four
+  // An all-day one has no hour; one of several days says its days instead ("21–23.10").
+  const directorate = eventTiles(must(dirR, 'directorate_events') as any[], t, today, cfg).shown.map(e => {
+    const d = new Date(e.starts_at), iso = isoDateIL(d), tm = timeIL(d), en = new Date(eventEnd(e)), last = timeIL(en) === '00:00' ? addDays(isoDateIL(en), -1) : isoDateIL(en);
+    return { day: iso.slice(8, 10), dow: dowOf(iso), mon: MON[Number(iso.slice(5, 7)) - 1], time: tm !== '00:00' ? tm : last > iso ? range(iso, last) : '', name: e.title, place: e.place || '',
+      start: d.toISOString(), end: new Date(eventEnd(e)).toISOString(), img: e.photo_url || null };
+  });
 
-  // ---- people: explicit life events + computed birthdays
-  const from = addDays(today, -cfg.peopleBackDays), until = addDays(today, cfg.peopleHorizonDays);
-  const life = must(lifeR, 'life_events') as any[];
-  const people: any[] = [];
-  const seen = new Set<string>();
-  for (const e of life) {
-    // Someone outside the people list carries just a name (life_events.name): no rank or unit, a photo only if uploaded.
-    const named = !e.people && typeof e.name === 'string' && e.name.trim();
-    const p = e.people || (named ? { display_name: named } : null);
-    if (!p || (e.people && (p.active === false || p.on_wall === false))) continue;
-    const windowed = e.show_from || e.show_until;
-    if (windowed ? !lifeShown(e, today) : (e.event_date < from || e.event_date > until)) continue;
-    seen.add(`${e.type}|${p.display_name}|${e.event_date}`);
-    people.push({ ...lifeCard(e, p, today), sort: e.event_date });
-  }
-  for (const p of must(rosterR, 'people') as any[]) {
-    const next = nextYearly(p.birthday.slice(5), from, cfg.peopleHorizonDays + cfg.peopleBackDays);
-    if (!next || seen.has(`birthday|${p.display_name}|${next}`)) continue;
-    people.push({ ...birthdayCard(p, next, today), sort: next });
-  }
-  // Nearest first, today's before tomorrow's; cap to the six tiles the panel holds.
-  people.sort((a, b) => Math.abs(dayDiff(today, a.sort)) - Math.abs(dayDiff(today, b.sort)) || a.sort.localeCompare(b.sort));
-  const peopleOut = people.slice(0, 6).map(({ sort, ...p }) => p);
+  // ---- people: explicit life events + computed birthdays, the panel's six tiles
+  const peopleOut = peopleTiles(must(lifeR, 'life_events') as any[], must(rosterR, 'people') as any[], today, cfg).shown
+    .map(({ sort, until, ref, ...p }) => p);
 
   // ---- ticker: industry events from the database, then the newsletter's items that are not the same event
   const evUntil = addDays(today, cfg.eventsHorizonDays);
