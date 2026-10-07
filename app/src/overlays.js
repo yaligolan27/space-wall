@@ -641,13 +641,16 @@ window.makeWallOverlays = (React) => {
             h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 140 : 230, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
             h('div', { style: { position: 'relative', fontSize: en ? 140 : 230, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember')));
           const date = (size, extra) => h('div', { dir: 'ltr', style: rise(1600, 4200, Object.assign({ fontFamily: LEX, fontSize: size, fontWeight: 500, lineHeight: 1, letterSpacing: '.03em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, tr('7/10', 'Oct 7'));
-          if (below) return h('div', { style: { marginTop: 22 } }, title, date(en ? 76 : 96, { marginTop: 18, textAlign: en ? 'left' : 'right' }));
-          return h('div', { style: { marginTop: 22, display: 'flex', alignItems: 'center', gap: 44 } },
+          // the gold rule under the title runs the full width of the title row (date included)
+          const rule = (w) => h('div', { style: { marginTop: 28, width: w, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.5) 70%, rgba(233,184,114,.15))`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } });
+          if (below) return h('div', { style: { marginTop: 22 } }, title, date(en ? 76 : 96, { marginTop: 18, textAlign: en ? 'left' : 'right' }), rule(520));
+          return h('div', { style: { marginTop: 22, display: 'flex', flexDirection: 'column', alignItems: 'stretch' } },
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 44 } },
             title,
             h('div', { style: { width: 2, height: 190, flex: 'none', background: 'linear-gradient(180deg, transparent, rgba(233,184,114,.9) 30%, rgba(233,184,114,.9) 70%, transparent)', animation: 'mmTitleIn 1600ms ease 3800ms both' } }),
-            date(170, { marginTop: 22 }));
+            date(170, { marginTop: 22 })),
+            rule('100%'));
         })(),
-        h('div', { style: { marginTop: 28, width: 520, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.35) 60%, transparent)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } }),
         h('div', { style: rise(1200, 4400, { marginTop: 28, fontSize: 36, fontWeight: 300, lineHeight: 1.42, color: '#ece4d6', maxWidth: 900, textWrap: 'pretty' }) },
           tr('עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
             'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.')),
