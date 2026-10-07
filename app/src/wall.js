@@ -288,6 +288,7 @@
       // (a minute past its server end, so the server's "none" leads into the entrance rather than schedule() cutting it)
       else if (tk.kind === 'welcome') this.welcomeUp({ id: tk.id, live: true, guest: tk.guest || '', until: until + 60e3 });
       else if (tk.kind === 'image' && tk.url) this.setState({ ov: { kind: 'image', id: tk.id, live: true, url: tk.url, caption: tk.caption || '', captionEn: tk.captionEn || '', until } });
+      else if (tk.kind === 'scene' && tk.html) this.setState({ ov: { kind: 'scene', id: tk.id, live: true, html: tk.html, until } });
       else if (tk.kind === 'stream' && tk.videoId) this.setState({ ov: { kind: 'stream', id: tk.id, live: true, videoId: tk.videoId, title: tk.title || '', until } });
       else if (tk.kind === 'news') { const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: tk.id, live: true, item, secs: Math.max(5, Math.round((until - now) / 1000)), until } }); }
       else if (tk.kind === 'memorial') this.setState({ ov: { kind: 'memorial', id: tk.id, live: true, until } });
@@ -610,6 +611,7 @@
       if (ov && ov.kind === 'image') el = h(O.ImageMoment, { key: mk, url: ov.url, caption: (EN() && ov.captionEn) || ov.caption });
       // The remote's preview (often a phone) shows a card for a stream instead of loading the video player.
       if (ov && ov.kind === 'stream') el = h(O.LiveStream, { key: mk, videoId: ov.videoId, title: ov.title, preview: CFG.preview });
+      if (ov && ov.kind === 'scene') el = h(O.CustomScene, { key: mk, html: ov.html, store: (this.state.live && this.state.live.store) || '' });
       if (ov && ov.kind === 'news') el = h(O.NewsMoment, { key: mk, item: ov.item, secs: ov.secs, qr: CFG.showQr && ov.item.url ? qrData(ov.item.url) : '', fx: CFG.ambientFx });
       // Every moment but the welcome (which has its own) comes and goes with the shared transition.
       if (el && !wlUp && !isMemorial(ov) && O.Moment) el = h(O.Moment, { key: 'mv' + mk, out: !!ov.out, fx: M().fx }, el);
@@ -802,7 +804,7 @@
       const rightFirst = EN() ? 3800 : 3200, leftFirst = EN() ? 3200 : 3800;   // the physical right column is "r" in Hebrew, "l" in English
       const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
         h('div', { 'data-w': 'stage', dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) ' + (hidden('ticker') ? '0px ' : '50px ') + (hidden('launches') ? '16px' : '118px') } },
-          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers, h(React.Fragment, { key: 'fx' }, !asm && !(wlUp && this.state.covered) ? this.ambientFx() : null)),
+          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers, h(React.Fragment, { key: 'decor' }, this.decorLayer()), h(React.Fragment, { key: 'fx' }, !asm && !(wlUp && this.state.covered) ? this.ambientFx() : null)),
           h(React.Fragment, { key: 'sv' }, this.streamLayer()), h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
       const ago = D && this.updatedAgo(D);
       const dot = ago && h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
@@ -902,6 +904,16 @@
         launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), Object.assign({ gridColumn: '2 / -1' }, enW('wlFootIn', 1800, 5900))));
 
       return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer]);
+    }
+    /** The remote's agent's decoration layer (design.decor, app/src/custom-doc.js): a transparent page over the home wall,
+     *  under the full-screen moments and the urgent banner, that never takes a click. ?css=0 leaves it out. */
+    decorLayer() {
+      const L = this.state.live, d = L && L.design && L.design.decor;
+      if (!d || !d.html || CFG.noCss || !window.customDoc) return null;
+      const k = d.id + '|' + CFG.lang + '|' + (L.store || '');
+      if (this._decK !== k) { this._decK = k; this._decDoc = window.customDoc(d.html, { store: L.store, lang: CFG.lang, transparent: true }); }
+      return h('iframe', { key: d.id, srcDoc: this._decDoc, sandbox: 'allow-scripts', title: 'decorations', tabIndex: -1, 'data-w': 'decor',
+        style: { position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, border: 0, zIndex: 30, background: 'transparent', colorScheme: 'normal', pointerEvents: 'none' } });
     }
     /** From the remote: the urgent banner on top, and brightness as a dimming layer over everything. */
     liveLayers() {

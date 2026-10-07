@@ -673,6 +673,12 @@ window.makeWallOverlays = (React) => {
     caption ? h('div', { key: 'cap', style: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: '120px 120px 70px', background: 'linear-gradient(0deg, rgba(2,5,12,.92), rgba(2,5,12,0))', fontSize: 52, fontWeight: 700, lineHeight: 1.2, textAlign: 'center', textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, caption) : null
   ]);
 
+  // ---------- a screen the remote's agent made (app/src/custom-doc.js): its own page in a sandboxed frame ----------
+  const CustomScene = ({ html, store }) => shell([
+    h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#040914' } }),
+    h('iframe', { key: 'f', srcDoc: window.customDoc ? window.customDoc(html, { store, lang: window.wallLang }) : '', sandbox: 'allow-scripts', title: 'screen', tabIndex: -1,
+      style: { position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, border: 0, background: 'transparent', pointerEvents: 'none' } })]);
+
   // ---------- a live stream (a launch's webcast) on the whole wall: YouTube, muted, until the remote ends it ----------
   // In the remote's preview a card stands in for the player, so a phone never loads the video.
   const LiveStream = ({ videoId, title, preview }) => {
@@ -733,5 +739,5 @@ window.makeWallOverlays = (React) => {
       out ? null : h('div', { key: 'edge', style: { position: 'absolute', inset: 14, zIndex: 2, borderRadius: 30, border: '1px solid rgba(212,242,92,.7)', pointerEvents: 'none', animation: 'wlEdge 1200ms ease 700ms both' } }));
   };
 
-  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, NewsMoment, Moment, Memorial, Candle };
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, CustomScene, NewsMoment, Moment, Memorial, Candle };
 };

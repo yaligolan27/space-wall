@@ -15,7 +15,7 @@
       "maxDuration": 60
     },
     "api/remote.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "api/live.ts": {
       "maxDuration": 15
@@ -37,6 +37,15 @@
         {
           "key": "Cache-Control",
           "value": "s-maxage=4, stale-while-revalidate=10"
+        }
+      ]
+    },
+    {
+      "source": "/assets/fonts/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
         }
       ]
     }
