@@ -627,7 +627,7 @@ window.makeWallOverlays = (React) => {
           h('div', { style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K } },
             h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, part: 'flame' })))),
       // the words
-      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 214, width: 900, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }, side) },
+      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 118, width: 920, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }, side) },
         h('div', { style: rise(1200, 2200, { display: 'flex', alignItems: 'center', gap: 22 }) },
           h('div', { style: { position: 'relative', width: 92, height: 92, flex: 'none' } },
             h('div', { style: { position: 'absolute', inset: -9, borderRadius: '50%', border: '1px dashed rgba(233,184,114,.4)', animation: fx ? 'spin 40s linear infinite' : 'none' } }),
@@ -635,15 +635,18 @@ window.makeWallOverlays = (React) => {
               h('img', { src: '/assets/logo-mark.png', alt: '', style: { position: 'absolute', left: '50%', top: '50%', width: 96, height: 'auto', marginLeft: -50.5, marginTop: -41.4, clipPath: 'inset(0 0 23% 0)' } }))),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
             h('span', { style: { fontSize: 30, fontWeight: 700, color: '#e8dcc6', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
-            h('span', { style: { fontFamily: MONO, fontSize: 17, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('שלוש שנים · 7.10', 'THREE YEARS · 7.10')))),
-        h('div', { style: { position: 'relative', marginTop: 34, lineHeight: 1 } },
-          h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 150 : 270, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 2900ms both${fx ? ', mmTitleGlow 6s ease-in-out 5300ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
-          h('div', { style: { position: 'relative', fontSize: en ? 150 : 270, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2700ms both' } }, tr('יזכור', 'We Remember'))),
-        h('div', { style: { marginTop: 30, width: 520, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.35) 60%, transparent)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 3900ms both' } }),
-        h('div', { style: rise(1200, 4300, { marginTop: 32, fontSize: 40, fontWeight: 300, lineHeight: 1.4, color: '#ece4d6', maxWidth: 880 }) },
-          en ? 'The Space Program Office remembers those murdered and fallen on October 7 and in the war that followed.' : ['מנהלת החלל מתייחדת עם זכרם של הנרצחים והנופלים', h('br', { key: 'br' }), 'במתקפת השבעה באוקטובר ובמלחמה']),
-        h('div', { style: rise(1200, 4900, { marginTop: 26, fontSize: 34, fontWeight: 500, color: '#e9b872' }) }, tr('יהי זכרם ברוך', 'May their memory be a blessing')),
-        h('div', { dir: 'ltr', style: rise(1200, 5400, { marginTop: 22, fontFamily: MONO, fontSize: 20, letterSpacing: '.22em', color: 'rgba(200,184,156,.7)', unicodeBidi: 'plaintext' }) }, tr('7.10.2023 · כ״ב בתשרי תשפ״ד', 'OCTOBER 7, 2023'))));
+            h('span', { style: { fontFamily: MONO, fontSize: 17, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL')))),
+        // the date, large, then the title
+        h('div', { dir: 'ltr', style: rise(1600, 2500, { marginTop: 26, fontFamily: LEX, fontSize: 180, fontWeight: 300, lineHeight: 1, letterSpacing: '.02em', color: '#e9b872', textShadow: '0 0 50px rgba(233,160,80,.35)', unicodeBidi: 'plaintext' }) }, tr('7.10', 'Oct 7')),
+        h('div', { style: { position: 'relative', marginTop: 8, lineHeight: 1 } },
+          h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 140 : 230, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
+          h('div', { style: { position: 'relative', fontSize: en ? 140 : 230, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember'))),
+        h('div', { style: { marginTop: 28, width: 520, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.35) 60%, transparent)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } }),
+        h('div', { style: rise(1200, 4400, { marginTop: 28, fontSize: 36, fontWeight: 300, lineHeight: 1.42, color: '#ece4d6', maxWidth: 900, textWrap: 'pretty' }) },
+          tr('עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
+            'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.')),
+        h('div', { style: rise(1200, 5000, { marginTop: 24, fontSize: 32, fontWeight: 500, color: '#e9b872' }) }, tr('מנהלת החלל מרכינה ראש · יהי זכרם ברוך', 'The Space Program Office bows its head · May their memory be a blessing')),
+        h('div', { style: rise(1200, 5500, { marginTop: 18, fontFamily: MONO, fontSize: 19, letterSpacing: '.18em', color: 'rgba(200,184,156,.7)' }) }, tr('כ״ב בתשרי תשפ״ד · 7.10.2023', 'OCTOBER 7, 2023'))));
   };
 
   // ---------- small toast (e.g. "שוגר") ----------
