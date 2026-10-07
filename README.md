@@ -31,8 +31,9 @@ project/, chats/  the original Claude Design handoff bundle
 2. **The remote** (`/remote/?t=<REMOTE_TOKEN>`, `app/remote/`) is the button-first way to run the wall day to day:
    full-screen moments now (the 12:00 show, a greeting, an important event), personal and directorate events,
    ticker items, the newsletter link, the urgent banner, brightness and the wall's design. Its "אנשים" tab is
-   the people list: add, edit, delete, import from Excel (including the Google Form's response sheet) and
-   export. Every change is stored in `remote_history` with its undo operations. Its agent panel ("סוכן הצג",
+   the people list: add, edit, delete, import from Excel (including the Google Form's response sheet), import
+   photos (picked, or the zip of the form's photo folder; whose each is, is guessed from the file name by
+   `app/remote/photo-match.js`) and export. Every change is stored in `remote_history` with its undo operations. Its agent panel ("סוכן הצג",
    `lib/remote-agent.ts`) carries out free-text requests on the server: Claude through the Anthropic API, with
    the remote's own operations as tools, so one tap undoes everything a request changed. It needs an API key,
    which an operator pastes once in the remote. The wall reads the live part from `/api/live` every 5 seconds.

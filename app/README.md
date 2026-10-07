@@ -91,9 +91,9 @@ manifest.webmanifest  installs the wall as an app (icons: assets/app-icon-192.pn
 styles.css            keyframes and globals, verbatim from the design
 src/wall.js           the wall (React, no JSX)
 src/overlays.js       full-screen moments: launch mode, celebration, 12:00 show, important event, toast
-remote/               the remote control (/remote): index.html, remote.js (React, no JSX), wall.webp (preview backdrop)
+remote/               the remote control (/remote): index.html, remote.js (React, no JSX), photo-match.js (whose photo, by file name), wall.webp (preview backdrop)
 src/emblem-v2.js      <space-emblem-v2>, the 3D emblem (three.js)
 data/feed.json        sample feed = the design's own week
 assets/               logo, promo video, category images, Earth textures, fonts (Heebo, Lexend, IBM Plex Mono, Open Sans)
-vendor/               react, react-dom, three.module.js, qrcode.js
+vendor/               react, react-dom, three.module.js, qrcode.js; jszip.min.js and heic2any.min.js, loaded by the remote's photo import only when needed
 ```
