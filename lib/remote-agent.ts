@@ -118,7 +118,7 @@ const compact = (o: Row) => Object.fromEntries(Object.entries(o).filter(([, v]) 
 export function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string, launches: Row[] = []): string {
   const now = new Date(s.now), byId = new Map(s.people.map(p => [p.id, p]));
   const tk = (s.takeover?.leaving ? null : s.takeover) as Row | null;   // a welcome on its way out (the entrance) is over
-  const tkText = !tk ? null : (tk.kind === 'noon' ? 'סרטון תדמית' : tk.kind === 'welcome' ? 'מסך ברוכים הבאים, עד שלוחצים "כניסה לצג הבית" (end)' : tk.kind === 'event' ? 'מודעה מנהלת: ' + tk.title : tk.kind === 'image' ? 'תמונה' + (tk.caption ? ': ' + tk.caption : '') : tk.kind === 'stream' ? 'שידור חי' + (tk.title ? ': ' + tk.title : '') : tk.kind === 'news' ? 'חדשות החלל' : 'מודעה אישית: ' + (tk.person?.name || '') + (tk.type ? ' · ' + tk.type : ''))
+  const tkText = !tk ? null : (tk.kind === 'noon' ? 'סרטון תדמית' : tk.kind === 'welcome' ? 'מסך ברוכים הבאים, עד שלוחצים "כניסה לצג הבית" (end)' : tk.kind === 'memorial' ? 'מסך יזכור (end מחזיר לצג הבית)' : tk.kind === 'event' ? 'מודעה מנהלת: ' + tk.title : tk.kind === 'image' ? 'תמונה' + (tk.caption ? ': ' + tk.caption : '') : tk.kind === 'stream' ? 'שידור חי' + (tk.title ? ': ' + tk.title : '') : tk.kind === 'news' ? 'חדשות החלל' : 'מודעה אישית: ' + (tk.person?.name || '') + (tk.type ? ' · ' + tk.type : ''))
     + ' (עד ' + timeIL(new Date(tk.until)) + ')';
   const data = {
     screen: {
@@ -364,9 +364,9 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'show_fullscreen',
-    description: 'הצגה עכשיו על כל המסך. welcome: מסך "WELCOME TO THE SPACE PROGRAM OFFICE" לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה (guest: שורה אופציונלית מתחת לכותרת, למשל "Delegation of Japan"). noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. news: חדשות החלל, הידיעה המרכזית הבאה מהניוזלטר. end: חזרה לתצוגה הרגילה.',
+    description: 'הצגה עכשיו על כל המסך. welcome: מסך "WELCOME TO THE SPACE PROGRAM OFFICE" לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה (guest: שורה אופציונלית מתחת לכותרת, למשל "Delegation of Japan"). noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. news: חדשות החלל, הידיעה המרכזית הבאה מהניוזלטר. memorial: מסך יזכור (רק ביום זיכרון, למשל 7-8 באוקטובר 2026), ל-15 דקות. end: חזרה לתצוגה הרגילה.',
     input_schema: obj({
-      what: { type: 'string', enum: ['welcome', 'noon', 'celebration', 'event', 'news', 'end'] },
+      what: { type: 'string', enum: ['welcome', 'noon', 'celebration', 'event', 'news', 'memorial', 'end'] },
       guest: { type: 'string', description: 'למסך ברוכים הבאים: למי (לא חובה)' },
       person_id: id('למודעת יום הולדת'), life_event_id: id('למודעה על שמחה'), event_id: id('לאירוע מלוח האירועים'),
     }, ['what']),
@@ -377,7 +377,8 @@ export const TOOLS: Tool[] = [
       else if (a.what === 'event') await ACTIONS.showEvent({ eventId: a.event_id }, ctx.who);
       else if (a.what === 'celebration') await ACTIONS.celebrate({ personId: a.person_id, lifeId: a.life_event_id }, ctx.who);
       else if (a.what === 'news') await ACTIONS.showNews({}, ctx.who);
-      else throw new Error('what: welcome, noon, celebration, event, news או end');
+      else if (a.what === 'memorial') await ACTIONS.memorial({ show: true }, ctx.who);
+      else throw new Error('what: welcome, noon, celebration, event, news, memorial או end');
       return ok();
     },
   },

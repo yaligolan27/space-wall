@@ -433,6 +433,7 @@
       if (!tk) return '';
       if (tk.kind === 'noon') return 'סרטון תדמית';
       if (tk.kind === 'welcome') return 'ברוכים הבאים' + (tk.guest ? ' · ' + tk.guest : '');
+      if (tk.kind === 'memorial') return 'יזכור';
       if (tk.kind === 'event') return tk.title;
       if (tk.kind === 'image') return 'תמונה' + (tk.caption ? ' · ' + tk.caption : '');
       if (tk.kind === 'stream') return 'שידור חי' + (tk.title ? ' · ' + tk.title : '');
@@ -461,6 +462,7 @@
     showCeleb(x) { this.run('celebrate', { personId: x.person.free ? null : x.person.id, lifeId: x.lifeId }, 'מודעה אישית על כל המסך: ' + dn(x.person)).catch(() => {}); }
     showEvent(e) { this.run('showEvent', { eventId: e.id }, 'על כל המסך: ' + e.title).catch(() => {}); }
     endTk() { const w = (this.takeover() || {}).kind === 'welcome'; this.run('endTakeover', {}, w ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה').catch(() => {}); }
+    memorial(a, label) { this.run('memorial', a, label).catch(() => {}); }
     showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
     showNews() { this.run('showNews', {}, 'חדשות החלל על כל המסך').catch(() => {}); }
     /** The schedules: shown at once, saved in the background (the wall picks them up within seconds). */
@@ -475,8 +477,11 @@
       };
       const onOff = (group, name) => ({ sw: sw(mo[group].on), toggle: () => this.setMoment(group, 'on', !mo[group].on, name + (mo[group].on ? ': כבוי' : ': פעיל')) });
       const every = (group, name) => pick('כל כמה זמן', group, 'every', mo[group].every, [10, 15, 20, 30, 45, 60, 90, 120], minLbl, (t) => name + ' כל ' + t);
-      const ev = mo.event, evAll = !ev.every;
+      const ev = mo.event, evAll = !ev.every, mem = this.D && this.D.memorial;
       return [
+        // (Yizkor keeps its own fixed times, from the server's MEMORIALS; here it can only be ended or brought back)
+        mem ? { key: 'memorial', title: 'יזכור', sub: mem.on ? 'מסך היזכור עולה לבד ל-5 דקות בתחילת כל שעה, 08:00–20:00 (' + mem.label + '). היום חדשות החלל, המודעות האישיות וסרטון התדמית לא עולים לבד' : 'היזכור כבוי בצג', sw: sw(mem.on),
+          toggle: () => this.memorial({ on: !mem.on }, mem.on ? 'סיום היזכור בצג' : 'היזכור חזר לצג'), selects: [] } : null,
         Object.assign({ key: 'news', title: 'חדשות החלל', sub: mo.news.on ? 'הידיעה המרכזית הבאה מהניוזלטר עולה לבד כל ' + minLbl(mo.news.every) + ', באמצע הזמן שבין המודעות האישיות' : 'כבוי: עולה רק בלחיצה על "חדשות החלל"',
           selects: mo.news.on ? [every('news', 'חדשות החלל'), pick('נשאר על המסך', 'news', 'secs', mo.news.secs, [15, 20, 30, 45, 60, 90, 120], secLbl, (t) => 'חדשות החלל ל-' + t)] : [],
           btn: { label: 'להציג עכשיו', go: () => this.showNews() } }, onOff('news', 'חדשות החלל')),
@@ -493,7 +498,7 @@
           selects: mo.launch.on ? [pick('מתחיל לפני השיגור', 'launch', 'lead', mo.launch.lead, [3, 5, 10, 15, 20, 30], minLbl, (t) => 'מצב שיגור ' + t + ' לפני')] : [] }, onOff('launch', 'מצב שיגור')),
         { key: 'welcome', title: 'ברוכים הבאים', sub: 'עולה רק מהשלט. אפשר לקבוע שייכנס לצג הבית לבד אחרי זמן מסוים', sw: null,
           selects: [pick('נשאר על המסך', 'welcome', 'auto', mo.welcome.auto, [0, 15, 30, 60, 120, 240], (x) => (x ? minLbl(x) : 'עד שלוחצים "כניסה"'), (t) => 'ברוכים הבאים: ' + t)] },
-      ];
+      ].filter(Boolean);
     }
     setMoment(group, field, value, label) {
       const patch = field ? { [group]: { [field]: value } } : { [group]: value };
@@ -812,8 +817,12 @@
 
       const nextEv = todayEvents.find((e) => toMin(e.end) > nm);
       const nl = D && D.newsletter;
+      // Yizkor, on a memorial day (the server's MEMORIALS): the screen now, or Yizkor off (and back) for the rest of it.
+      const mem = D && D.memorial, memItems = !mem ? [] : [
+        { label: tkK === 'memorial' ? 'חזרה לצג הבית' : 'מסך יזכור', sub: tkK === 'memorial' ? 'מסך היזכור מוצג · הנר עובר לצג הבית' : mem.on ? 'עולה לבד בתחילת כל שעה · ' + mem.label : 'היזכור כבוי היום · לחיצה מחזירה אותו', dot: '#e9b872', bg: 'rgba(233,184,114,.12)', border: 'rgba(233,184,114,.55)', go: () => (tkK === 'memorial' ? this.endTk() : this.memorial({ show: true }, 'מסך יזכור על כל המסך')) }];
+      const memMore = !mem ? [] : [{ label: mem.on ? 'סיום היזכור' : 'החזרת היזכור', sub: mem.on ? 'נר יזכור קטן בצג הבית · ' + mem.label : 'היזכור כבוי בצג', dot: '#e9b872', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.memorial({ on: !mem.on }, mem.on ? 'סיום היזכור בצג' : 'היזכור חזר לצג') }];
       const actGroups = [
-        { title: 'להציג עכשיו על כל המסך', items: [
+        { title: 'להציג עכשיו על כל המסך', items: [...memItems,
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
           { label: tkK === 'news' ? 'חזרה מהחדשות' : 'חדשות החלל', sub: tkK === 'news' ? 'מוצג עכשיו' : 'הידיעה המרכזית הבאה מהניוזלטר' + (mo.news.on ? ' · עולה לבד כל ' + minLbl(mo.news.every) : ''), dot: '#6fd6ea', bg: 'rgba(111,214,234,.09)', border: 'rgba(111,214,234,.4)', go: () => (tkK === 'news' ? this.endTk() : this.showNews()) },
           { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : design.noon ? 'עולה לבד ב-' + mo.noon.at : 'האוטומציה כבויה', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
@@ -827,6 +836,7 @@
         { title: 'עוד', items: [
           { label: design.lang === 'en' ? 'חזרה לעברית' : 'הצג באנגלית', sub: s.langBusy ? 'מתרגם את הצג…' : design.lang === 'en' ? 'הצג מוצג עכשיו באנגלית' : 'כל הצג באנגלית, למשלחות מחו״ל', dot: '#7fe0c4', bg: design.lang === 'en' ? 'rgba(127,224,196,.09)' : 'rgba(14,28,58,.55)', border: design.lang === 'en' ? 'rgba(127,224,196,.45)' : 'rgba(150,190,240,.16)', go: () => this.setLang(design.lang === 'en' ? 'he' : 'en') },
           { label: 'תזמונים ואוטומציות', sub: 'מה עולה לבד על כל המסך, כל כמה זמן ולכמה זמן', dot: '#6fd6ea', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('moments') },
+          ...memMore,
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
           { label: 'עיצוב הצג', sub: 'גלובוס ' + (design.globeStyle === 'real' ? 'ריאליסטי' : 'הולוגרפי') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
       ];
@@ -856,7 +866,7 @@
         openHistory: () => this.openSheet('history'),
 
         tkOn: !!tk, tkTitle: this.tkTitle(tk), tkRemain: tk && tkK !== 'welcome' ? 'נותרו ' + mmss(remain) : '', endTk: () => this.endTk(),
-        tkEndLabel: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'חזרה לתצוגה רגילה', tkWelcome: tkK === 'welcome', tkGuest: tkK === 'welcome' ? tk.guest || '' : '',
+        tkEndLabel: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : tkK === 'memorial' ? 'חזרה לצג הבית' : 'חזרה לתצוגה רגילה', tkWelcome: tkK === 'welcome', tkGuest: tkK === 'welcome' ? tk.guest || '' : '',
         tkNoon: tkK === 'noon', tkCeleb: tkK === 'celebrate', tkEvent: tkK === 'event',
         tkPct: tk ? Math.max(0, Math.min(100, (now.getTime() - t0) / (Date.parse(tk.until) - t0) * 100)).toFixed(1) + '%' : '0%',
         tkAv: tkK === 'celebrate' ? { bg: tkP ? colorFor(tkP) : OFF, ini: initials(tkP ? tkP.name : tk.person.name), photoEl: tk.person.photo ? imgEl(tk.person.photo, COVER) : null } : { bg: OFF, ini: '', photoEl: null },
@@ -887,6 +897,7 @@
         addPerson: () => this.openPerson(), pickImport: () => this.importRef.current && this.importRef.current.click(), onImportFile: (e) => this.onImportFile(e),
         impBtn: s.impBusy ? 'קורא את הקובץ…' : 'ייבוא מאקסל', exportPeople: () => this.exportPeople(),
         celebs: cel.map(celRow), hasCelebs: cel.length > 0, noCelebs: cel.length === 0,
+        celebAuto: (mo.celebrate.on ? 'עולות לבד על כל המסך כל ' + minLbl(mo.celebrate.every) : 'לא עולות לבד (כבוי בתזמונים)') + ' · לחיצה מציגה עכשיו',
         hasQuiet: quiet.length > 0, quietNames: quiet.map((x) => dn(x.person)).join(', '),
         todayRows: rows, soonRows,
 
@@ -989,7 +1000,7 @@
         lfPMsg: f.note || (lfT.quiet ? 'משפחת מנהלת החלל משתתפת בצערך' : 'מאחלים המון אושר והצלחה — ממשפחת מנהלת החלל'),
         lfPrevBg: lfT.quiet ? '#0b1120' : 'radial-gradient(circle at 50% 40%, #1b2f5c 0%, #040914 75%)',
         lfQuiet: !!lfT.quiet, lfNotQuiet: !lfT.quiet,
-        lfWindow: lfW ? 'מוצג בפאנל האנשים מ-' + dm(lfW.from) + ' עד ' + dm(lfW.until) + ', ועולה על כל המסך כל חצי שעה מ-' + dm(lfDay) + ' עד ' + dm(lfW.greetUntil) : '',
+        lfWindow: lfW ? 'מוצג בפאנל האנשים מ-' + dm(lfW.from) + ' עד ' + dm(lfW.until) + ', ועולה על כל המסך ' + (mo.celebrate.on ? 'כל ' + minLbl(mo.celebrate.every) : 'מהשלט') + ' מ-' + dm(lfDay) + ' עד ' + dm(lfW.greetUntil) : '',
         lfSaveLabel: sh && sh.mode === 'edit' ? 'שמירת שינויים' : 'שמירה',
         saveLife: () => this.saveLife(false), saveLifeShow: () => this.saveLife(true),
 
@@ -1166,7 +1177,7 @@
           el('div', 'display:flex;flex-direction:column;gap:10px', null,
             el('div', 'display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap', null,
               el('span', 'font-size:15px;font-weight:700', null, 'מודעות אישיות היום'),
-              el('span', 'font-size:12px;color:#8b9dbd', null, 'עולות לבד על כל המסך כל :00 ו-:30 · לחיצה מציגה עכשיו')),
+              el('span', 'font-size:12px;color:#8b9dbd', null, v.celebAuto)),
             v.hasCelebs ? el('div', 'display:flex;flex-wrap:wrap;gap:8px', null, v.celebs.map((c) =>
               el('button', 'display:flex;align-items:center;gap:8px;padding:5px 5px 5px 14px;border-radius:999px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.5);color:#e6f1ff;cursor:pointer;text-align:right', { key: c.key, onClick: c.show },
                 avatarDiv(34, 13, c.av),

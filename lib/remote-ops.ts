@@ -46,6 +46,9 @@ const EVENT_FALLBACK_MS = 30 * 60e3;
 const EVENT_PREVIEW_MS = 10 * 60e3;
 const WELCOME_MS = 12 * 3600e3;   // the welcome screen waits for "enter" (endTakeover); a forgotten one still ends
 const WELCOME_LEAVE_MS = 20e3;    // after "enter": the wall's entrance (about 12 s), during which nothing else takes the screen
+const MEMORIAL_MS = 15 * 60e3;    // the Yizkor screen from the remote; "חזרה לצג הבית" ends it sooner
+const MEMORIAL_AUTO_MIN = 5;      // …and by itself, the first minutes of every hour of a memorial day
+const MEMORIAL_HOURS = [8, 20];   // (Israel time, first and last hour)
 export const HE_TYPE: Record<string, string> = { birthday: 'יום הולדת', wedding: 'חתונה', birth: 'לידה', bereavement: 'אבל', promotion: 'העלאה בדרגה', discharge: 'שחרור', joined: 'קליטה', other: 'אירוע' };
 
 /** Mourning words as whole words (with a ו/ב/ה/ל prefix), so "חתימות" or "השלמות" aren't read as "מות". Same list as the remote's tpl(). */
@@ -140,7 +143,20 @@ function eventSlot(e: Row, M: Moments, t: number): { k: number; until: number } 
   return t < until ? { k, until } : null;
 }
 
-/** What is on the full screen now: a moment started from the remote, else a running important event, else the 12:00 show. */
+// ---- Yizkor: memorial days -----------------------------------------------------------------------------
+// On a memorial day the home wall keeps a small Yizkor (a lit candle) under the emblem all day, and the full Yizkor
+// screen comes up by itself for the first minutes of every hour; the remote can show it, or end Yizkor early (kept in
+// `dismissed` as "memorial:<id>", so it is undoable). The 12:00 promo, the half-hourly celebrations and the space news
+// pause on those days.
+export const MEMORIALS = [{ id: 'oct7-2026', from: '2026-10-07', to: '2026-10-08', label: 'יזכור · 7 באוקטובר' }];
+export function memorialPeriod(now = new Date()) { const d = isoDateIL(now); return MEMORIALS.find(m => m.from <= d && d <= m.to) || null; }
+/** The memorial on the wall now: today's, unless the remote ended it. */
+function memorialNow(st: Row, now: Date) { const m = memorialPeriod(now); return m && !(st.dismissed || []).includes('memorial:' + m.id) ? m : null; }
+/** dismissed, with `id` added: the newest 20 automatic moments, and the memorial ends however many came after them. */
+const withDismissed = (list: string[] = [], id: string) => { const all = [...list.filter(x => x !== id), id]; return [...all.filter(x => x.startsWith('memorial:')), ...all.filter(x => !x.startsWith('memorial:')).slice(-20)]; };
+
+/** What is on the full screen now: a moment started from the remote, else a running important event (as the schedules
+ *  say), else the Yizkor screen at the top of the hour on a memorial day, else the 12:00 show (not on a memorial day). */
 function effectiveTakeover(st: Row, big: Row[], now: Date): Row | null {
   const t = now.getTime(), today = isoDateIL(now), dis = new Set<string>(st.dismissed || []);
   if (st.takeover && Date.parse(st.takeover.until) > t) return st.takeover;
@@ -152,8 +168,14 @@ function effectiveTakeover(st: Row, big: Row[], now: Date): Row | null {
     const tk = evTakeover(e, true, t, slot);
     if (!dis.has(tk.id)) return tk;
   }
+  const mem = memorialNow(st, now);
+  if (mem) {
+    const [hh, mm] = timeIL(now).split(':').map(Number), id = 'memorial:' + today + 'T' + String(hh).padStart(2, '0');
+    if (hh >= MEMORIAL_HOURS[0] && hh <= MEMORIAL_HOURS[1] && mm < MEMORIAL_AUTO_MIN && !dis.has(id))
+      return { id, kind: 'memorial', auto: true, until: ilToIso(today, String(hh).padStart(2, '0') + ':' + String(MEMORIAL_AUTO_MIN).padStart(2, '0')) };
+  }
   const noonAt = Date.parse(ilToIso(today, M.noon.at));
-  if (design.noon && st.noon_skip !== today && !dis.has('noon:' + today) && t >= noonAt && t < noonAt + NOON_MS)
+  if (!mem && design.noon && st.noon_skip !== today && !dis.has('noon:' + today) && t >= noonAt && t < noonAt + NOON_MS)
     return { id: 'noon:' + today, kind: 'noon', auto: true, until: new Date(noonAt + NOON_MS).toISOString() };
   return null;
 }
@@ -168,7 +190,7 @@ export async function live() {
   const design = withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) });
   design.news = liveNews(design.news, now.getTime());
   return { design, brightness: st.brightness ?? 100, urgent: st.urgent || null,
-    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), at: now.toISOString(), build: BUILD };
+    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), memorial: memorialNow(st, now), at: now.toISOString(), build: BUILD };
 }
 
 // ---- snapshot for the remote ------------------------------------------------------------------------
@@ -210,6 +232,7 @@ export async function snapshot() {
     newsletter: issue ? { range: issue.content?.issue?.range || '', url: issue.source_url, count: (issue.content?.news || []).length, at: issue.imported_at } : null,
     state: { design: withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) }), brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
     takeover: effectiveTakeover(st, big, now),
+    memorial: (() => { const m = memorialPeriod(now); return m ? { id: m.id, label: m.label, on: !!memorialNow(st, now) } : null; })(),
     history: (must(hist, 'history') as Row[]).map(h => ({ id: h.id, at: h.at, who: h.who, text: h.label, canRestore: Array.isArray(h.undo) && h.undo.length > 0 })),
   };
 }
@@ -432,10 +455,22 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     if (!tk) return;
     // "Enter" on the welcome screen: kept a few seconds more, marked `leaving`, so every wall plays the entrance (and one
     // opened meanwhile goes straight to the home wall). Pressed again meanwhile: ended at once.
-    const patch: Row = tk.auto ? { dismissed: [...(st.dismissed || []), tk.id].slice(-20) }
+    const patch: Row = tk.auto ? { dismissed: withDismissed(st.dismissed, tk.id) }
       : tk.kind === 'welcome' && !tk.leaving ? { takeover: { ...tk, leaving: now.toISOString(), until: new Date(now.getTime() + WELCOME_LEAVE_MS).toISOString() } }
       : { takeover: null };
-    await record(who, tk.kind === 'welcome' ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה', [await patchState(patch, who)]);
+    await record(who, tk.kind === 'welcome' || tk.kind === 'memorial' ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה', [await patchState(patch, who)]);
+  },
+  /** Yizkor on a memorial day: show: the full Yizkor screen now (and Yizkor back on, if it was ended); on: false ends
+   *  Yizkor on the wall for the rest of the period (with the Yizkor screen, if it is up), on: true brings it back. */
+  async memorial(a, who) {
+    const { show, on } = z.object({ show: z.boolean().optional(), on: z.boolean().optional() }).parse(a || {});
+    const now = new Date(), m = memorialPeriod(now);
+    if (!m) throw new Error('היום אין יזכור בצג');
+    const st = await wallState(), key = 'memorial:' + m.id, dis: string[] = st.dismissed || [], t = now.getTime();
+    const back = { dismissed: dis.filter(x => x !== key) };
+    if (show) return record(who, 'מסך יזכור על כל המסך', [await patchState({ ...back, takeover: { id: 'rt:' + t, kind: 'memorial', until: new Date(t + MEMORIAL_MS).toISOString() } }, who)]);
+    if (on === false) return record(who, 'סיום היזכור בצג', [await patchState({ dismissed: withDismissed(dis, key), ...(st.takeover?.kind === 'memorial' ? { takeover: null } : {}) }, who)]);
+    if (on === true) return record(who, 'היזכור חזר לצג', [await patchState(back, who)]);
   },
   async noonToday(a, who) {
     const { on } = z.object({ on: z.boolean() }).parse(a);
