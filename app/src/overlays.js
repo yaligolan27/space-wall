@@ -593,7 +593,7 @@ window.makeWallOverlays = (React) => {
   // Light on purpose (the lobby computer, phones): CSS animations on transform/opacity, WAAPI for the way out.
   const MM_K = 1.15;
   const Memorial = ({ fx, preview, leaving, target, onDone }) => {
-    const en = EN(), CX = en ? 1380 : 540, CY = 440;
+    const en = EN(), CX = en ? 1520 : 400, CY = 430;
     const r = useRef({}).current, set = (n) => r['_' + n] || (r['_' + n] = (el) => { r[n] = el; });
     const cb = useRef(onDone); cb.current = onDone;
     useEffect(() => {
@@ -630,36 +630,34 @@ window.makeWallOverlays = (React) => {
         h('div', { ref: set('rigFade'), style: { position: 'absolute', inset: 0 } },
           h('div', { style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K } },
             h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, part: 'flame' })))),
-      // the words
-      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 0, bottom: 40, width: 920, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start' }, side) },
+      // the words, in their own column well clear of the candle: the directorate on top, the title and the text in the
+      // middle, the date of the attack at the foot
+      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 92, bottom: 92, width: 900, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-start' }, side) },
         h('div', { style: rise(1200, 2200, { display: 'flex', alignItems: 'center', gap: 22 }) },
           // the directorate's 3D emblem (a still of the wall's own emblem-v2, so no second WebGL scene)
-          h('img', { src: '/assets/emblem-3d.png', alt: '', style: { width: 124, height: 124, flex: 'none', margin: '-16px -8px -16px -12px', filter: 'drop-shadow(0 0 18px rgba(90,160,255,.28))' } }),
+          h('img', { src: '/assets/emblem-3d.png', alt: '', style: { width: 116, height: 116, flex: 'none', margin: '-14px -8px -14px -12px', filter: 'drop-shadow(0 0 18px rgba(90,160,255,.28))' } }),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
-            h('span', { style: { fontSize: 30, fontWeight: 700, color: '#e8dcc6', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
-            h('span', { style: { fontFamily: MONO, fontSize: 17, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL')))),
-        // the title, with the date beside it after a gold divider (Hebrew; ?mmdate=below puts it under the title, as English does)
-        (() => {
-          const below = en || /[?&]mmdate=below/.test(location.search);
-          const title = h('div', { style: { position: 'relative', lineHeight: 1 } },
-            h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 140 : 230, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
-            h('div', { style: { position: 'relative', fontSize: en ? 140 : 230, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember')));
-          const date = (size, extra) => h('div', { dir: 'ltr', style: rise(1600, 4200, Object.assign({ fontFamily: LEX, fontSize: size, fontWeight: 500, lineHeight: 1, letterSpacing: '.03em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, tr('7/10', 'Oct 7'));
-          // the gold rule under the title runs the full width of the title row (date included)
-          const rule = (w) => h('div', { style: { marginTop: 28, width: w, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.5) 70%, rgba(233,184,114,.15))`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } });
-          if (below) return h('div', { style: { marginTop: 22 } }, title, date(en ? 76 : 96, { marginTop: 18, textAlign: en ? 'left' : 'right' }), rule(520));
-          return h('div', { style: { marginTop: 22, display: 'flex', flexDirection: 'column', alignItems: 'stretch' } },
-            h('div', { style: { display: 'flex', alignItems: 'center', gap: 44 } },
-            title,
-            h('div', { style: { width: 2, height: 190, flex: 'none', background: 'linear-gradient(180deg, transparent, rgba(233,184,114,.9) 30%, rgba(233,184,114,.9) 70%, transparent)', animation: 'mmTitleIn 1600ms ease 3800ms both' } }),
-            date(170, { marginTop: 22 })),
-            rule('100%'));
-        })(),
-        h('div', { style: rise(1200, 4400, { marginTop: 28, fontSize: 36, fontWeight: 300, lineHeight: 1.42, color: '#ece4d6', maxWidth: 900, textWrap: 'pretty' }) },
-          tr('עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
-            'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.')),
-        h('div', { style: rise(1200, 5000, { marginTop: 24, fontSize: 32, fontWeight: 500, color: '#e9b872' }) }, tr('מנהלת החלל מרכינה ראש · יהי זכרם ברוך', 'The Space Program Office bows its head · May their memory be a blessing')),
-        h('div', { style: rise(1200, 5500, { marginTop: 18, fontFamily: MONO, fontSize: 19, letterSpacing: '.18em', color: 'rgba(200,184,156,.7)' }) }, tr('כ״ב בתשרי תשפ״ד · 7.10.2023', 'OCTOBER 7, 2023'))));
+            h('span', { style: { fontSize: 28, fontWeight: 700, color: '#e8dcc6', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
+            h('span', { style: { fontFamily: MONO, fontSize: 16, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL')))),
+        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start' } },
+          // the title with the date beside it after a gold divider (English: the date under the title), one gold rule under both
+          (() => {
+            const title = h('div', { style: { position: 'relative', lineHeight: 1 } },
+              h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 136 : 210, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
+              h('div', { style: { position: 'relative', fontSize: en ? 136 : 210, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember')));
+            const date = (size, extra) => h('div', { dir: 'ltr', style: rise(1600, 4200, Object.assign({ fontFamily: LEX, fontSize: size, fontWeight: 600, lineHeight: 1, letterSpacing: '.02em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, tr('7/10', 'Oct 7'));
+            const rule = h('div', { style: { marginTop: 30, width: '100%', height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.5) 70%, rgba(233,184,114,.15))`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } });
+            const row = en ? h('div', null, title, date(84, { marginTop: 14 }))
+              : h('div', { style: { display: 'flex', alignItems: 'center', gap: 40 } }, title,
+                h('div', { style: { width: 2, height: 170, flex: 'none', background: 'linear-gradient(180deg, transparent, rgba(233,184,114,.9) 30%, rgba(233,184,114,.9) 70%, transparent)', animation: 'mmTitleIn 1600ms ease 3800ms both' } }),
+                date(150, { marginTop: 20 }));
+            return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'stretch' } }, row, rule);
+          })(),
+          h('div', { style: rise(1200, 4400, { marginTop: 34, fontSize: 34, fontWeight: 300, lineHeight: 1.5, color: '#ece4d6', maxWidth: 860, textWrap: 'pretty' }) },
+            tr('עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
+              'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.')),
+          h('div', { style: rise(1200, 5000, { marginTop: 28, fontSize: 30, fontWeight: 500, color: '#e9b872', maxWidth: 860 }) }, tr('מנהלת החלל מרכינה ראש · יהי זכרם ברוך', 'The Space Program Office bows its head · May their memory be a blessing'))),
+        h('div', { style: rise(1200, 5500, { fontFamily: MONO, fontSize: 18, letterSpacing: '.2em', color: 'rgba(200,184,156,.6)' }) }, tr('כ״ב בתשרי תשפ״ד · 7.10.2023', 'OCTOBER 7, 2023'))));
   };
 
   // ---------- small toast (e.g. "שוגר") ----------
