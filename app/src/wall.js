@@ -553,9 +553,10 @@
       if (due.c) { const P = this.celebratable(T.iso), k = due.c.k; due.c = null; if (P.length) return this.setState({ ov: { kind: 'celebrate', id: now, person: P[k % P.length], until: now + S.celebrate.secs * 1000 } }); }
       if (due.n) { due.n = null; const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: now, item, secs: S.news.secs, until: now + S.news.secs * 1000 } }); }
     }
-    /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment. */
+    /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment or
+     *  during a launch broadcast. */
     maybeReload(T, ov) {
-      if (ov || this.wl || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
+      if (ov || this.wl || this.stream() || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
       const nightly = T.h === 4 && T.m < 20 && Date.now() - this.t0 > 3600e3;
       if (!nightly && (this._newBuild || 0) < 2) return;
       this._reloadTry = Date.now() + 60e3;
