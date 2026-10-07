@@ -629,10 +629,8 @@ window.makeWallOverlays = (React) => {
       // the words
       h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 118, width: 920, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }, side) },
         h('div', { style: rise(1200, 2200, { display: 'flex', alignItems: 'center', gap: 22 }) },
-          h('div', { style: { position: 'relative', width: 92, height: 92, flex: 'none' } },
-            h('div', { style: { position: 'absolute', inset: -9, borderRadius: '50%', border: '1px dashed rgba(233,184,114,.4)', animation: fx ? 'spin 40s linear infinite' : 'none' } }),
-            h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #fbf6ee, #e2d8c8 60%, #b8a88e)', boxShadow: '0 0 34px rgba(255,190,120,.25)', overflow: 'hidden' } },
-              h('img', { src: '/assets/logo-mark.png', alt: '', style: { position: 'absolute', left: '50%', top: '50%', width: 96, height: 'auto', marginLeft: -50.5, marginTop: -41.4, clipPath: 'inset(0 0 23% 0)' } }))),
+          // the directorate's 3D emblem (a still of the wall's own emblem-v2, so no second WebGL scene)
+          h('img', { src: '/assets/emblem-3d.png', alt: '', style: { width: 124, height: 124, flex: 'none', margin: '-16px -8px -16px -12px', filter: 'drop-shadow(0 0 18px rgba(90,160,255,.28))' } }),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
             h('span', { style: { fontSize: 30, fontWeight: 700, color: '#e8dcc6', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
             h('span', { style: { fontFamily: MONO, fontSize: 17, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL')))),
