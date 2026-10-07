@@ -110,16 +110,56 @@
   const imgEl = (src, style) => h('img', { src, alt: '', style });
   const COVER = { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' };
 
-  const readAsDataURL = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
   const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
   async function shrinkImage(file, max = 1024) {
-    const img = await loadImg(await readAsDataURL(file));
-    const k = Math.min(1, max / Math.max(img.width, img.height));
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.85);
+    const url = URL.createObjectURL(file);   // lighter than a data URL for a phone's 12-megapixel photo
+    try {
+      const img = await loadImg(url);
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.85);
+    } finally { URL.revokeObjectURL(url); }
   }
+  // Scripts the photo import needs only now and then (the zip reader, the HEIC decoder), each loaded once.
+  const scripts = {};
+  const loadScript = (src) => (scripts[src] = scripts[src] || new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = res;
+    s.onerror = () => { delete scripts[src]; rej(new Error('לא הצלחתי לטעון רכיב של השלט. בדקו את האינטרנט ונסו שוב.')); };
+    document.head.appendChild(s);
+  }));
+  const IMG_FILE = /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i;
+  const imgType = (n) => { const x = (n.match(/\.(\w+)$/) || ['', ''])[1].toLowerCase(); return x === 'jpg' ? 'image/jpeg' : /^hei[cf]$/.test(x) ? 'image/heic' : 'image/' + x; };
+  // A zip's file names: UTF-8 (Google Drive), or a Hebrew Windows one.
+  const zipName = (b) => { const u = b instanceof Uint8Array ? b : new Uint8Array(b); try { return new TextDecoder('utf-8', { fatal: true }).decode(u); } catch (e) { return new TextDecoder('windows-1255').decode(u); } };
+  /** The images among picked files, as { name, blob }; a zip (the form's photo folder as Google Drive downloads it) is
+   *  opened here. */
+  async function readImages(files) {
+    const out = [];
+    for (const f of files) {
+      if (/\.zip$/i.test(f.name) || /zip/.test(f.type)) {
+        await loadScript('/vendor/jszip.min.js');
+        const zip = await window.JSZip.loadAsync(f, { decodeFileName: zipName });
+        for (const z of Object.values(zip.files)) {
+          const name = z.name.split('/').pop();
+          if (z.dir || !IMG_FILE.test(name) || /(^|\/)(__MACOSX|\.)/.test(z.name)) continue;
+          out.push({ name, blob: new Blob([await z.async('arraybuffer')], { type: imgType(name) }) });
+        }
+      } else if (IMG_FILE.test(f.name) || /^image\//.test(f.type)) out.push({ name: f.name, blob: f });
+    }
+    return out;
+  }
+  /** shrinkImage for any photo: an iPhone's HEIC that this browser can't open (Chrome) is turned into JPEG first. */
+  async function shrinkPhoto(blob, name, max) {
+    try { return await shrinkImage(blob, max); } catch (e) {
+      if (!/\.hei[cf]$/i.test(name) && !/hei[cf]/i.test(blob.type || '')) throw e;
+      await loadScript('/vendor/heic2any.min.js');
+      const jpg = await window.heic2any({ blob, toType: 'image/jpeg', quality: 0.9 });
+      return shrinkImage(Array.isArray(jpg) ? jpg[0] : jpg, max);
+    }
+  }
+  const PHOTOS_MAX = 60;   // photos in one import
   let xlsxLoading = null;
   const loadXlsx = () => window.XLSX ? Promise.resolve() : (xlsxLoading = xlsxLoading || new Promise((res, rej) => {
     const s = document.createElement('script'); s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'; s.onload = res; s.onerror = rej; document.head.appendChild(s);
@@ -252,6 +292,8 @@
     get: (k) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
     set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) { /* private mode */ } },
   };
+  // a hand on the page (the remote waits for the hands to be off before reloading itself to a new version)
+  const TOUCH_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'];
   /** The access code as pasted: the code itself or the whole private link, with whatever came along from a chat (spaces,
    *  quotes, a period, the invisible direction marks of Hebrew text, the words around it). */
   const codeOf = (text) => {
@@ -298,7 +340,7 @@
         data: null, loadErr: '', auth: !!token(), who, whoDraft: '', tokenDraft: '',
         design: null, brightness: null,   // optimistic local values while a slider is being dragged
         demo: 'off',
-        tab: 'today', studio: false, sheet: null, toast: null, nlBusy: false, photoBusy: false, busyAct: false, impBusy: false,
+        tab: 'today', studio: false, sheet: null, toast: null, nlBusy: false, photoBusy: false, busyAct: false, impBusy: false, phBusy: '',
         pq: '', showInactive: false, gateErr: '',
         // The live preview runs the whole wall inside the page. A phone or tablet shows it on a tap (or while the design is
         // being edited): loaded by itself it took more memory than some phones give a page, and the remote crashed on opening.
@@ -308,7 +350,7 @@
         keyDraft: '', keyBusy: false, keyErr: '', keyOpen: false,
       };
       this.fileRef = React.createRef(); this.photoRef = React.createRef(); this.scrollRef = React.createRef(); this.previewRef = React.createRef();
-      this.personPhotoRef = React.createRef(); this.importRef = React.createRef(); this.panelRef = React.createRef(); this.eventPhotoRef = React.createRef();
+      this.personPhotoRef = React.createRef(); this.importRef = React.createRef(); this.panelRef = React.createRef(); this.eventPhotoRef = React.createRef(); this.photosRef = React.createRef();
       this.timers = {};
     }
 
@@ -316,14 +358,21 @@
       this.iv = setInterval(() => this.tick(), 1000);
       this.onR = () => this.setState({ vw: window.innerWidth });
       window.addEventListener('resize', this.onR);
-      this.onVis = () => { if (!document.hidden) this.refresh(); };
+      this.onVis = () => { if (!document.hidden) { this._backAt = Date.now(); this.refresh(); } };
       document.addEventListener('visibilitychange', this.onVis);
+      // back from the browser's page cache (iPhone): the same as coming back to the screen
+      this.onShow = (e) => { if (e.persisted) this.onVis(); };
+      window.addEventListener('pageshow', this.onShow);
+      this.onTouch = () => { this._touchAt = Date.now(); };
+      for (const t of TOUCH_EVENTS) window.addEventListener(t, this.onTouch, { capture: true, passive: true });
       if (this.state.auth) this.refresh();
       this.poll = setInterval(() => { if (!document.hidden && this.state.auth) this.refresh(); }, 15000);
       this.observe();
     }
     componentWillUnmount() {
       clearInterval(this.iv); clearInterval(this.poll); window.removeEventListener('resize', this.onR); document.removeEventListener('visibilitychange', this.onVis);
+      window.removeEventListener('pageshow', this.onShow);
+      for (const t of TOUCH_EVENTS) window.removeEventListener(t, this.onTouch, { capture: true });
       if (this.ro) this.ro.disconnect(); clearTimeout(this.tt); clearTimeout(this.srcT); Object.values(this.timers).forEach((t) => clearTimeout(t.t));
     }
     observe() {
@@ -344,6 +393,26 @@
       const n = new Date(), tk = this.state.data && this.state.data.takeover;
       this.setState({ now: n });
       if (tk && Date.parse(tk.until) <= n.getTime() && this._expId !== tk.id) { this._expId = tk.id; this.refresh(); }
+      this.maybeReload();
+    }
+    /** A new version of the remote went up (the server's `build` changed since this page loaded): reload by itself, as the
+     *  wall does, so a phone that keeps the remote open never stays on an old version. Only when nothing would be lost (no
+     *  window open, nothing typed or on its way, no recent talk with the agent) and the hands are off the page: just back
+     *  on the screen and not touched yet, or untouched for a minute. At most once in 10 minutes, so it can never loop. */
+    maybeReload() {
+      const s = this.state, b = s.data && s.data.build, now = Date.now();
+      if (!b) return;
+      if (!this._build) this._build = b;
+      if (b === this._build || document.hidden) return;
+      const back = this._backAt || 0, touched = this._touchAt || 0;
+      if (now - touched < 60e3 && !(back > touched && now - back < 20e3)) return;
+      if (s.sheet || s.studio || s.chatOpen || s.chatInput || s.attach.length || s.toast || s.keyDraft || Object.keys(this.timers).length
+        || s.agentBusy || s.busyAct || s.impBusy || s.phBusy || s.photoBusy || s.nlBusy || s.keyBusy || (s.messages.length && now - s.agentAt < 30 * 60e3)) return;
+      try {
+        if (now - (Number(sessionStorage.getItem('remote:reloadAt')) || 0) < 10 * 60e3) return;
+        sessionStorage.setItem('remote:reloadAt', String(now));
+      } catch (e) { return; }
+      location.reload();
     }
 
     // ---- server ----------------------------------------------------------------------------------
@@ -615,6 +684,74 @@
       try { const dataUrl = await shrinkImage(fl, 640); const r = await api('POST', { action: 'photo', dataUrl, folder: 'people' }); this.setFV({ photo: r.result.url }); }
       catch (er) { this.toast(er.message && er.message !== 'unauthorized' ? er.message : 'לא הצלחתי להעלות את התמונה'); }
       finally { this.setState({ photoBusy: false }); }
+    }
+    /** Photos for many people at once: picked one by one, or the zip of the form's photo folder as Google Drive downloads
+     *  it. Each is shrunk here and matched to a person by its file name (photo-match.js); the sheet shows them all, to
+     *  check and correct before anything is saved. */
+    async onPhotoFiles(e) {
+      const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
+      this.setState({ phBusy: 'פותח את הקבצים…' });
+      try {
+        const imgs = await readImages(files), take = imgs.slice(0, PHOTOS_MAX), items = [];
+        if (!imgs.length) throw new Error('לא מצאתי תמונות בקבצים שנבחרו');
+        for (const [i, im] of take.entries()) {
+          this.setState({ phBusy: 'מכין תמונה ' + (i + 1) + ' מתוך ' + take.length + '…' });
+          let src = null, err = '';
+          try { src = await shrinkPhoto(im.blob, im.name, 640); }
+          catch (er) { err = /\.hei[cf]$/i.test(im.name) ? 'לא הצלחתי לפתוח את התמונה (HEIC). אפשר לשמור אותה כ-JPG ולנסות שוב' : 'לא הצלחתי לפתוח את הקובץ כתמונה'; }
+          items.push({ key: i, name: im.name, src, err, personId: '', auto: false });
+        }
+        const people = this.photoPeople(), match = window.photoMatch;
+        const sug = match ? match.suggest(items.map((x) => x.name), people.map((p) => ({ id: p.id, first: p.first, last: p.last, photo: p.photo, photoLink: !!(p.profile && p.profile.photo_link) }))) : [];
+        items.forEach((x, i) => { if (x.src && sug[i]) Object.assign(x, { personId: sug[i], auto: true }); });
+        this.openSheet('photos', { items, more: imgs.length - take.length });
+      } catch (er) { this.toast(er.message || 'לא הצלחתי לקרוא את הקבצים'); }
+      finally { this.setState({ phBusy: '' }); }
+    }
+    photoPeople() { return (this.D ? this.D.people : []).filter((p) => p.active); }
+    setPhotoPerson(key, personId) {
+      const f = this.state.sheet && this.state.sheet.f; if (!f || !f.items) return;
+      this.setFV({ items: f.items.map((x) => (x.key === key ? Object.assign({}, x, { personId, auto: false }) : x)) });
+    }
+    /** Uploads the photos that have a person, then sets them all at once: one undo brings every old photo back. */
+    async doPhotoImport() {
+      const f = this.state.sheet && this.state.sheet.f; if (!f || !f.items || this.state.phBusy) return;
+      const picked = f.items.filter((x) => x.src && x.personId), items = [];
+      if (!picked.length) return this.toast('בחרו של מי כל תמונה');
+      try {
+        for (const [i, x] of picked.entries()) {
+          this.setState({ phBusy: 'מעלה תמונה ' + (i + 1) + ' מתוך ' + picked.length + '…' });
+          const r = await api('POST', { action: 'photo', dataUrl: x.src, folder: 'people' });
+          items.push({ personId: x.personId, url: r.result.url });
+        }
+      } catch (er) { this.setState({ phBusy: '' }); return this.toast(er.message && er.message !== 'unauthorized' ? er.message : 'לא הצלחתי להעלות את התמונות'); }
+      this.setState({ phBusy: 'שומר…' });
+      try {
+        await this.run('setPhotos', { items }, (r) => (r.updated === 1 ? 'התמונה נשמרה, ותופיע בצג תוך דקה' : r.updated + ' תמונות נשמרו, ויופיעו בצג תוך דקה'));
+        this.closeSheet();
+      } catch (er) { /* toasted */ }
+      finally { this.setState({ phBusy: '' }); }
+    }
+    photosVals(f) {
+      const people = this.photoPeople(), byId = {}, uses = {}, busy = this.state.phBusy;
+      people.forEach((p) => { byId[p.id] = p; });
+      f.items.forEach((x) => { if (x.src && x.personId) uses[x.personId] = (uses[x.personId] || 0) + 1; });
+      // Those who sent a photo in the form and have none yet come first: the photos are most likely theirs.
+      const sent = (p) => !!(p.profile && p.profile.photo_link) && !p.photo;
+      const groups = [['שלחו תמונה בטופס', people.filter(sent)], [people.some(sent) ? 'כל השאר' : 'רשימת האנשים', people.filter((p) => !sent(p))]]
+        .filter((g) => g[1].length).map(([label, ps]) => ({ label, opts: ps.map((p) => ({ v: p.id, label: dn(p) + (p.photo ? ' · יש תמונה' : '') })) }));
+      const rows = f.items.map((x) => {
+        const p = x.personId ? byId[x.personId] : null, twice = !!p && uses[p.id] > 1;
+        return { key: x.key, file: x.name, src: x.src, personId: p ? p.id : '', set: (e) => this.setPhotoPerson(x.key, e.target.value),
+          note: x.err || (twice ? 'אותו אדם נבחר גם לתמונה אחרת' : !p ? 'לא תיובא' : p.photo ? 'תחליף את התמונה שיש עכשיו' : x.auto ? 'זוהה לפי שם הקובץ' : ''),
+          noteColor: x.err || twice ? '#ffb4a8' : !p ? '#8b9dbd' : p.photo ? WARM : ICE };
+      });
+      const n = f.items.filter((x) => x.src && byId[x.personId]).length, auto = f.items.filter((x) => x.src && x.auto && byId[x.personId]).length;
+      const clash = Object.keys(uses).some((k) => uses[k] > 1);
+      return { phRows: rows, phGroups: groups, phCan: n > 0 && !clash && !busy, phMore: f.more,
+        phGo: busy || (clash ? 'אותו אדם נבחר לשתי תמונות' : n ? 'ייבוא ' + cnt(n, 'תמונה אחת', 'תמונות') : 'בחרו של מי כל תמונה'),
+        phSummary: cnt(f.items.length, 'תמונה אחת', 'תמונות') + (auto ? ' · ' + (auto === 1 ? 'אחת זוהתה' : auto + ' זוהו') + ' לפי שם הקובץ' : '')
+          + '. בדקו שכל תמונה שייכת לאדם הנכון. תמונה בלי אדם לא תיובא.' };
     }
     async onImportFile(e) {
       const fl = e.target.files[0]; e.target.value = ''; if (!fl) return;
@@ -985,6 +1122,12 @@
         pInactive: inactiveP.filter(pMatch).map(pRow), showInactive: s.showInactive, toggleInactive: () => this.setState({ showInactive: !s.showInactive }),
         addPerson: () => this.openPerson(), pickImport: () => this.importRef.current && this.importRef.current.click(), onImportFile: (e) => this.onImportFile(e),
         impBtn: s.impBusy ? 'קורא את הקובץ…' : 'ייבוא מאקסל', exportPeople: () => this.exportPeople(),
+        pickPhotos: () => !s.phBusy && this.photosRef.current && this.photosRef.current.click(), onPhotoFiles: (e) => this.onPhotoFiles(e),
+        phBtn: s.phBusy || 'ייבוא תמונות',
+        // the survey form's photos not on the wall yet (the form keeps them in Google Drive; the import takes them from there)
+        phNeed: (() => { const k = activeP.filter((pp) => pp.onWall && !pp.photo && pp.profile && pp.profile.photo_link).length;
+          return k ? (k === 1 ? 'אחד מהאנשים שלח תמונה בטופס, והיא עוד לא בצג' : k + ' אנשים שלחו תמונה בטופס, והתמונות עוד לא בצג')
+            + '. מורידים מ-Google Drive את תיקיית התמונות של הטופס (מתקבל קובץ zip), ובוחרים אותו ב"ייבוא תמונות".' : ''; })(),
         celebs: cel.map(celRow), noCelebs: cel.length === 0,
         wallPersonRows, wallEvRows, addLifeNew: () => this.openLife(), addEventNew: () => this.openEvent(),
         peopleHint: 'מה שמוצג עכשיו בפאנל האנשים. ' + (greetPaused ? 'היום, בגלל היזכור, ברכות לא עולות לבד על כל המסך'
@@ -1041,11 +1184,11 @@
         sheetOn: !!sh, closeSheet: () => this.closeSheet(), sheetBackdrop: (e) => { if (e.target === e.currentTarget) this.closeSheet(); },
         sheetAlign: small ? 'flex-end' : 'center', sheetPad: small ? '0' : '24px', sheetRadius: small ? '20px 20px 0 0' : '20px', sheetMaxH: small ? '92vh' : '88vh',
         sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', moments: 'תזמונים ואוטומציות', welcome: 'מסך ברוכים הבאים', history: 'היסטוריית שינויים',
-          person: sh && sh.mode === 'edit' ? 'פרטי ' + [f.first, f.last].filter(Boolean).join(' ') : 'אדם חדש ברשימה', import: 'ייבוא אנשים מקובץ', ticker: sh && sh.mode === 'edit' ? 'עריכה ברצועת האירועים' : 'אירוע או הזדמנות לרצועה' }[kind] || '',
+          person: sh && sh.mode === 'edit' ? 'פרטי ' + [f.first, f.last].filter(Boolean).join(' ') : 'אדם חדש ברשימה', import: 'ייבוא אנשים מקובץ', photos: 'ייבוא תמונות של אנשים', ticker: sh && sh.mode === 'edit' ? 'עריכה ברצועת האירועים' : 'אירוע או הזדמנות לרצועה' }[kind] || '',
         shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shWelcome: kind === 'welcome', shHistory: kind === 'history', shMoments: kind === 'moments',
         // the schedules screen: one card per moment, each with on/off, how often and how long
         moCards: kind === 'moments' ? this.momentCards(mo, design, sw) : [], moFx: mo.fx, moFxSw: sw(mo.fx), toggleMoFx: () => this.setMoment('fx', null, !mo.fx, mo.fx ? 'אנימציות מעבר כבויות' : 'אנימציות מעבר פעילות'),
-        shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker',
+        shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker', shPhotos: kind === 'photos',
         openLifeNew: () => this.openLife(), openEventNew: () => this.openEvent(),
         showEvents: evShowList.map((e) => { const live = tk && tk.eventId === e.id, d = parse(e.date), multi = lastOf(e) > e.date;
           const day = e.date === ti ? 'היום' : e.date < ti ? 'מתקיים עכשיו' : 'יום ' + DOWS[d.getDay()] + ' ' + dm(e.date);
@@ -1139,7 +1282,8 @@
 
         // import sheet
         ...(kind === 'import' ? this.importVals(f.imp) : {}),
-        doImport: () => { if (!s.impBusy) this.doImport(); }, impGo: s.impBusy ? 'מייבא…' : null,
+        ...(kind === 'photos' ? this.photosVals(f) : {}),
+        doImport: () => { if (!s.impBusy) this.doImport(); }, impGo: s.impBusy ? 'מייבא…' : null, doPhotoImport: () => this.doPhotoImport(),
 
         // ticker sheet
         tiName: f.name || '', setTiName: this.fv('name'), tiStart: f.start || '', setTiStart: this.fv('start'), tiEnd: f.end || '', setTiEnd: this.fv('end'),
@@ -1331,7 +1475,8 @@
         v.tabPeople ? el('div', 'display:flex;flex-direction:column;gap:10px', null,
           el('div', 'display:flex;gap:6px;flex-wrap:wrap', null,
             el('button', 'min-height:38px;padding:0 14px;border-radius:10px;border:none;background:#d4f25c;color:#0b1400;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap', { onClick: v.addPerson }, '+ הוספת אדם'),
-            smallBtn(v.impBtn, v.pickImport), v.hasPeople ? smallBtn('ייצוא לאקסל', v.exportPeople) : null),
+            smallBtn(v.impBtn, v.pickImport), v.hasPeople ? smallBtn(v.phBtn, v.pickPhotos) : null, v.hasPeople ? smallBtn('ייצוא לאקסל', v.exportPeople) : null),
+          v.phNeed ? el('span', 'font-size:13px;color:#cfe0f7;line-height:1.5;text-wrap:pretty;padding:10px 12px;border-radius:12px;background:rgba(159,220,255,.07);border:1px solid rgba(159,220,255,.22)', null, v.phNeed) : null,
           v.hasPeople ? el('input', field, { value: v.pq, onChange: v.setPq, placeholder: 'חיפוש לפי שם, ענף, תפקיד או טלפון', type: 'search' }) : null,
           v.pSummary ? el('span', 'font-size:12px;color:#8b9dbd', null, v.pSummary) : null,
           v.hasPeople ? null : el('div', 'display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:14px;border:1px dashed rgba(159,220,255,.3);background:rgba(4,9,20,.4)', null,
@@ -1619,6 +1764,22 @@
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
               saveBtn(v.impGo || v.impLabel, v.doImport, !v.impCan || s.impBusy),
               el('button', 'min-height:48px;padding:0 18px;border-radius:12px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:15px;cursor:pointer', { onClick: v.pickImport }, 'קובץ אחר'))) : null,
+          v.shPhotos ? h(React.Fragment, null,
+            el('span', 'font-size:14px;color:#cfe0f7;text-wrap:pretty', null, v.phSummary),
+            el('div', 'display:flex;flex-direction:column;max-height:52vh;overflow-y:auto', null, v.phRows.map((r) =>
+              el('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(150,190,240,.08)', { key: r.key },
+                // round, as the wall shows a face
+                el('div', 'position:relative;flex:none;width:64px;height:64px;border-radius:50%;overflow:hidden;background:rgba(150,190,240,.12)', null, r.src ? imgEl(r.src, COVER) : null),
+                el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:4px', null,
+                  r.src ? el('select', field + ';color-scheme:dark', { value: r.personId, onChange: r.set, 'aria-label': 'של מי התמונה ' + r.file },
+                    el('option', null, { value: '' }, 'לא לייבא'),
+                    v.phGroups.map((g) => el('optgroup', null, { key: g.label, label: g.label }, g.opts.map((o) => el('option', null, { key: o.v, value: o.v }, o.label))))) : null,
+                  el('span', 'font-size:12px;color:#5d6f8f;overflow-wrap:anywhere;text-align:right', { dir: 'auto' }, r.file),
+                  r.note ? el('span', `font-size:12px;color:${r.noteColor};text-wrap:pretty`, null, r.note) : null)))),
+            v.phMore ? el('span', 'font-size:12px;color:#8b9dbd', null, 'ועוד ' + v.phMore + ' תמונות לא נכנסו: עד 60 בכל פעם') : null,
+            el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
+              saveBtn(v.phGo, v.doPhotoImport, !v.phCan),
+              el('button', 'min-height:48px;padding:0 18px;border-radius:12px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:15px;cursor:pointer', { onClick: v.pickPhotos }, 'קבצים אחרים'))) : null,
           v.shTicker ? h(React.Fragment, null,
             el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:16px', { value: v.tiName, onChange: v.setTiName, placeholder: 'שם, למשל: כנס החלל הבינלאומי', maxLength: 120, autoFocus: !v.tiEdit }),
             segWrap(2, v.tiKinds.map((o) => el('button', `min-height:40px;border-radius:9px;border:none;background:${o.bg};color:${o.fg};font-size:14px;font-weight:600;cursor:pointer`, { key: o.v, onClick: o.pick }, o.label))),
@@ -1652,6 +1813,7 @@
         el('input', 'display:none', { type: 'file', ref: this.personPhotoRef, accept: 'image/*', onChange: v.onPersonPhoto }),
         el('input', 'display:none', { type: 'file', ref: this.eventPhotoRef, accept: 'image/*', onChange: v.onEventPhoto }),
         el('input', 'display:none', { type: 'file', ref: this.importRef, accept: '.xlsx,.xls,.csv,.txt', onChange: v.onImportFile }),
+        el('input', 'display:none', { type: 'file', ref: this.photosRef, multiple: true, accept: 'image/*,.heic,.heif,.zip,application/zip', onChange: v.onPhotoFiles }),
         el('div', { minHeight: '100vh', display: 'grid', gridTemplateColumns: v.rootCols, background: 'radial-gradient(1200px 600px at 60% -10%, #0c1c3a 0%, #040914 60%)' }, { dir: 'rtl' },
           el('main', { minWidth: 0, padding: v.mainPad, display: 'flex', flexDirection: 'column', gap: 16 }, null,
             header, tkBanner, urBanner,
