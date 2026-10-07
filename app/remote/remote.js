@@ -292,6 +292,8 @@
     get: (k) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
     set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) { /* private mode */ } },
   };
+  // a hand on the page (the remote waits for the hands to be off before reloading itself to a new version)
+  const TOUCH_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'];
   /** The access code as pasted: the code itself or the whole private link, with whatever came along from a chat (spaces,
    *  quotes, a period, the invisible direction marks of Hebrew text, the words around it). */
   const codeOf = (text) => {
@@ -356,14 +358,21 @@
       this.iv = setInterval(() => this.tick(), 1000);
       this.onR = () => this.setState({ vw: window.innerWidth });
       window.addEventListener('resize', this.onR);
-      this.onVis = () => { if (!document.hidden) this.refresh(); };
+      this.onVis = () => { if (!document.hidden) { this._backAt = Date.now(); this.refresh(); } };
       document.addEventListener('visibilitychange', this.onVis);
+      // back from the browser's page cache (iPhone): the same as coming back to the screen
+      this.onShow = (e) => { if (e.persisted) this.onVis(); };
+      window.addEventListener('pageshow', this.onShow);
+      this.onTouch = () => { this._touchAt = Date.now(); };
+      for (const t of TOUCH_EVENTS) window.addEventListener(t, this.onTouch, { capture: true, passive: true });
       if (this.state.auth) this.refresh();
       this.poll = setInterval(() => { if (!document.hidden && this.state.auth) this.refresh(); }, 15000);
       this.observe();
     }
     componentWillUnmount() {
       clearInterval(this.iv); clearInterval(this.poll); window.removeEventListener('resize', this.onR); document.removeEventListener('visibilitychange', this.onVis);
+      window.removeEventListener('pageshow', this.onShow);
+      for (const t of TOUCH_EVENTS) window.removeEventListener(t, this.onTouch, { capture: true });
       if (this.ro) this.ro.disconnect(); clearTimeout(this.tt); clearTimeout(this.srcT); Object.values(this.timers).forEach((t) => clearTimeout(t.t));
     }
     observe() {
@@ -384,6 +393,26 @@
       const n = new Date(), tk = this.state.data && this.state.data.takeover;
       this.setState({ now: n });
       if (tk && Date.parse(tk.until) <= n.getTime() && this._expId !== tk.id) { this._expId = tk.id; this.refresh(); }
+      this.maybeReload();
+    }
+    /** A new version of the remote went up (the server's `build` changed since this page loaded): reload by itself, as the
+     *  wall does, so a phone that keeps the remote open never stays on an old version. Only when nothing would be lost (no
+     *  window open, nothing typed or on its way, no recent talk with the agent) and the hands are off the page: just back
+     *  on the screen and not touched yet, or untouched for a minute. At most once in 10 minutes, so it can never loop. */
+    maybeReload() {
+      const s = this.state, b = s.data && s.data.build, now = Date.now();
+      if (!b) return;
+      if (!this._build) this._build = b;
+      if (b === this._build || document.hidden) return;
+      const back = this._backAt || 0, touched = this._touchAt || 0;
+      if (now - touched < 60e3 && !(back > touched && now - back < 20e3)) return;
+      if (s.sheet || s.studio || s.chatOpen || s.chatInput || s.attach.length || s.toast || s.keyDraft || Object.keys(this.timers).length
+        || s.agentBusy || s.busyAct || s.impBusy || s.phBusy || s.photoBusy || s.nlBusy || s.keyBusy || (s.messages.length && now - s.agentAt < 30 * 60e3)) return;
+      try {
+        if (now - (Number(sessionStorage.getItem('remote:reloadAt')) || 0) < 10 * 60e3) return;
+        sessionStorage.setItem('remote:reloadAt', String(now));
+      } catch (e) { return; }
+      location.reload();
     }
 
     // ---- server ----------------------------------------------------------------------------------

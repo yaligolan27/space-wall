@@ -204,7 +204,7 @@ function effectiveTakeover(st: Row, big: Row[], now: Date): Row | null {
   return null;
 }
 
-/** The deployment the server runs; the wall reloads itself when it changes. '' when unknown (no reloads). */
+/** The deployment the server runs; the wall and the remote reload themselves when it changes. '' when unknown (no reloads). */
 const BUILD = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || '';
 
 /** For the wall (api/live.ts): polled every few seconds. */
@@ -262,7 +262,7 @@ export async function snapshot() {
       showFrom: w.from, showUntil: w.until, note: l.text_he || '', photo: l.photo_mode || 'crm', photoSrc: l.photo_url || null, dupOf: keep && keep !== l.id ? keep : null };
   });
   return {
-    now: now.toISOString(), today,
+    now: now.toISOString(), today, build: BUILD,
     people: (must(people, 'people') as Row[]).map(personOut),
     life: lifeRows,
     events: (must(events, 'events') as Row[]).map(e => ({ id: e.id, title: e.title, ...eventSpan(e), startsAt: new Date(e.starts_at).toISOString(),
