@@ -685,6 +685,18 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     undo.push(...life.map(row => ({ op: 'put', table: 'life_events', row }) as UndoOp), { op: 'put', table: 'people', row: prev });
     await record(who, 'נמחק/ה מרשימת האנשים: ' + prev.display_name + (life.length ? ' (עם ' + life.length + ' אירועים אישיים)' : ''), undo);
   },
+  /** Photos for several people at once (the remote's photo import, already uploaded by the `photo` action): each one's
+   *  photo_url, with one undo for all. */
+  async setPhotos(a, who) {
+    const { items } = z.object({ items: z.array(z.object({ personId: UUID, url: z.string().url().max(500) })).min(1).max(100) }).parse(a);
+    if (new Set(items.map(i => i.personId)).size !== items.length) throw new Error('אותו אדם נבחר לשתי תמונות');
+    const prev = must(await db().from('people').select('*').in('id', items.map(i => i.personId)), 'people') as Row[];
+    if (prev.length !== items.length) throw new Error('חלק מהאנשים כבר לא ברשימה. פתחו שוב את ייבוא התמונות');
+    await Promise.all(items.map(async i => must(await db().from('people').update({ photo_url: i.url }).eq('id', i.personId).select('id'), 'photo')));
+    const name = prev[0].display_name;
+    await record(who, items.length === 1 ? 'תמונה חדשה ל' + name : 'תמונות חדשות ל-' + items.length + ' אנשים', prev.map(row => ({ op: 'put', table: 'people', row }) as UndoOp));
+    return { updated: items.length };
+  },
   /** Rows from an Excel/CSV file or the survey form's response sheet, already mapped to fields by the remote.
    *  A name that exists is updated with what the file adds (never blanked); a new name is added. */
   async importPeople(a, who) {
