@@ -53,7 +53,7 @@
   const initials = (n) => String(n || '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('');
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 
-  const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he' };
+  const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he', vw: false };
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
   // The schedules screen ("תזמונים"): what comes up on the whole wall by itself (design.moments, lib/remote-ops.ts MOMENTS0).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
@@ -64,6 +64,7 @@
   const SPEC = [
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
     { title: 'שפה', controls: [{ key: 'lang', label: 'שפת הצג (השלט נשאר בעברית)', kind: 'seg', options: [['he', 'עברית'], ['en', 'English']] }] },
+    { title: 'קיר המסכים', controls: [{ key: 'vw', label: 'מצב קיר מסכים: טקסט גדול ועבה יותר לקיר של 9 הטלוויזיות', kind: 'toggle' }] },
     { title: 'רגעים', controls: [{ key: 'noon', label: 'סרטון תדמית אוטומטי ב-12:00', kind: 'toggle' }] },
     { title: 'תוכן', controls: [{ key: 'qr', label: 'קודי QR לכתבות', kind: 'toggle' }] },
     { title: 'תנועה', controls: [
@@ -393,7 +394,7 @@
     buildSrc() {
       const D = this.D; if (!D) return '';
       const d = this.design();
-      const q = new URLSearchParams({ noon: d.noon ? '1' : '0', qr: d.qr ? '1' : '0', feature: String(d.feature), list: String(d.list), fx: d.fx ? '1' : '0', globe: String(d.globe), globeStyle: d.globeStyle, sway: d.sway ? '1' : '0', lang: d.lang === 'en' ? 'en' : 'he', preview: '1' });
+      const q = new URLSearchParams({ noon: d.noon ? '1' : '0', qr: d.qr ? '1' : '0', feature: String(d.feature), list: String(d.list), fx: d.fx ? '1' : '0', globe: String(d.globe), globeStyle: d.globeStyle, sway: d.sway ? '1' : '0', lang: d.lang === 'en' ? 'en' : 'he', vw: d.vw ? '1' : '0', preview: '1' });
       if (this.state.studio && this.state.demo !== 'off') q.set('demo', this.state.demo);
       if (D.config && D.config.displayKey) q.set('key', D.config.displayKey);
       return '/?' + q.toString();
