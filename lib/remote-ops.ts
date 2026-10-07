@@ -10,6 +10,7 @@ import { DATE, TIME, PERSON_KINDS, NewsletterContent, assertRealDate, ilToIso, i
 import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from './newsletter.js';
 import { storeNewsletterImages } from './newsletter-images.js';
 import { syncForumEvents } from './newsletter-forum.js';
+import { launchStream } from './launch-stream.js';
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { headers: { accept: 'text/html', 'user-agent': 'space-wall-remote/1.0' }, signal: AbortSignal.timeout(15000) });
@@ -81,6 +82,9 @@ export const MOMENTS0 = {
   noon: { at: '12:00' },                            // the promo video's time
   launch: { on: true, lead: 10 },                   // launch mode, `lead` minutes before a Go launch
   welcome: { auto: 0 },                             // minutes until the welcome enters the wall by itself; 0 = waits for "enter"
+  // a launch's official broadcast (lib/launch-stream.ts): full screen from `before` minutes before liftoff to `full`
+  // minutes after it, then (small) in the space news corner until it ends; which: 'all' launches or 'big' ones only
+  stream: { on: true, which: 'all', before: 5, full: 15, small: true },
 };
 export type Moments = typeof MOMENTS0;
 const on = z.boolean(), int = (min: number, max: number) => z.number().int().min(min).max(max);
@@ -92,6 +96,7 @@ export const MomentsPatch = z.object({
   noon: z.object({ at: TIME }).partial().strict(),
   launch: z.object({ on, lead: int(2, 30) }).partial().strict(),
   welcome: z.object({ auto: int(0, 720) }).partial().strict(),
+  stream: z.object({ on, which: z.enum(['all', 'big']), before: int(1, 60), full: int(1, 240), small: on }).partial().strict(),
 }).partial().strict();
 /** The stored schedules over the defaults (anything malformed falls back to its default). */
 export function momentsOf(design: Row | null | undefined): Moments {
@@ -102,6 +107,7 @@ export function momentsOf(design: Row | null | undefined): Moments {
     const r = raw[k] && typeof raw[k] === 'object' ? raw[k] : {};
     out[k] = Object.fromEntries(Object.entries(d).map(([f, v]) => [f, typeof r[f] === typeof v ? r[f] : v]));
   }
+  if (!['all', 'big'].includes(out.stream.which)) out.stream.which = MOMENTS0.stream.which;
   return out as Moments;
 }
 const withMoments = <T extends Row>(design: T): T & { moments: Moments } => ({ ...design, moments: momentsOf(design) });
@@ -206,8 +212,9 @@ export async function live() {
   const [st, big] = await Promise.all([wallState(), bigEventsNow(now)]);
   const design = withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) });
   design.news = liveNews(design.news, now.getTime());
+  const stream = await launchStream(design.moments.stream, st.dismissed, now.getTime());
   return { design, brightness: st.brightness ?? 100, urgent: st.urgent || null,
-    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), memorial: memorialNow(st, now), at: now.toISOString(), build: BUILD };
+    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), memorial: memorialNow(st, now), stream, at: now.toISOString(), build: BUILD };
 }
 
 // ---- snapshot for the remote ------------------------------------------------------------------------
@@ -271,6 +278,7 @@ export async function snapshot() {
     newsletter: issue ? { range: issue.content?.issue?.range || '', url: issue.source_url, count: (issue.content?.news || []).length, at: issue.imported_at } : null,
     state: { design: withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) }), brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
     takeover: effectiveTakeover(st, big, now),
+    stream: await launchStream(momentsOf(st.design).stream, st.dismissed, now.getTime()),
     memorial: (() => { const m = memorialPeriod(now); return m ? { id: m.id, label: m.label, on: !!memorialNow(st, now) } : null; })(),
     history: (must(hist, 'history') as Row[]).map(h => ({ id: h.id, at: h.at, who: h.who, text: h.label, canRestore: Array.isArray(h.undo) && h.undo.length > 0 })),
   };
@@ -514,6 +522,13 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     if (show) return record(who, 'מסך יזכור על כל המסך', [await patchState({ ...back, takeover: { id: 'rt:' + t, kind: 'memorial', until: new Date(t + MEMORIAL_MS).toISOString() } }, who)]);
     if (on === false) return record(who, 'סיום היזכור בצג', [await patchState({ dismissed: withDismissed(dis, key), ...(st.takeover?.kind === 'memorial' ? { takeover: null } : {}) }, who)]);
     if (on === true) return record(who, 'היזכור חזר לצג', [await patchState(back, who)]);
+  },
+  /** The launch broadcast on the wall (live().stream): small: from full screen to the space news corner; else ended.
+   *  Kept in `dismissed` per launch, so the remote's undo brings it back. */
+  async stream(a, who) {
+    const { key, small } = z.object({ key: z.string().max(80), small: z.boolean().optional() }).parse(a);
+    const st = await wallState();
+    await record(who, small ? 'שידור השיגור עבר לצד' : 'סיום שידור השיגור', [await patchState({ dismissed: withDismissed(st.dismissed, (small ? 'streamfull:' : 'stream:') + key) }, who)]);
   },
   async noonToday(a, who) {
     const { on } = z.object({ on: z.boolean() }).parse(a);

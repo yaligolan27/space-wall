@@ -401,7 +401,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'set_schedules',
-    description: 'התזמונים של מה שעולה לבד על כל המסך (design.moments; רק מה שנשלח משתנה). news: חדשות החלל, כל every דקות ל-secs שניות. celebrate: מודעות אישיות (ימי הולדת ושמחות) כל every דקות ל-secs שניות; manual: כמה שניות מודעה אישית שמפעילים מהשלט נשארת. event: מודעה מנהלת בזמן האירוע: every 0 = כל זמן האירוע, אחרת כל every דקות ל-secs שניות. noon.at: שעת סרטון התדמית (ההפעלה עצמה ב-set_wall_design noon). launch: מצב שיגור lead דקות לפני שיגור. welcome.auto: אחרי כמה דקות ברוכים הבאים נכנס לצג לבד (0 = מחכה ללחיצה). fx: אנימציית הכניסה והיציאה המשותפת. on: false מכבה את האוטומציה.',
+    description: 'התזמונים של מה שעולה לבד על כל המסך (design.moments; רק מה שנשלח משתנה). news: חדשות החלל, כל every דקות ל-secs שניות. celebrate: מודעות אישיות (ימי הולדת ושמחות) כל every דקות ל-secs שניות; manual: כמה שניות מודעה אישית שמפעילים מהשלט נשארת. event: מודעה מנהלת בזמן האירוע: every 0 = כל זמן האירוע, אחרת כל every דקות ל-secs שניות. noon.at: שעת סרטון התדמית (ההפעלה עצמה ב-set_wall_design noon). launch: מצב שיגור lead דקות לפני שיגור. welcome.auto: אחרי כמה דקות ברוכים הבאים נכנס לצג לבד (0 = מחכה ללחיצה). stream: השידור הרשמי של שיגור (YouTube) עולה לבד על כל המסך before דקות לפני ההמראה ועד full דקות אחריה, ואז (small) בפינת חדשות החלל עד סוף השידור; which: all לכל השיגורים או big רק לגדולים. fx: אנימציית הכניסה והיציאה המשותפת. on: false מכבה את האוטומציה.',
     input_schema: obj({
       changes: obj({
         fx: { type: 'boolean' },
@@ -411,6 +411,7 @@ export const TOOLS: Tool[] = [
         noon: obj({ at: time('שעת סרטון התדמית') }),
         launch: obj({ on: { type: 'boolean' }, lead: { type: 'integer', minimum: 2, maximum: 30 } }),
         welcome: obj({ auto: { type: 'integer', minimum: 0, maximum: 720 } }),
+        stream: obj({ on: { type: 'boolean' }, which: { type: 'string', enum: ['all', 'big'] }, before: { type: 'integer', minimum: 1, maximum: 60 }, full: { type: 'integer', minimum: 1, maximum: 240 }, small: { type: 'boolean' } }),
       }),
       label: str('תיאור קצר לשינוי, להיסטוריה. למשל "חדשות החלל כל שעה"', 80),
     }, ['changes', 'label']),

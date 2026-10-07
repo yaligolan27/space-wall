@@ -57,7 +57,8 @@
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
   // The schedules screen ("תזמונים"): what comes up on the whole wall by itself (design.moments, lib/remote-ops.ts MOMENTS0).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
-    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 } };
+    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 },
+    stream: { on: true, which: 'all', before: 5, full: 15, small: true } };
   const minLbl = (m) => (m < 60 ? m + ' דק׳' : m % 60 ? (m / 60).toFixed(1).replace('.0', '') + ' שע׳' : m === 60 ? 'שעה' : m === 120 ? 'שעתיים' : m / 60 + ' שעות');
   const secLbl = (n) => (n < 60 ? n + ' שנ׳' : n % 60 ? Math.floor(n / 60) + ':' + pad(n % 60) + ' דק׳' : n === 60 ? 'דקה' : n / 60 + ' דק׳');
   const SPEC = [
@@ -474,6 +475,8 @@
     memorial(a, label) { this.run('memorial', a, label).catch(() => {}); }
     showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
     showNews() { this.run('showNews', {}, 'חדשות החלל על כל המסך').catch(() => {}); }
+    /** The launch broadcast on the wall: to the space news corner (small), or ended. */
+    streamCtl(small) { const st = this.D && this.D.stream; if (st) this.run('stream', { key: st.key, small: !!small }, small ? 'שידור השיגור עבר לצד' : 'סיום שידור השיגור').catch(() => {}); }
     /** The schedules: shown at once, saved in the background (the wall picks them up within seconds). */
     moments() { const d = this.design(), m = d.moments || {}, p = this.state.moPend || {}, o = { fx: 'fx' in p ? p.fx : 'fx' in m ? m.fx : MOMENTS0.fx };
       for (const k in MOMENTS0) if (typeof MOMENTS0[k] === 'object') o[k] = Object.assign({}, MOMENTS0[k], m[k], p[k]);
@@ -505,6 +508,12 @@
           time: design.noon ? { label: 'באיזו שעה', value: mo.noon.at, set: (e) => { const t = e.target.value; if (/^\d{2}:\d{2}$/.test(t)) this.setMoment('noon', 'at', t, 'סרטון התדמית ב-' + t); } } : null, selects: [] },
         Object.assign({ key: 'launch', title: 'מצב שיגור', sub: mo.launch.on ? 'ספירה לאחור על כל המסך לפני שיגור שאושר (Go), עד ההמראה' : 'כבוי: שיגורים מופיעים רק בשורת השיגורים',
           selects: mo.launch.on ? [pick('מתחיל לפני השיגור', 'launch', 'lead', mo.launch.lead, [3, 5, 10, 15, 20, 30], minLbl, (t) => 'מצב שיגור ' + t + ' לפני')] : [] }, onOff('launch', 'מצב שיגור')),
+        Object.assign({ key: 'stream', title: 'שידור חי של שיגורים', sub: mo.stream.on ? 'השידור הרשמי של השיגור (YouTube, בלי קול) עולה לבד על כל המסך לפני ההמראה' + (mo.stream.small ? ', ואחר כך עובר לפינת חדשות החלל עד סוף השידור' : '') + '. שיגור בלי שידור ביוטיוב לא יוצג' : 'כבוי: שידורים עולים רק מהסוכן בשלט',
+          selects: mo.stream.on ? [
+            { label: 'אילו שיגורים', value: mo.stream.which, options: [['all', 'כל השיגורים'], ['big', 'רק שיגורים גדולים']], set: (e) => this.setMoment('stream', 'which', e.target.value, e.target.value === 'big' ? 'שידור רק לשיגורים גדולים' : 'שידור לכל השיגורים') },
+            pick('מתחיל לפני השיגור', 'stream', 'before', mo.stream.before, [2, 5, 10, 15, 30], minLbl, (t) => 'שידור שיגור ' + t + ' לפני'),
+            pick('על כל המסך אחרי ההמראה', 'stream', 'full', mo.stream.full, [5, 10, 15, 30, 60], minLbl, (t) => 'שידור שיגור על כל המסך ' + t + ' אחרי'),
+            { label: 'אחר כך', value: mo.stream.small ? '1' : '0', options: [['1', 'עובר לפינה'], ['0', 'נגמר']], set: (e) => this.setMoment('stream', 'small', e.target.value === '1', e.target.value === '1' ? 'שידור ממשיך בפינה' : 'שידור נגמר אחרי המסך המלא') }] : [] }, onOff('stream', 'שידור חי של שיגורים')),
         { key: 'welcome', title: 'ברוכים הבאים', sub: 'עולה רק מהשלט. אפשר לקבוע שייכנס לצג הבית לבד אחרי זמן מסוים', sw: null,
           selects: [pick('נשאר על המסך', 'welcome', 'auto', mo.welcome.auto, [0, 15, 30, 60, 120, 240], (x) => (x ? minLbl(x) : 'עד שלוחצים "כניסה"'), (t) => 'ברוכים הבאים: ' + t)] },
       ].filter(Boolean);
@@ -888,8 +897,12 @@
       const mem = D && D.memorial, memItems = !mem ? [] : [
         { label: tkK === 'memorial' ? 'חזרה לצג הבית' : 'מסך יזכור', sub: tkK === 'memorial' ? 'מסך היזכור מוצג · הנר עובר לצג הבית' : mem.on ? 'עולה לבד בתחילת כל שעה · ' + mem.label : 'היזכור כבוי היום · לחיצה מחזירה אותו', dot: '#e9b872', bg: 'rgba(233,184,114,.12)', border: 'rgba(233,184,114,.55)', go: () => (tkK === 'memorial' ? this.endTk() : this.memorial({ show: true }, 'מסך יזכור על כל המסך')) }];
       const memMore = !mem ? [] : [{ label: mem.on ? 'סיום היזכור' : 'החזרת היזכור', sub: mem.on ? 'נר יזכור קטן בצג הבית · ' + mem.label : 'היזכור כבוי בצג', dot: '#e9b872', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.memorial({ on: !mem.on }, mem.on ? 'סיום היזכור בצג' : 'היזכור חזר לצג') }];
+      // A launch's broadcast, when the wall shows one (the server's schedules): to the side, or ended.
+      const lst = D && D.stream, streamItems = !lst ? [] : [
+        lst.mode === 'full' ? { label: 'שידור השיגור לצד', sub: 'שידור חי על כל המסך · ' + lst.title, dot: '#ff5a4f', bg: 'rgba(255,90,79,.10)', border: 'rgba(255,120,110,.55)', go: () => this.streamCtl(true) } : null,
+        { label: 'סיום שידור השיגור', sub: (lst.mode === 'full' ? 'על כל המסך' : 'בפינת חדשות החלל') + ' · ' + lst.title, dot: '#ff5a4f', bg: 'rgba(255,90,79,.10)', border: 'rgba(255,120,110,.55)', go: () => this.streamCtl(false) }].filter(Boolean);
       const actGroups = [
-        { title: 'להציג עכשיו על כל המסך', items: [...memItems,
+        { title: 'להציג עכשיו על כל המסך', items: [...streamItems, ...memItems,
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
           { label: tkK === 'news' ? 'חזרה מהחדשות' : 'חדשות החלל', sub: tkK === 'news' ? 'מוצג עכשיו' : 'הידיעה המרכזית הבאה מהניוזלטר' + (mo.news.on ? ' · עולה לבד כל ' + minLbl(mo.news.every) : ''), dot: '#6fd6ea', bg: 'rgba(111,214,234,.09)', border: 'rgba(111,214,234,.4)', go: () => (tkK === 'news' ? this.endTk() : this.showNews()) },
           { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : design.noon ? 'עולה לבד ב-' + mo.noon.at : 'האוטומציה כבויה', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
