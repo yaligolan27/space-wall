@@ -26,6 +26,8 @@
   const DOWS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
   const MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
   const BDAY_DAYS = 30;   // birthdays in the upcoming list
+  const LIFE_LEAD = 60;   // a personal event shows at most this many days ahead of its day (lib/feed.ts LIFE_LEAD_MAX)
+  const PEOPLE_TILES = 6, EVENT_ROWS = 4;   // the wall's people and events panels (lib/feed.ts)
   const pad = (n) => String(n).padStart(2, '0');
   const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const mmss = (sec) => pad(Math.floor(sec / 60)) + ':' + pad(Math.floor(sec % 60));
@@ -42,6 +44,12 @@
   };
   const dm = (s) => { const d = parse(s); return d.getDate() + '.' + (d.getMonth() + 1); };
   const toMin = (t) => { const [hh, mm] = (t || '0:0').split(':').map(Number); return hh * 60 + (mm || 0); };
+  /** An event's days and hours: "10:00–11:00", "כל היום", "21.10–22.10 · כל היום", "21.10 22:00 – 22.10 01:00". */
+  const evWhen = (e) => {
+    const multi = e.lastDay && e.lastDay > e.date;
+    if (e.allDay) return multi ? dm(e.date) + '–' + dm(e.lastDay) + ' · כל היום' : 'כל היום';
+    return multi ? dm(e.date) + ' ' + e.start + ' – ' + dm(e.lastDay) + ' ' + e.end : e.start + '–' + e.end;
+  };
   const cnt = (n, one, many) => (n === 1 ? one : n + ' ' + many);   // "אדם אחד" / "3 אנשים"
   const initials = (n) => String(n || '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('');
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };

@@ -9,7 +9,7 @@ import { z, ZodError } from 'zod';
 import { db, must } from './db.js';
 import { addDays, dayDiff, isoDateIL, timeIL } from './dates.js';
 import { saveSetting, setting } from './settings.js';
-import { ACTIONS, HE_TYPE, PANELS, classifyLife, cssProblem, liveNews, snapshot, storeWebImage, youtubeId } from './remote-ops.js';
+import { ACTIONS, HE_TYPE, PANELS, classifyLife, cssProblem, eventSpan, liveNews, snapshot, storeWebImage, youtubeId } from './remote-ops.js';
 
 const API = () => (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '');
 export const DEFAULT_MODEL = 'claude-sonnet-5-5';
@@ -90,10 +90,11 @@ const INSTRUCTIONS = `את/ה "סוכן הצג" בשלט של צג החלל, ה�
 - ימי הולדת: מי שברשימה עם תאריך לידה מקבל/ת מודעה אישית אוטומטית בכל שנה, בלי אירוע נפרד. אם חסר תאריך לידה מלא ומבקשים לחגוג, מעדכנים את birthday באדם; כשידוע רק היום והחודש, יוצרים אירוע "יום הולדת" לתאריך הקרוב ומציינים שתאריך לידה מלא יחזיר את המודעה כל שנה. למי שלא ברשימה: אירוע "יום הולדת" ביום ההולדת הקרוב.
 - מי שביקש/ה לא להופיע בצג (on_wall: false) או שכבר לא במנהלת (active: false) לא מקבל/ת רגעים בצג. אם מבקשים, מסבירים למה.
 - הודעת אבל לעולם לא עולה על כל המסך ולא נכתבת כשמחה.
-- אירוע בלוח האירועים בלי שעת סיום נמשך שעה. בלי שעת התחלה: שואלים.
+- אירוע בלוח האירועים בלי שעת סיום נמשך שעה. בלי שעת התחלה: שואלים. אירוע של כמה ימים: date הוא היום הראשון ו-end_date היום האחרון; all_day לאירוע בלי שעות.
+- להוריד מהצג יום הולדת שמחושב מרשימת האנשים: update_person עם show_birthday: false.
 - רשימת אנשים מקובץ: עד 20 שורות אפשר עם import_people (עם הסכמה להופיע בצג, אם יש עמודה כזו). קובץ גדול יותר, וגם תשובות טופס הסקר, מייבאים במסך "אנשים" בשלט, בכפתור "ייבוא מקובץ", שמראה תצוגה מקדימה לפני השמירה.
 - תמונות שצורפו לשיחה ממוספרות (תמונה 1, תמונה 2...). כדי לשים תמונה לאדם, לשמחה או לאירוע, שולחים את המספר ב-photo_image.
-- שאלות על מה שיש בצג או ברשימות: עונים מהנתונים, בלי כלים.
+- שאלות על מה שיש בצג או ברשימות: עונים מהנתונים, בלי כלים. מה שמוצג עכשיו בפאנלים של הצג נמצא ב-on_wall_now (עד 6 אנשים ועד 4 אירועים; waiting מחכים שיתפנה מקום).
 
 מעבר לנתונים:
 - עיצוב: set_wall_design משנה הגדרות (אפקטים, מהירויות, סגנון הגלובוס, שפה, כותרת באמצע הפס העליון, הסתרה של פאנלים). שינוי חזותי קטן שאין לו הגדרה (להזיז, למרכז, להגדיל, להקטין, לצבוע, לעגל, להסתיר רכיב): set_style_layer, שכבת CSS שהצג מוסיף מעל העיצוב שלו. הקוד של הצג לא משתנה, ואת השכבה אפשר לבטל או לאפס.
@@ -117,6 +118,8 @@ const compact = (o: Row) => Object.fromEntries(Object.entries(o).filter(([, v]) 
 /** The wall and its data as the agent sees them (a second system block, refreshed every request). */
 export function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string, launches: Row[] = []): string {
   const now = new Date(s.now), byId = new Map(s.people.map(p => [p.id, p]));
+  const tile = (t: Awaited<ReturnType<typeof snapshot>>['wall']['people'][number]) => compact({ for: t.name, what: t.type, date: t.on,
+    personal_event_id: t.ref.kind === 'life' ? t.ref.id : undefined, birthday_of: t.ref.kind === 'bday' ? t.ref.personId : undefined, full_screen_today: t.full || undefined });
   const tk = (s.takeover?.leaving ? null : s.takeover) as Row | null;   // a welcome on its way out (the entrance) is over
   const tkText = !tk ? null : (tk.kind === 'noon' ? 'סרטון תדמית' : tk.kind === 'welcome' ? 'מסך ברוכים הבאים, עד שלוחצים "כניסה לצג הבית" (end)' : tk.kind === 'event' ? 'מודעה מנהלת: ' + tk.title : tk.kind === 'image' ? 'תמונה' + (tk.caption ? ': ' + tk.caption : '') : tk.kind === 'stream' ? 'שידור חי' + (tk.title ? ': ' + tk.title : '') : 'מודעה אישית: ' + (tk.person?.name || '') + (tk.type ? ' · ' + tk.type : ''))
     + ' (עד ' + timeIL(new Date(tk.until)) + ')';
@@ -139,7 +142,15 @@ export function brief(s: Awaited<ReturnType<typeof snapshot>>, who: string, laun
       id: l.id, person_id: l.personId || undefined, for: l.personId ? byId.get(l.personId)?.name : l.name, type: l.type, date: l.date,
       show_from: l.showFrom !== l.date ? l.showFrom : undefined, note: l.note, photo: l.photo === 'upload' ? 'uploaded' : l.photo === 'none' ? 'none' : undefined,
     })),
-    directorate_events: s.events.map(e => compact({ id: e.id, title: e.title, date: e.date, start: e.start, end: e.end, place: e.place, important: e.big || undefined, has_photo: e.photo ? true : undefined })),
+    directorate_events: s.events.map(e => compact({ id: e.id, title: e.title, date: e.date, end_date: e.lastDay && e.lastDay !== e.date ? e.lastDay : undefined,
+      all_day: e.allDay || undefined, start: e.allDay ? undefined : e.start, end: e.allDay ? undefined : e.end, place: e.place, important: e.big || undefined, has_photo: e.photo ? true : undefined })),
+    // the wall's people panel (six tiles) and events panel (four rows) now
+    on_wall_now: s.wall ? compact({
+      people: s.wall.people.map(tile),
+      people_waiting: s.wall.waiting.length ? s.wall.waiting.map(tile) : undefined,
+      events: s.wall.events,
+      events_waiting: s.wall.eventsWaiting.length ? s.wall.eventsWaiting : undefined,
+    }) : undefined,
     ticker: s.ticker.map(t => compact({ id: t.id, name: t.name, kind: t.kind, start: t.start, end: t.end, place: t.place, url: t.url })),
     newsletter: s.newsletter ? { range: s.newsletter.range, items: s.newsletter.count, imported: s.newsletter.at } : null,
     recent_changes: s.history.slice(0, 12).map(h => ({ id: h.id, at: isoDateIL(new Date(h.at)) + ' ' + timeIL(new Date(h.at)), who: h.who, text: h.text })),
@@ -307,24 +318,30 @@ export const TOOLS: Tool[] = [
     description: 'אירוע בלוח "אירועים" של המנהלת (טקס, הרמת כוסית, כנס, ביקור, מפגש...). מוצג בצג בשבוע שלפניו. עם id: עריכה, ורק השדות שנשלחים משתנים; שינוי שעת ההתחלה בלי שעת סיום שומר על אותו משך.',
     input_schema: obj({
       id: id('לעריכת אירוע קיים. בלי id נוצר אירוע חדש'),
-      title: str('שם האירוע', 80), date: date('תאריך'), start: time('שעת התחלה'), end: time('שעת סיום. בלי: שעה אחרי ההתחלה'),
-      place: str('מקום', 60), important: bool('מודעה מנהלת: האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד בסופו'),
+      title: str('שם האירוע', 80), date: date('תאריך (היום הראשון, באירוע של כמה ימים)'), start: time('שעת התחלה'), end: time('שעת סיום. בלי: שעה אחרי ההתחלה'),
+      end_date: dateOrNull('היום האחרון, לאירוע של כמה ימים (עד חודש). null: אירוע של יום אחד'),
+      all_day: bool('אירוע בלי שעות, כל היום (גם לכמה ימים עם end_date). false: חוזר לשעות start ו-end'),
+      place: str('מקום', 60), important: bool('מודעה מנהלת: האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד בסופו (לא באירוע של יום שלם)'),
       photo_image: PHOTO_IMAGE, no_photo: bool('להסיר את התמונה של האירוע'),
     }),
     async run(a, ctx) {
       let b: Row = {}, dur = 60;
       if (a.id) {
-        const e = await rowOf('directorate_events', a.id, 'האירוע'), s = new Date(e.starts_at), en = e.ends_at ? new Date(e.ends_at) : new Date(s.getTime() + 60 * 60e3);
-        b = { title: e.title, date: isoDateIL(s), start: timeIL(s), end: timeIL(en), place: e.place || '', big: !!e.takeover };
+        const e = await rowOf('directorate_events', a.id, 'האירוע'), sp = eventSpan(e);
+        b = { title: e.title, date: sp.date, start: sp.start, end: sp.end, lastDay: sp.lastDay > sp.date ? sp.lastDay : null, allDay: sp.allDay, place: e.place || '', big: !!e.takeover };
         dur = toMin(b.end) - toMin(b.start) > 0 ? toMin(b.end) - toMin(b.start) : 60;
+        // Moved to another day: an event of several days keeps its length.
+        if (a.date !== undefined && a.end_date === undefined && b.lastDay && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) b.lastDay = addDays(b.lastDay, dayDiff(b.date, a.date));
       }
-      Object.assign(b, defined({ title: a.title, date: a.date, start: a.start, end: a.end, place: a.place, big: a.important }));
+      Object.assign(b, defined({ title: a.title, date: a.date, start: a.start, end: a.end, lastDay: a.end_date, allDay: a.all_day, place: a.place, big: a.important }));
       if (a.photo_image != null) b.photo = await imageUrl(ctx, a.photo_image, 'events');
       else if (a.no_photo) b.photo = null;
       if (!(b.title || '').trim()) throw new Error('חסר שם לאירוע (title)');
       if (!b.date) throw new Error('חסר תאריך (date)');
+      if (b.allDay) Object.assign(b, { start: '00:00', end: '00:00' });
+      else if (a.all_day === false && b.start === '00:00' && a.start === undefined) throw new Error('חסרה שעת התחלה (start) לאירוע עם שעות');
       if (!b.start) throw new Error('חסרה שעת התחלה (start)');
-      if (a.start !== undefined && a.end === undefined) b.end = fromMin(toMin(b.start) + dur);
+      if (!b.allDay && a.start !== undefined && a.end === undefined) b.end = fromMin(toMin(b.start) + dur);
       if (!b.end) b.end = fromMin(toMin(b.start) + 60);
       return ok(await ACTIONS.saveEvent({ ...b, id: a.id }, ctx.who) as Row);
     },

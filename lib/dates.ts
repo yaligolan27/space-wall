@@ -41,11 +41,13 @@ export function ilToIso(date: string, time = '09:00'): string {
 export function timeIL(d: Date): string {
   return new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 }
-/** month/day of a yearly date in the next `horizon` days (birthdays). Returns the ISO date this year or next. */
+/** month/day of a yearly date in the next `horizon` days (birthdays). Returns the ISO date this year or next.
+ *  29 February falls on the 28th in a common year, as in the remote. */
 export function nextYearly(mmdd: string, todayIso: string, horizon: number): string | null {
   const year = Number(todayIso.slice(0, 4));
   for (const y of [year, year + 1]) {
-    const iso = `${y}-${mmdd}`;
+    const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+    const iso = `${y}-${mmdd === '02-29' && !leap ? '02-28' : mmdd}`;
     const diff = dayDiff(todayIso, iso);
     if (diff >= 0 && diff <= horizon) return iso;
   }
