@@ -3,7 +3,9 @@
 //   newsletter part  (issue, summary, featured, news, catColor, catImage, ticker)
 //                    ← latest row in newsletter_issues; empty until the first import (the bundled sample lends only
 //                      the category colours and images, which are style, not content)
-//   directorate      ← directorate_events in the next 7 days that have not ended (the panel's first four)
+//   directorate      ← directorate_events in the next 7 days that have not ended (the panel's first four); the year's
+//                      occasions are among them (lib/occasions.ts), dressed by their kind (`occ`)
+//   occasions        ← the occasions the wall greets today: a card under the emblem and a full screen (app/src/wall.js)
 //   people           ← life_events in their window + birthdays computed from people, next 10 days (and 3 back);
 //                      only people on the wall (on_wall) and birthdays they agreed to (show_birthday); a life event
 //                      can also name someone outside the people list. The panel's six nearest.
@@ -15,6 +17,7 @@
 import { db, must } from './db.js';
 import { addDays, dayDiff, ilToIso, isoDateIL, nextYearly, shortDate, timeIL } from './dates.js';
 import { endDate } from './newsletter.js';
+import { occasionGreets, occasionLook } from './occasions.js';
 import sample from '../app/data/feed.json' with { type: 'json' };
 
 export type Settings = { peopleHorizonDays: number; peopleBackDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
@@ -233,10 +236,18 @@ export async function buildFeed() {
 
   // ---- directorate events, next 7 days: the ones still to come or running, the panel's four
   // An all-day one has no hour; one of several days says its days instead ("21–23.10").
-  const directorate = eventTiles(must(dirR, 'directorate_events') as any[], t, today, cfg).shown.map(e => {
-    const d = new Date(e.starts_at), iso = isoDateIL(d), tm = timeIL(d), en = new Date(eventEnd(e)), last = timeIL(en) === '00:00' ? addDays(isoDateIL(en), -1) : isoDateIL(en);
+  const dirRows = must(dirR, 'directorate_events') as any[];
+  const days = (e: any) => { const iso = isoDateIL(new Date(e.starts_at)), en = new Date(eventEnd(e)); return { iso, last: timeIL(en) === '00:00' ? addDays(isoDateIL(en), -1) : isoDateIL(en) }; };
+  const directorate = eventTiles(dirRows, t, today, cfg).shown.map(e => {
+    const d = new Date(e.starts_at), tm = timeIL(d), { iso, last } = days(e), occ = occasionLook(e);
     return { day: iso.slice(8, 10), dow: dowOf(iso), mon: MON[Number(iso.slice(5, 7)) - 1], time: tm !== '00:00' ? tm : last > iso ? range(iso, last) : '', name: e.title, place: e.place || '',
-      start: d.toISOString(), end: new Date(eventEnd(e)).toISOString(), img: e.photo_url || null };
+      start: d.toISOString(), end: new Date(eventEnd(e)).toISOString(), img: e.photo_url || null, ...(occ ? { occ } : {}) };
+  });
+  // ---- today's occasions: the ones the office kept (edited or not), each on the days the wall greets it
+  const occasions = dirRows.flatMap(e => {
+    const occ = occasionLook(e), { iso, last } = days(e);
+    if (!occ || !occasionGreets(occ.kind, iso, last, today)) return [];
+    return [{ ...occ, id: e.id, title: e.title, first: iso, last }];
   });
 
   // ---- people: explicit life events + computed birthdays, the panel's six tiles
@@ -281,6 +292,7 @@ export async function buildFeed() {
     launches,
     tracked: [],
     directorate,
+    occasions,
     people: peopleOut,
     promoVideo: '/assets/promo.mp4',
   };

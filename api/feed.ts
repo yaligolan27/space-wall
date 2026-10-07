@@ -7,6 +7,8 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { buildFeed } from '../lib/feed.js';
 import { setting } from '../lib/settings.js';
 import { feedInEnglish } from '../lib/translate.js';
+import { occasionDemo } from '../lib/occasions.js';
+import { isoDateIL } from '../lib/dates.js';
 
 const digest = (s: string) => createHash('sha256').update(s).digest();
 async function keyOk(req: VercelRequest): Promise<boolean> {
@@ -19,6 +21,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (!(await keyOk(req))) return res.status(401).json({ error: 'unauthorized' });
     const feed = await buildFeed();
+    // ?occ=<key>: that occasion as today's (the wall's demo of an occasion's card and full screen)
+    const demo = typeof req.query.occ === 'string' ? occasionDemo(req.query.occ, isoDateIL()) : null;
+    if (demo) feed.occasions = [demo, ...feed.occasions.filter(o => o.key !== demo.key)];
     // ?lang=en: the wall in English (the remote's switch). Text with no English yet stays Hebrew, and that answer is
     // cached only briefly, so the next poll picks up what the model has finished meanwhile.
     if (req.query.lang === 'en') {

@@ -69,3 +69,6 @@ a{color:#9fdcff;text-decoration:none}a:hover{color:#e6f1ff}
 @keyframes mmRise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 @keyframes mmTitleIn{from{opacity:0;transform:scale(1.035)}to{opacity:1;transform:none}}
 @keyframes mmTitleGlow{0%,100%{opacity:1}50%{opacity:.55}}
+/* occasions (overlays.js OccasionMoment): a holiday's glyphs float up; a day of space sends a craft across */
+@keyframes occFloat{0%{transform:translateY(0) rotate(0);opacity:0}10%{opacity:.55}85%{opacity:.4}100%{transform:translateY(-1300px) rotate(var(--r));opacity:0}}
+@keyframes occCross{from{transform:translate(0,0) rotate(-12deg)}to{transform:translate(2200px,-760px) rotate(-12deg)}}
