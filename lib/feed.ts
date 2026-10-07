@@ -232,9 +232,10 @@ export async function buildFeed() {
   if (!base.featured.length) base.featured = base.news.slice(0, 6).map((_: unknown, i: number) => i);
 
   // ---- directorate events, next 7 days: the ones still to come or running, the panel's four
+  // An all-day one has no hour; one of several days says its days instead ("21–23.10").
   const directorate = eventTiles(must(dirR, 'directorate_events') as any[], t, today, cfg).shown.map(e => {
-    const d = new Date(e.starts_at), iso = isoDateIL(d), tm = timeIL(d);
-    return { day: iso.slice(8, 10), dow: dowOf(iso), mon: MON[Number(iso.slice(5, 7)) - 1], time: tm === '00:00' ? '' : tm, name: e.title, place: e.place || '',
+    const d = new Date(e.starts_at), iso = isoDateIL(d), tm = timeIL(d), en = new Date(eventEnd(e)), last = timeIL(en) === '00:00' ? addDays(isoDateIL(en), -1) : isoDateIL(en);
+    return { day: iso.slice(8, 10), dow: dowOf(iso), mon: MON[Number(iso.slice(5, 7)) - 1], time: tm !== '00:00' ? tm : last > iso ? range(iso, last) : '', name: e.title, place: e.place || '',
       start: d.toISOString(), end: new Date(eventEnd(e)).toISOString(), img: e.photo_url || null };
   });
 

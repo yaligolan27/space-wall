@@ -170,13 +170,16 @@ export async function snapshot() {
     wallPanels(now),
   ]);
   const issue = (must(nl, 'newsletter') as Row[])[0];
-  // The same moment entered twice (same person or name, wording and day): the later ones say which they repeat.
-  const firstOf = new Map<string, string>();
-  const lifeRows = (must(life, 'life') as Row[]).map(l => {
-    const k = [l.type, l.label || '', l.person_id || (l.name || '').trim(), l.event_date].join('|'), dupOf = firstOf.get(k) || null, w = lifeWindow(l);
-    if (!dupOf) firstOf.set(k, l.id);
+  // The same moment entered twice (same person or name, wording and day): the wall shows one of them, and the others say
+  // which one they repeat.
+  const lifeAll = must(life, 'life') as Row[], dupKey = (l: Row) => [l.type, l.label || '', l.person_id || (l.name || '').trim(), l.event_date].join('|');
+  const tiles = [...panels.people.shown, ...panels.people.waiting], onWall = new Set(tiles.map(c => (c.ref.kind === 'life' ? c.ref.id : '')));
+  const keeper = new Map<string, string>();
+  for (const l of lifeAll) { const k = dupKey(l), cur = keeper.get(k); if (!cur || (onWall.has(l.id) && !onWall.has(cur))) keeper.set(k, l.id); }
+  const lifeRows = lifeAll.map(l => {
+    const keep = keeper.get(dupKey(l)), w = lifeWindow(l);
     return { id: l.id, personId: l.person_id || null, name: l.name || '', kind: l.type, type: l.label || HE_TYPE[l.type] || 'אירוע', date: l.event_date,
-      showFrom: w.from, showUntil: w.until, note: l.text_he || '', photo: l.photo_mode || 'crm', photoSrc: l.photo_url || null, dupOf };
+      showFrom: w.from, showUntil: w.until, note: l.text_he || '', photo: l.photo_mode || 'crm', photoSrc: l.photo_url || null, dupOf: keep && keep !== l.id ? keep : null };
   });
   return {
     now: now.toISOString(), today,
