@@ -42,7 +42,6 @@ export const DesignPatch = z.object({
 }).partial().strict();
 
 const NOON_MS = 150e3;            // 10 s countdown + the 107 s promo, with a margin
-const CELEBRATE_MS = 60e3;
 const EVENT_FALLBACK_MS = 30 * 60e3;
 const EVENT_PREVIEW_MS = 10 * 60e3;
 const WELCOME_MS = 12 * 3600e3;   // the welcome screen waits for "enter" (endTakeover); a forgotten one still ends
@@ -65,6 +64,43 @@ export function classifyLife(label: string): string {
   return 'other';
 }
 
+// ---- schedules: when the full-screen moments come up and for how long (the remote's "תזמונים" screen) -------
+/** Stored as design.moments (only what the remote changed); momentsOf() fills in the rest. These defaults are the
+ *  wall's behaviour before the schedules screen existed, plus the half-hourly space news. The 12:00 video's on/off
+ *  stays design.noon. Times are minutes (every, lead, auto) or seconds (secs, manual). */
+export const MOMENTS0 = {
+  fx: true,                                         // the shared entry and exit transition
+  news: { on: true, every: 30, secs: 30 },          // a space news item, every `every` minutes (at a quarter past and to)
+  celebrate: { on: true, every: 30, secs: 14, manual: 60 },   // personal ads (birthdays, joys); manual: shown from the remote
+  event: { on: true, every: 0, secs: 60 },          // directorate ads while their event runs: every 0 = the whole time
+  noon: { at: '12:00' },                            // the promo video's time
+  launch: { on: true, lead: 10 },                   // launch mode, `lead` minutes before a Go launch
+  welcome: { auto: 0 },                             // minutes until the welcome enters the wall by itself; 0 = waits for "enter"
+};
+export type Moments = typeof MOMENTS0;
+const on = z.boolean(), int = (min: number, max: number) => z.number().int().min(min).max(max);
+export const MomentsPatch = z.object({
+  fx: on,
+  news: z.object({ on, every: int(5, 240), secs: int(10, 300) }).partial().strict(),
+  celebrate: z.object({ on, every: int(5, 240), secs: int(8, 300), manual: int(10, 600) }).partial().strict(),
+  event: z.object({ on, every: int(0, 240).refine(v => v === 0 || v >= 5, 'כל 5 דקות לפחות'), secs: int(15, 1800) }).partial().strict(),
+  noon: z.object({ at: TIME }).partial().strict(),
+  launch: z.object({ on, lead: int(2, 30) }).partial().strict(),
+  welcome: z.object({ auto: int(0, 720) }).partial().strict(),
+}).partial().strict();
+/** The stored schedules over the defaults (anything malformed falls back to its default). */
+export function momentsOf(design: Row | null | undefined): Moments {
+  const raw: Row = design && typeof design.moments === 'object' && design.moments ? design.moments : {};
+  const out: Row = { fx: typeof raw.fx === 'boolean' ? raw.fx : MOMENTS0.fx };
+  for (const [k, d] of Object.entries(MOMENTS0)) {
+    if (typeof d !== 'object') continue;
+    const r = raw[k] && typeof raw[k] === 'object' ? raw[k] : {};
+    out[k] = Object.fromEntries(Object.entries(d).map(([f, v]) => [f, typeof r[f] === typeof v ? r[f] : v]));
+  }
+  return out as Moments;
+}
+const withMoments = <T extends Row>(design: T): T & { moments: Moments } => ({ ...design, moments: momentsOf(design) });
+
 // ---- state -----------------------------------------------------------------------------------------
 type Row = Record<string, any>;
 type UndoOp = { op: 'state'; patch: Row } | { op: 'del'; table: string; id: string } | { op: 'put'; table: string; row: Row };
@@ -81,10 +117,10 @@ const minutesIL = (d: Date) => { const [h, m] = timeIL(d).split(':').map(Number)
 
 /** An event on the full screen until it ends. Shown from the remote ahead of time, it stays only a short preview
  *  (unless it starts within half an hour), so a click on next week's event can't hold the wall for days. */
-function evTakeover(e: Row, auto: boolean, now = Date.now()): Row {
+function evTakeover(e: Row, auto: boolean, now = Date.now(), slot?: { k: number; until: number }): Row {
   const start = new Date(e.starts_at), end = e.ends_at ? Date.parse(e.ends_at) : start.getTime() + 60 * 60e3;
-  const until = end <= now ? now + EVENT_FALLBACK_MS : start.getTime() - now > 30 * 60e3 ? now + EVENT_PREVIEW_MS : end;
-  return { id: (auto ? 'event:' : 'rt:' + now + ':') + e.id, kind: 'event', auto, eventId: e.id, title: e.title, place: e.place || '',
+  const until = slot ? slot.until : end <= now ? now + EVENT_FALLBACK_MS : start.getTime() - now > 30 * 60e3 ? now + EVENT_PREVIEW_MS : end;
+  return { id: (auto ? 'event:' : 'rt:' + now + ':') + e.id + (slot ? ':' + slot.k : ''), kind: 'event', auto, eventId: e.id, title: e.title, place: e.place || '',
     start: timeIL(start), end: timeIL(new Date(end)), img: e.photo_url || null, until: new Date(until).toISOString() };
 }
 
@@ -95,14 +131,28 @@ async function bigEventsNow(now: Date): Promise<Row[]> {
   return rows.filter(e => (e.ends_at ? Date.parse(e.ends_at) : Date.parse(e.starts_at) + 60 * 60e3) > now.getTime());
 }
 
+/** A running important event's turn on the full screen under the schedules: the whole event (every 0), or `secs`
+ *  seconds every `every` minutes from its start; null between turns. */
+function eventSlot(e: Row, M: Moments, t: number): { k: number; until: number } | undefined | null {
+  if (!M.event.every) return undefined;
+  const start = Date.parse(e.starts_at), end = e.ends_at ? Date.parse(e.ends_at) : start + 60 * 60e3, p = M.event.every * 60e3;
+  const k = Math.floor((t - start) / p), until = Math.min(end, start + k * p + M.event.secs * 1e3);
+  return t < until ? { k, until } : null;
+}
+
 /** What is on the full screen now: a moment started from the remote, else a running important event, else the 12:00 show. */
 function effectiveTakeover(st: Row, big: Row[], now: Date): Row | null {
   const t = now.getTime(), today = isoDateIL(now), dis = new Set<string>(st.dismissed || []);
   if (st.takeover && Date.parse(st.takeover.until) > t) return st.takeover;
-  const ev = big.find(e => !dis.has('event:' + e.id));
-  if (ev) return evTakeover(ev, true, t);
-  const design = { ...DESIGN_DEFAULTS, ...(st.design || {}) };
-  const noonAt = Date.parse(ilToIso(today, '12:00'));
+  const design = { ...DESIGN_DEFAULTS, ...(st.design || {}) }, M = momentsOf(design);
+  if (M.event.on) for (const e of big) {
+    if (dis.has('event:' + e.id)) continue;
+    const slot = eventSlot(e, M, t);
+    if (slot === null) continue;
+    const tk = evTakeover(e, true, t, slot);
+    if (!dis.has(tk.id)) return tk;
+  }
+  const noonAt = Date.parse(ilToIso(today, M.noon.at));
   if (design.noon && st.noon_skip !== today && !dis.has('noon:' + today) && t >= noonAt && t < noonAt + NOON_MS)
     return { id: 'noon:' + today, kind: 'noon', auto: true, until: new Date(noonAt + NOON_MS).toISOString() };
   return null;
@@ -115,7 +165,7 @@ const BUILD = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT
 export async function live() {
   const now = new Date();
   const [st, big] = await Promise.all([wallState(), bigEventsNow(now)]);
-  const design = { ...DESIGN_DEFAULTS, ...(st.design || {}) };
+  const design = withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) });
   design.news = liveNews(design.news, now.getTime());
   return { design, brightness: st.brightness ?? 100, urgent: st.urgent || null,
     noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), at: now.toISOString(), build: BUILD };
@@ -158,7 +208,7 @@ export async function snapshot() {
     ticker: (must(ticker, 'ticker') as Row[]).filter(t => (t.ends_on || t.starts_on) >= today)
       .map(t => ({ id: t.id, name: t.name, kind: t.kind || 'אירוע', start: t.starts_on, end: t.ends_on || null, place: t.place_he || '', url: t.url || '' })),
     newsletter: issue ? { range: issue.content?.issue?.range || '', url: issue.source_url, count: (issue.content?.news || []).length, at: issue.imported_at } : null,
-    state: { design: { ...DESIGN_DEFAULTS, ...(st.design || {}) }, brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
+    state: { design: withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) }), brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
     takeover: effectiveTakeover(st, big, now),
     history: (must(hist, 'history') as Row[]).map(h => ({ id: h.id, at: h.at, who: h.who, text: h.label, canRestore: Array.isArray(h.undo) && h.undo.length > 0 })),
   };
@@ -320,9 +370,10 @@ async function lifeWho(personId: string | null | undefined, name: string | undef
 const lifeRowPerson = async (e: Row): Promise<Row> => (e.person_id ? personRow(e.person_id) : { display_name: e.name || '' });
 
 /** person = the wall's card; type/note = the operator's wording, for the remote's preview. */
-function celebrateTakeover(card: Row, personId: string | null, type: string, note: string, now = Date.now()): Row {
-  return { id: 'rt:' + now, kind: 'celebrate', personId, person: card, type, note, until: new Date(now + CELEBRATE_MS).toISOString() };
+function celebrateTakeover(card: Row, personId: string | null, type: string, note: string, M: Moments, now = Date.now()): Row {
+  return { id: 'rt:' + now, kind: 'celebrate', personId, person: card, type, note, at: new Date(now).toISOString(), until: new Date(now + M.celebrate.manual * 1e3).toISOString() };
 }
+const momentsNow = async () => momentsOf((await wallState()).design);
 
 export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> = {
   async noon(_a, who) {
@@ -333,9 +384,22 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
    *  guest: an optional line under the title, as typed (e.g. "Delegation of Japan"). */
   async welcome(a, who) {
     const { guest } = z.object({ guest: z.string().trim().max(80, 'עד 80 תווים').optional() }).parse(a || {});
-    const now = Date.now();
+    const now = Date.now(), auto = (await momentsNow()).welcome.auto;
     await record(who, 'מסך ברוכים הבאים' + (guest ? ': ' + guest : ''),
-      [await patchState({ takeover: { id: 'rt:' + now, kind: 'welcome', guest: guest || '', until: new Date(now + WELCOME_MS).toISOString() } }, who)]);
+      [await patchState({ takeover: { id: 'rt:' + now, kind: 'welcome', guest: guest || '', until: new Date(now + (auto ? auto * 60e3 : WELCOME_MS)).toISOString() } }, who)]);
+  },
+  /** A space news item on the whole wall now: the wall picks the next of the newsletter's central stories. */
+  async showNews(_a, who) {
+    const now = Date.now(), M = await momentsNow();
+    await record(who, 'חדשות החלל על כל המסך',
+      [await patchState({ takeover: { id: 'rt:' + now, kind: 'news', at: new Date(now).toISOString(), until: new Date(now + M.news.secs * 1e3).toISOString() } }, who)]);
+  },
+  /** The schedules screen: what comes up by itself, how often and for how long (only what is sent changes). */
+  async moments(a, who) {
+    const { patch, label } = z.object({ patch: MomentsPatch, label: z.string().trim().min(1).max(80) }).parse(a);
+    const cur = (await wallState()).design || {}, prev: Row = cur.moments || {}, next: Row = { ...prev };
+    for (const [k, v] of Object.entries(patch)) next[k] = v && typeof v === 'object' ? { ...(prev[k] || {}), ...v } : v;
+    await record(who, 'תזמונים: ' + label, [await patchState({ design: { ...cur, moments: next } }, who)]);
   },
   async celebrate(a, who) {
     const { personId, lifeId } = z.object({ personId: UUID.nullable().optional(), lifeId: UUID.optional() })
@@ -354,7 +418,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
       assertOnWall(p);
       card = birthdayCard(p, today, today);
     }
-    await record(who, 'מודעה אישית על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note) }, who)]);
+    await record(who, 'מודעה אישית על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note, await momentsNow()) }, who)]);
   },
   async showEvent(a, who) {
     const { eventId } = z.object({ eventId: UUID }).parse(a);
@@ -395,7 +459,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
       saved = must(await db().from('life_events').insert({ ...row, created_by: 'remote:' + who }).select('*').single(), 'add life') as Row;
       undo.push({ op: 'del', table: 'life_events', id: saved.id });
     }
-    if (f.showNow && kind !== 'bereavement') undo.push(await patchState({ takeover: celebrateTakeover(lifeCard(saved, p, isoDateIL()), personId, f.type, f.note || '') }, who));
+    if (f.showNow && kind !== 'bereavement') undo.push(await patchState({ takeover: celebrateTakeover(lifeCard(saved, p, isoDateIL()), personId, f.type, f.note || '', await momentsNow()) }, who));
     await record(who, (f.id ? 'עודכן: ' : 'נוסף: ') + f.type + ' · ' + displayName(p), undo);
     return { id: saved.id };
   },
@@ -596,9 +660,9 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     }
   },
   async resetDesign(_a, who) {
-    // The news items added from the remote live in design too (design.news), but they aren't the design.
-    const news = (await wallState()).design?.news;
-    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: news?.length ? { news } : {} }, who)]);
+    // The news items added from the remote and the schedules live in design too (design.news, design.moments), but they aren't the design.
+    const { news, moments } = (await wallState()).design || {};
+    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: { ...(news?.length ? { news } : {}), ...(moments ? { moments } : {}) } }, who)]);
   },
   /** A news item from the remote (the agent's suggestion, after the operator approved it): first in the newsletter
    *  panel, as a featured story, until it expires. Hebrew and English, so the English mode needs no translation. */

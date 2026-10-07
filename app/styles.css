@@ -52,5 +52,10 @@ a{color:#9fdcff;text-decoration:none}a:hover{color:#e6f1ff}
 @keyframes wlSeam{0%{opacity:1;transform:scaleY(0)}60%{opacity:1;transform:none}100%{opacity:0;transform:none}}
 @keyframes wlEdge{0%{opacity:0}30%{opacity:.85}100%{opacity:0}}
 /* the wall's far star tile, moved by transforms (a background-position animation repaints the whole screen every frame) */
+/* the shared transition of full-screen moments (overlays.js Moment) */
+@keyframes mvIn{from{opacity:0;transform:scale(1.04)}to{opacity:1;transform:none}}
+@keyframes mvOut{from{opacity:1;transform:none}to{opacity:0;transform:scale(1.05)}}
+@keyframes mvSweepDown{0%{opacity:0;transform:translateY(0)}10%,90%{opacity:1}100%{opacity:0;transform:translateY(1078px)}}
+@keyframes mvSweepUp{0%{opacity:0;transform:translateY(1078px)}10%,90%{opacity:1}100%{opacity:0;transform:translateY(0)}}
 @keyframes tileX{from{transform:none}to{transform:translateX(-512px)}}
 @keyframes tileY{from{transform:none}to{transform:translateY(512px)}}

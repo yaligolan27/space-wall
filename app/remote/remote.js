@@ -47,7 +47,12 @@
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 
   const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he' };
-  const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
+  const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
+  // The schedules screen ("תזמונים"): what comes up on the whole wall by itself (design.moments, lib/remote-ops.ts MOMENTS0).
+  const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
+    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 } };
+  const minLbl = (m) => (m < 60 ? m + ' דק׳' : m % 60 ? (m / 60).toFixed(1).replace('.0', '') + ' שע׳' : m === 60 ? 'שעה' : m === 120 ? 'שעתיים' : m / 60 + ' שעות');
+  const secLbl = (n) => (n < 60 ? n + ' שנ׳' : n % 60 ? Math.floor(n / 60) + ':' + pad(n % 60) + ' דק׳' : n === 60 ? 'דקה' : n / 60 + ' דק׳');
   const SPEC = [
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
     { title: 'שפה', controls: [{ key: 'lang', label: 'שפת הצג (השלט נשאר בעברית)', kind: 'seg', options: [['he', 'עברית'], ['en', 'English']] }] },
@@ -431,6 +436,7 @@
       if (tk.kind === 'event') return tk.title;
       if (tk.kind === 'image') return 'תמונה' + (tk.caption ? ' · ' + tk.caption : '');
       if (tk.kind === 'stream') return 'שידור חי' + (tk.title ? ' · ' + tk.title : '');
+      if (tk.kind === 'news') return 'חדשות החלל';
       return tpl(tk.type || (tk.person && tk.person.type)).head + (tk.person ? ' · ' + tk.person.name : '');
     }
 
@@ -456,6 +462,44 @@
     showEvent(e) { this.run('showEvent', { eventId: e.id }, 'על כל המסך: ' + e.title).catch(() => {}); }
     endTk() { const w = (this.takeover() || {}).kind === 'welcome'; this.run('endTakeover', {}, w ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה').catch(() => {}); }
     showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
+    showNews() { this.run('showNews', {}, 'חדשות החלל על כל המסך').catch(() => {}); }
+    /** The schedules: shown at once, saved in the background (the wall picks them up within seconds). */
+    moments() { const d = this.design(), m = d.moments || {}, p = this.state.moPend || {}, o = { fx: 'fx' in p ? p.fx : 'fx' in m ? m.fx : MOMENTS0.fx };
+      for (const k in MOMENTS0) if (typeof MOMENTS0[k] === 'object') o[k] = Object.assign({}, MOMENTS0[k], m[k], p[k]);
+      return o; }
+    /** The schedules screen's cards (renderVals). Each choice list keeps a value set elsewhere (the agent) as it is. */
+    momentCards(mo, design, sw) {
+      const pick = (label, group, field, cur, values, fmt, say) => {
+        const opts = values.includes(cur) ? values : [...values, cur].sort((a, b) => a - b);
+        return { label, value: String(cur), options: opts.map((x) => [String(x), fmt(x)]), set: (e) => { const x = Number(e.target.value); this.setMoment(group, field, x, say(fmt(x))); } };
+      };
+      const onOff = (group, name) => ({ sw: sw(mo[group].on), toggle: () => this.setMoment(group, 'on', !mo[group].on, name + (mo[group].on ? ': כבוי' : ': פעיל')) });
+      const every = (group, name) => pick('כל כמה זמן', group, 'every', mo[group].every, [10, 15, 20, 30, 45, 60, 90, 120], minLbl, (t) => name + ' כל ' + t);
+      const ev = mo.event, evAll = !ev.every;
+      return [
+        Object.assign({ key: 'news', title: 'חדשות החלל', sub: mo.news.on ? 'הידיעה המרכזית הבאה מהניוזלטר עולה לבד כל ' + minLbl(mo.news.every) + ', באמצע הזמן שבין המודעות האישיות' : 'כבוי: עולה רק בלחיצה על "חדשות החלל"',
+          selects: mo.news.on ? [every('news', 'חדשות החלל'), pick('נשאר על המסך', 'news', 'secs', mo.news.secs, [15, 20, 30, 45, 60, 90, 120], secLbl, (t) => 'חדשות החלל ל-' + t)] : [],
+          btn: { label: 'להציג עכשיו', go: () => this.showNews() } }, onOff('news', 'חדשות החלל')),
+        Object.assign({ key: 'celebrate', title: 'ימי הולדת ושמחות', sub: mo.celebrate.on ? 'מודעה אישית עולה לבד כל ' + minLbl(mo.celebrate.every) + ' מהשעה העגולה, לכל מי שהיום שלו (ועד יומיים אחרי)' : 'כבוי: מודעות אישיות עולות רק מהשלט',
+          selects: [].concat(mo.celebrate.on ? [every('celebrate', 'מודעות אישיות'), pick('נשאר על המסך', 'celebrate', 'secs', mo.celebrate.secs, [10, 14, 20, 30, 45, 60], secLbl, (t) => 'מודעה אישית ל-' + t)] : [],
+            [pick('כשמפעילים מהשלט', 'celebrate', 'manual', mo.celebrate.manual, [30, 60, 90, 120, 180, 300], secLbl, (t) => 'מודעה אישית מהשלט ל-' + t)]) }, onOff('celebrate', 'מודעות אישיות')),
+        Object.assign({ key: 'event', title: 'מודעה מנהלת', sub: ev.on ? 'אירוע שסומן "מודעה מנהלת" עולה לבד בזמן שהוא מתקיים' : 'כבוי: אירועים עולים רק מהשלט',
+          selects: ev.on ? [pick('מתי', 'event', 'every', ev.every, [0, 10, 15, 30, 60], (x) => (x ? 'כל ' + minLbl(x) : 'כל זמן האירוע'), (t) => 'מודעה מנהלת ' + t)]
+            .concat(evAll ? [] : [pick('נשאר על המסך', 'event', 'secs', ev.secs, [30, 60, 120, 300, 600], secLbl, (t) => 'מודעה מנהלת ל-' + t)]) : [] }, onOff('event', 'מודעה מנהלת')),
+        { key: 'noon', title: 'סרטון תדמית', sub: design.noon ? 'עולה לבד כל יום, ונשאר עד סוף הסרטון' : 'כבוי: עולה רק בלחיצה על "סרטון תדמית"', sw: sw(design.noon),
+          toggle: () => this.setDesign('noon', !design.noon, !design.noon ? 'פעיל' : 'כבוי'),
+          time: design.noon ? { label: 'באיזו שעה', value: mo.noon.at, set: (e) => { const t = e.target.value; if (/^\d{2}:\d{2}$/.test(t)) this.setMoment('noon', 'at', t, 'סרטון התדמית ב-' + t); } } : null, selects: [] },
+        Object.assign({ key: 'launch', title: 'מצב שיגור', sub: mo.launch.on ? 'ספירה לאחור על כל המסך לפני שיגור שאושר (Go), עד ההמראה' : 'כבוי: שיגורים מופיעים רק בשורת השיגורים',
+          selects: mo.launch.on ? [pick('מתחיל לפני השיגור', 'launch', 'lead', mo.launch.lead, [3, 5, 10, 15, 20, 30], minLbl, (t) => 'מצב שיגור ' + t + ' לפני')] : [] }, onOff('launch', 'מצב שיגור')),
+        { key: 'welcome', title: 'ברוכים הבאים', sub: 'עולה רק מהשלט. אפשר לקבוע שייכנס לצג הבית לבד אחרי זמן מסוים', sw: null,
+          selects: [pick('נשאר על המסך', 'welcome', 'auto', mo.welcome.auto, [0, 15, 30, 60, 120, 240], (x) => (x ? minLbl(x) : 'עד שלוחצים "כניסה"'), (t) => 'ברוכים הבאים: ' + t)] },
+      ];
+    }
+    setMoment(group, field, value, label) {
+      const patch = field ? { [group]: { [field]: value } } : { [group]: value };
+      this.setState((s) => { const p = Object.assign({}, s.moPend); p[group] = field ? Object.assign({}, p[group], { [field]: value }) : value; return { moPend: p }; });
+      this.run('moments', { patch, label }, 'תזמונים: ' + label).catch(() => {}).finally(() => this.setState({ moPend: null }));
+    }
     async saveLife(showNow) {
       const sh = this.state.sheet, f = sh.f, per = this.P(f.personId), name = (f.name || '').replace(/\s+/g, ' ').trim();
       if (!per && name.length < 2) return this.toast('כתבו למי השמחה');
@@ -717,7 +761,7 @@
       const wlPhone = tkK === 'welcome' && touchOnly();
       const tkP = tk && tk.personId ? this.P(tk.personId) : null, tkT = tk && tk.kind === 'celebrate' ? tpl(tk.type || tk.person.type) : null;
       const remain = tk ? Math.max(0, (Date.parse(tk.until) - now.getTime()) / 1000) : 0;
-      const t0 = tk ? (tk.kind === 'noon' ? Date.parse(tk.until) - 150e3 : Date.parse(tk.until) - 60e3) : 0;
+      const t0 = tk ? (tk.at ? Date.parse(tk.at) : tk.kind === 'noon' ? Date.parse(tk.until) - 150e3 : Date.parse(tk.until) - 60e3) : 0;
       const sh = s.sheet, f = sh ? sh.f : {}, kind = sh ? sh.kind : '';
       const events = D ? D.events : [], life = D ? D.life : [], people = D ? D.people : [], history = D ? D.history : [];
 
@@ -728,8 +772,8 @@
           sub: [e.place, past ? 'הסתיים' : (toMin(e.start) <= nm ? 'מתקיים עכשיו' : ''), e.big && !past ? 'יעלה לבד על כל המסך' : ''].filter(Boolean).join(' · '),
           hasBtn: !past, btn: live ? 'מוצג עכשיו' : toMin(e.start) - nm > 30 ? 'הצצה ל-10 דק׳' : 'על כל המסך', action: () => (live ? null : this.showEvent(e)), hasToggle: false };
       });
-      const noonPast = nm >= 735, noonOn = design.noon && noonToday;
-      rows.push(Object.assign({ key: 'noon', m: 720, time: '12:00', title: 'סרטון תדמית', op: noonPast ? 0.45 : 1,
+      const mo = this.moments(), noonM = toMin(mo.noon.at), noonPast = nm >= noonM + 15, noonOn = design.noon && noonToday;
+      rows.push(Object.assign({ key: 'noon', m: noonM, time: mo.noon.at, title: 'סרטון תדמית', op: noonPast ? 0.45 : 1,
         sub: !design.noon ? 'כבוי בהגדרות העיצוב' : noonPast ? 'הסתיים להיום' : (noonToday ? 'יעלה לבד' : 'דילוג היום'),
         hasBtn: false, hasToggle: design.noon && !noonPast }, sw(noonOn), {
         toggle: () => this.run('noonToday', { on: !noonToday }, noonToday ? 'דילוג על סרטון התדמית היום' : 'סרטון התדמית יעלה היום').catch(() => {}) }));
@@ -771,7 +815,8 @@
       const actGroups = [
         { title: 'להציג עכשיו על כל המסך', items: [
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
-          { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : 'עולה לבד ב-12:00', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
+          { label: tkK === 'news' ? 'חזרה מהחדשות' : 'חדשות החלל', sub: tkK === 'news' ? 'מוצג עכשיו' : 'הידיעה המרכזית הבאה מהניוזלטר' + (mo.news.on ? ' · עולה לבד כל ' + minLbl(mo.news.every) : ''), dot: '#6fd6ea', bg: 'rgba(111,214,234,.09)', border: 'rgba(111,214,234,.4)', go: () => (tkK === 'news' ? this.endTk() : this.showNews()) },
+          { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : design.noon ? 'עולה לבד ב-' + mo.noon.at : 'האוטומציה כבויה', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
           { label: 'מודעה אישית', sub: cel.length ? 'היום: ' + dn(cel[0].person) + (cel.length > 1 ? ' ועוד ' + (cel.length - 1) : '') : 'אין מודעות אישיות היום', dot: WARM, bg: 'rgba(233,184,114,.09)', border: 'rgba(233,184,114,.4)', go: () => this.openSheet('celebrate') },
           { label: 'מודעה מנהלת', sub: nextEv ? nextEv.title : 'בחירה מלוח האירועים', dot: ICE, bg: 'rgba(159,220,255,.09)', border: 'rgba(159,220,255,.4)', go: () => this.openSheet('eventShow') }] },
         { title: 'להוסיף לצג', items: [
@@ -781,6 +826,7 @@
           { label: 'רשימת האנשים', sub: activeP.length ? activeP.length + ' ברשימה · הוספה, עריכה וייבוא' : 'הרשימה ריקה · הוספה או ייבוא מאקסל', dot: WARM, bg: 'rgba(14,28,58,.55)', border: activeP.length ? 'rgba(150,190,240,.16)' : 'rgba(233,184,114,.45)', go: () => this.goPeople() }] },
         { title: 'עוד', items: [
           { label: design.lang === 'en' ? 'חזרה לעברית' : 'הצג באנגלית', sub: s.langBusy ? 'מתרגם את הצג…' : design.lang === 'en' ? 'הצג מוצג עכשיו באנגלית' : 'כל הצג באנגלית, למשלחות מחו״ל', dot: '#7fe0c4', bg: design.lang === 'en' ? 'rgba(127,224,196,.09)' : 'rgba(14,28,58,.55)', border: design.lang === 'en' ? 'rgba(127,224,196,.45)' : 'rgba(150,190,240,.16)', go: () => this.setLang(design.lang === 'en' ? 'he' : 'en') },
+          { label: 'תזמונים ואוטומציות', sub: 'מה עולה לבד על כל המסך, כל כמה זמן ולכמה זמן', dot: '#6fd6ea', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('moments') },
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
           { label: 'עיצוב הצג', sub: 'גלובוס ' + (design.globeStyle === 'real' ? 'ריאליסטי' : 'הולוגרפי') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
       ];
@@ -893,9 +939,11 @@
 
         sheetOn: !!sh, closeSheet: () => this.closeSheet(), sheetBackdrop: (e) => { if (e.target === e.currentTarget) this.closeSheet(); },
         sheetAlign: small ? 'flex-end' : 'center', sheetPad: small ? '0' : '24px', sheetRadius: small ? '20px 20px 0 0' : '20px', sheetMaxH: small ? '92vh' : '88vh',
-        sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', welcome: 'מסך ברוכים הבאים', history: 'היסטוריית שינויים',
+        sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', moments: 'תזמונים ואוטומציות', welcome: 'מסך ברוכים הבאים', history: 'היסטוריית שינויים',
           person: sh && sh.mode === 'edit' ? 'פרטי ' + [f.first, f.last].filter(Boolean).join(' ') : 'אדם חדש ברשימה', import: 'ייבוא אנשים מקובץ', ticker: sh && sh.mode === 'edit' ? 'עריכה ברצועת האירועים' : 'אירוע או הזדמנות לרצועה' }[kind] || '',
-        shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shWelcome: kind === 'welcome', shHistory: kind === 'history',
+        shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shWelcome: kind === 'welcome', shHistory: kind === 'history', shMoments: kind === 'moments',
+        // the schedules screen: one card per moment, each with on/off, how often and how long
+        moCards: kind === 'moments' ? this.momentCards(mo, design, sw) : [], moFx: mo.fx, moFxSw: sw(mo.fx), toggleMoFx: () => this.setMoment('fx', null, !mo.fx, mo.fx ? 'אנימציות מעבר כבויות' : 'אנימציות מעבר פעילות'),
         shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker',
         openLifeNew: () => this.openLife(), openEventNew: () => this.openEvent(),
         showEvents: evShowList.map((e) => { const live = tk && tk.eventId === e.id; const d = parse(e.date);
@@ -1373,6 +1421,17 @@
               el('span', 'font-size:13px;color:#8b9dbd', null, 'שורה מתחת לכותרת (לא חובה)'),
               el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px', { value: v.wlInput, onChange: v.setWlInput, maxLength: 80, placeholder: 'לדוגמה: Delegation of Japan', dir: 'auto' })),
             el('button', 'min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.sendWl }, 'הצגה על כל המסך')) : null,
+          v.shMoments ? h(React.Fragment, null,
+            el('span', 'font-size:14px;color:#8b9dbd;line-height:1.5;text-wrap:pretty', null, 'מה עולה לבד על כל המסך, כל כמה זמן ולכמה זמן. כל שינוי עולה לצג מיד, ואפשר לבטל אותו.'),
+            v.moCards.map((c) => el('div', 'display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', { key: c.key },
+              el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px', null,
+                el('div', 'display:flex;flex-direction:column;gap:2px;min-width:0', null, el('span', 'font-size:15px;font-weight:700', null, c.title), el('span', 'font-size:12.5px;color:#8b9dbd;line-height:1.45;text-wrap:pretty', null, c.sub)),
+                c.sw ? toggleBtn(true, c.sw.j, c.sw.tbg, c.toggle, c.title) : null),
+              c.selects.length || c.time || c.btn ? el('div', 'display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end', null,
+                c.selects.map((x) => lbl(x.label, el('select', field + ';color-scheme:dark', { value: x.value, onChange: x.set }, x.options.map(([ov, ol]) => el('option', null, { key: ov, value: ov }, ol))), null)),
+                c.time ? lbl(c.time.label, el('input', dateField, { type: 'time', step: 300, value: c.time.value, onChange: c.time.set })) : null,
+                c.btn ? smallBtn(c.btn.label, c.btn.go, ';min-height:44px') : null) : null)),
+            toggleRow('אנימציות מעבר', 'כניסה ויציאה בסגנון "ברוכים הבאים" לכל מה שעולה על המסך. כבוי: מופיע ונעלם בלי אנימציה', v.moFxSw, v.toggleMoFx)) : null,
           v.shUrgent ? h(React.Fragment, null,
             el('span', 'font-size:14px;color:#8b9dbd', null, 'פס אדום בראש הצג, עד שמסירים אותו.'),
             el('textarea', 'resize:vertical;box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;line-height:1.5', { value: v.urInput, onChange: v.setUrInput, rows: 3, maxLength: 200, placeholder: 'לדוגמה: תרגיל פינוי ב-11:00, נא להתכנס ברחבה' }),
