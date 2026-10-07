@@ -630,23 +630,24 @@ window.makeWallOverlays = (React) => {
           h('div', { style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K } },
             h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, part: 'flame' })))),
       // the words
-      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 214, width: 900, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }, side) },
+      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 118, width: 920, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }, side) },
         h('div', { style: rise(1200, 2200, { display: 'flex', alignItems: 'center', gap: 22 }) },
-          h('div', { style: { position: 'relative', width: 92, height: 92, flex: 'none' } },
-            h('div', { style: { position: 'absolute', inset: -9, borderRadius: '50%', border: '1px dashed rgba(233,184,114,.4)', animation: fx ? 'spin 40s linear infinite' : 'none' } }),
-            h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #fbf6ee, #e2d8c8 60%, #b8a88e)', boxShadow: '0 0 34px rgba(255,190,120,.25)', overflow: 'hidden' } },
-              h('img', { src: '/assets/logo-mark.png', alt: '', style: { position: 'absolute', left: '50%', top: '50%', width: 96, height: 'auto', marginLeft: -50.5, marginTop: -41.4, clipPath: 'inset(0 0 23% 0)' } }))),
+          // the directorate's 3D emblem (a still of the wall's own emblem-v2, so no second WebGL scene)
+          h('img', { src: '/assets/emblem-3d.png', alt: '', style: { width: 124, height: 124, flex: 'none', margin: '-16px -8px -16px -12px', filter: 'drop-shadow(0 0 18px rgba(90,160,255,.28))' } }),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
             h('span', { style: { fontSize: 30, fontWeight: 700, color: '#e8dcc6', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
-            h('span', { style: { fontFamily: MONO, fontSize: 17, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('שלוש שנים · 7.10', 'THREE YEARS · 7.10')))),
-        h('div', { style: { position: 'relative', marginTop: 34, lineHeight: 1 } },
-          h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 150 : 270, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 2900ms both${fx ? ', mmTitleGlow 6s ease-in-out 5300ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
-          h('div', { style: { position: 'relative', fontSize: en ? 150 : 270, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2700ms both' } }, tr('יזכור', 'We Remember'))),
-        h('div', { style: { marginTop: 30, width: 520, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.35) 60%, transparent)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 3900ms both' } }),
-        h('div', { style: rise(1200, 4300, { marginTop: 32, fontSize: 40, fontWeight: 300, lineHeight: 1.4, color: '#ece4d6', maxWidth: 880 }) },
-          en ? 'The Space Program Office remembers those murdered and fallen on October 7 and in the war that followed.' : ['מנהלת החלל מתייחדת עם זכרם של הנרצחים והנופלים', h('br', { key: 'br' }), 'במתקפת השבעה באוקטובר ובמלחמה']),
-        h('div', { style: rise(1200, 4900, { marginTop: 26, fontSize: 34, fontWeight: 500, color: '#e9b872' }) }, tr('יהי זכרם ברוך', 'May their memory be a blessing')),
-        h('div', { dir: 'ltr', style: rise(1200, 5400, { marginTop: 22, fontFamily: MONO, fontSize: 20, letterSpacing: '.22em', color: 'rgba(200,184,156,.7)', unicodeBidi: 'plaintext' }) }, tr('7.10.2023 · כ״ב בתשרי תשפ״ד', 'OCTOBER 7, 2023'))));
+            h('span', { style: { fontFamily: MONO, fontSize: 17, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL')))),
+        // the date, large, then the title
+        h('div', { dir: 'ltr', style: rise(1600, 2500, { marginTop: 26, fontFamily: LEX, fontSize: 180, fontWeight: 300, lineHeight: 1, letterSpacing: '.02em', color: '#e9b872', textShadow: '0 0 50px rgba(233,160,80,.35)', unicodeBidi: 'plaintext' }) }, tr('7.10', 'Oct 7')),
+        h('div', { style: { position: 'relative', marginTop: 8, lineHeight: 1 } },
+          h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 140 : 230, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
+          h('div', { style: { position: 'relative', fontSize: en ? 140 : 230, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember'))),
+        h('div', { style: { marginTop: 28, width: 520, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.35) 60%, transparent)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } }),
+        h('div', { style: rise(1200, 4400, { marginTop: 28, fontSize: 36, fontWeight: 300, lineHeight: 1.42, color: '#ece4d6', maxWidth: 900, textWrap: 'pretty' }) },
+          tr('עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
+            'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.')),
+        h('div', { style: rise(1200, 5000, { marginTop: 24, fontSize: 32, fontWeight: 500, color: '#e9b872' }) }, tr('מנהלת החלל מרכינה ראש · יהי זכרם ברוך', 'The Space Program Office bows its head · May their memory be a blessing')),
+        h('div', { style: rise(1200, 5500, { marginTop: 18, fontFamily: MONO, fontSize: 19, letterSpacing: '.18em', color: 'rgba(200,184,156,.7)' }) }, tr('כ״ב בתשרי תשפ״ד · 7.10.2023', 'OCTOBER 7, 2023'))));
   };
 
   // ---------- small toast (e.g. "שוגר") ----------
@@ -677,5 +678,50 @@ window.makeWallOverlays = (React) => {
       tag]);
   };
 
-  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, Memorial, Candle };
+  // ---------- space news: one of the newsletter's central stories on the whole wall (every half hour, or from the remote) ----------
+  // The words on the reading side, the story's picture on the other, slowly drifting closer for as long as it stays (fx), a
+  // bar that runs out with it and a QR code to the full story. Text is clamped, so a long story never runs off the screen.
+  const NewsMoment = ({ item, secs, qr, fx }) => {
+    const n = item, col = n.color || '#9fdcff', start = EN() ? 'left' : 'right', end = EN() ? 'right' : 'left', img = n.image || '';
+    const clamp = (lines) => ({ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: lines, overflow: 'hidden' });
+    const chip = (t, c, fill) => h('span', { key: t, style: { padding: '6px 18px', borderRadius: 999, fontSize: 24, fontWeight: 600, color: fill ? '#0a1224' : c, background: fill ? c : 'rgba(6,12,26,.6)', border: `1.5px solid ${c}` } }, t);
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 1300px 900px at 30% 40%, #0e2350 0%, #07122a 55%, #040914 100%)' } }),
+      // (the picture fades into the background by a mask, so no seam shows where it ends)
+      img ? h('div', { key: 'img', style: { position: 'absolute', top: 0, bottom: 0, [end]: 0, width: 1000, overflow: 'hidden', WebkitMaskImage: `linear-gradient(to ${start}, #000 45%, transparent 96%)`, maskImage: `linear-gradient(to ${start}, #000 45%, transparent 96%)` } },
+        h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', animation: fx ? `zoomBg ${secs}s linear both` : 'none' } }),
+        h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(4,9,20,.35) 0%, rgba(4,9,20,0) 30%, rgba(4,9,20,0) 70%, rgba(4,9,20,.55) 100%)' } })) : null,
+      h('div', { key: 'c', style: { position: 'absolute', top: 0, bottom: 0, [start]: 130, width: img ? 900 : 1560, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 30 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, fontSize: 32, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } },
+          h('span', { style: { width: 14, height: 14, borderRadius: '50%', background: '#d4f25c', boxShadow: '0 0 14px #d4f25c', animation: 'breathe 2s ease-in-out infinite' } }), tr('חדשות החלל', 'SPACE NEWS')),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', animation: 'rise .8s ease .3s both' } },
+          n.cat ? chip(n.cat, col) : null, n.il ? chip(tr('ישראל', 'Israel'), '#d4f25c', true) : null,
+          h('span', { key: 'meta', style: { fontFamily: MONO, fontSize: 22, color: '#8b9dbd' } }, [n.date, n.src].filter(Boolean).join(' · '))),
+        h('div', { style: Object.assign({ fontSize: img ? 78 : 96, fontWeight: 800, lineHeight: 1.13, letterSpacing: '-0.01em', textWrap: 'balance', animation: 'rise .9s ease .45s both' }, clamp(4)) }, n.title),
+        n.dek ? h('div', { style: Object.assign({ fontSize: 36, color: '#b9c8e2', fontWeight: 300, lineHeight: 1.45, textWrap: 'pretty', animation: 'rise .9s ease .65s both' }, clamp(img ? 5 : 4)) }, n.dek) : null,
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 28, paddingTop: 10, animation: 'rise .9s ease .85s both' } },
+          h('div', { style: { flex: 1, height: 4, borderRadius: 4, background: 'rgba(150,190,240,.14)', overflow: 'hidden' } },
+            h('div', { style: { height: '100%', background: `linear-gradient(${EN() ? 90 : 270}deg,#d4f25c,#6fd6ea)`, transformOrigin: start, animation: `grow ${secs}s linear both` } })),
+          qr ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 14, flex: 'none' } },
+            h('span', { style: { fontSize: 20, color: '#8b9dbd', lineHeight: 1.3, textAlign: end } }, tr('לכתבה', 'Full'), h('br'), tr('המלאה', 'story')),
+            h('img', { src: qr, alt: 'QR', style: { width: 112, height: 112, borderRadius: 12, background: '#0b1430', padding: 5, border: '1px solid rgba(230,241,255,.25)' } })) : null)),
+      h('span', { key: 'src', style: { position: 'absolute', bottom: 54, [start]: 130, fontFamily: MONO, fontSize: 18, letterSpacing: '.16em', color: 'rgba(143,184,220,.6)' } },
+        [tr('ניוזלטר החלל השבועי · רקיע', 'WEEKLY SPACE NEWSLETTER · RAKIA'), n.issue].filter(Boolean).join(' · '))
+    ]);
+  };
+
+  // ---------- the shared way in and out of every full-screen moment but the welcome (whose own is the model) ----------
+  // In: the moment comes up over a slow push-in (scale 1.04 → 1), a line of light sweeps down the screen and the frame's
+  // edge glints once. Out (`out`, closeOv in wall.js): it pulls away (→ 1.05) and fades while a line sweeps back up, and the
+  // wall assembles under it. Only transform and opacity, so the compositor does the work. fx false: no transition.
+  const SWEEP = { position: 'absolute', left: 0, right: 0, top: 0, height: 2, zIndex: 2, pointerEvents: 'none', background: 'linear-gradient(90deg, rgba(212,242,92,0), #d4f25c 20%, #9fdcff 80%, rgba(159,220,255,0))', boxShadow: '0 0 18px rgba(159,220,255,.55)' };
+  const Moment = ({ out, fx, children }) => {
+    if (!fx) return out ? null : children;
+    return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden' } },
+      h('div', { key: 'm', style: { position: 'absolute', inset: 0, animation: out ? 'mvOut 1200ms cubic-bezier(.45,0,.55,1) both' : 'mvIn 1100ms cubic-bezier(.16,1,.3,1) both' } }, children),
+      h('div', { key: out ? 'up' : 'down', style: Object.assign({ animation: out ? 'mvSweepUp 1000ms cubic-bezier(.65,0,.35,1) both' : 'mvSweepDown 1300ms cubic-bezier(.65,0,.35,1) 150ms both' }, SWEEP) }),
+      out ? null : h('div', { key: 'edge', style: { position: 'absolute', inset: 14, zIndex: 2, borderRadius: 30, border: '1px solid rgba(212,242,92,.7)', pointerEvents: 'none', animation: 'wlEdge 1200ms ease 700ms both' } }));
+  };
+
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, NewsMoment, Moment, Memorial, Candle };
 };
