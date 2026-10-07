@@ -20,7 +20,7 @@ async function fetchText(url: string): Promise<string> {
 
 // ---- design (the wall's URL options, now stored) ----------------------------------------------------
 export const PANELS = ['news', 'events', 'people', 'ticker', 'launches'] as const;
-export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en',
+export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en', vw: false,
   css: '', headline: '', headlineEn: '', hide: [] as string[], news: [] as Row[] };
 
 /** The agent's style layer (design.css), which the wall puts in a <style> after its own: it can recolor, resize, move
@@ -37,6 +37,7 @@ export const DesignPatch = z.object({
   feature: z.number().int().min(6).max(30), list: z.number().int().min(2).max(10), globe: z.number().int().min(20).max(240),
   globeStyle: z.enum(['holo', 'real']),
   lang: z.enum(['he', 'en']).describe('שפת הצג: en = כל הצג באנגלית (למשלחות), he = עברית'),
+  vw: z.boolean().describe('מצב קיר מסכים: טקסט גדול, עבה ובהיר יותר לקיר של 9 טלוויזיות בלובי'),
   css: z.string().max(6000).superRefine((v, c) => { const e = cssProblem(v); if (e) c.addIssue({ code: 'custom', message: e }); }),
   headline: z.string().trim().max(80), headlineEn: z.string().trim().max(80),
   hide: z.array(z.enum(PANELS)).max(PANELS.length),

@@ -33,6 +33,7 @@
     featureSeconds: Math.min(30, Math.max(6, num('feature', 12))),
     listSeconds: Math.min(10, Math.max(2, num('list', 4))),
     ambientFx: bool('fx', true),
+    videoWall: bool('vw', false),                  // the lobby's 3×3 wall of TVs: bigger, bolder text (the remote's switch)
     globeSpeed: Math.min(240, Math.max(20, num('globe', 90))),
     globeStyle: q.get('globeStyle') === 'real' ? 'real' : 'holo',
     cameraSway: bool('sway', true),
@@ -47,7 +48,7 @@
     noCss: q.has('css') && /^(0|false|no|off)$/i.test(q.get('css')),
   };
   // Stored design (from the remote) → CFG, except where the URL sets the option explicitly.
-  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang' };
+  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang', vw: 'videoWall' };
   function applyDesign(d) {
     let changed = false;
     for (const k in DESIGN_KEYS) {
@@ -58,6 +59,7 @@
     for (const k of ['hide', 'news']) { const v = Array.isArray(d[k]) ? d[k] : []; if (JSON.stringify(CFG[k]) !== JSON.stringify(v)) { CFG[k] = v; changed = true; } }
     CFG.moments = d.moments && typeof d.moments === 'object' ? d.moments : null;   // read when used: no redraw needed
     styleLayer(typeof d.css === 'string' ? d.css : '');
+    videoWallLayer();
     window.wallLang = CFG.lang;                    // overlays.js reads it
     return changed;
   }
@@ -71,6 +73,27 @@
     if (!el) { el = document.createElement('style'); el.id = 'wall-style'; document.head.appendChild(el); }
     el.textContent = css;
   }
+  /** "מצב קיר מסכים": the lobby wall is 9 TVs fed one 1920×1080 picture, so each shows 640×360 of it three times
+   *  enlarged, and small, thin or faint text there turns to mush. Every font size on the stage goes up a step (by its
+   *  inline style, which React writes as "font-size: 12px"), light and regular weights a step bolder, and faint text
+   *  brighter. Before the agent's layer, so its rules still win. */
+  const VW_SIZES = { 10: 14, 11: 15, 12: 16, 13: 17, 14: 18, 15: 19, 16: 20, 17: 21, 18: 22, 20: 24, 22: 26, 24: 28, 25: 29, 26: 30 };
+  const VW_CSS = Object.entries(VW_SIZES).map(([a, b]) => `[data-w=stage] [style*="font-size: ${a}px"]{font-size:${b}px!important}`).join('\n') + `
+[data-w=stage] [style*="font-weight: 300"]{font-weight:400!important}
+[data-w=stage] [style*="font-weight: 400"]{font-weight:500!important}
+[data-w=stage] [style*="font-weight: 500"]{font-weight:600!important}
+[data-w=stage] [style*="color: rgb(111, 130, 166)"]{color:#a3b3cf!important}
+[data-w=stage] [style*="color: rgb(139, 157, 189)"]{color:#b3c2dc!important}
+[data-w=stage] [style*="color: rgb(179, 194, 220)"]{color:#d2dcec!important}`;
+  function videoWallLayer() {
+    let el = document.getElementById('wall-vw');
+    if (!CFG.videoWall) { if (el) el.remove(); return; }
+    if (el) return;
+    el = document.createElement('style'); el.id = 'wall-vw'; el.textContent = VW_CSS;
+    const agent = document.getElementById('wall-style');
+    document.head.insertBefore(el, agent || null);
+  }
+  videoWallLayer();
   window.wallLang = CFG.lang;
   // English (CFG.lang 'en'): the wall's own words here; what changes comes translated from /api/feed?lang=en.
   const EN = () => CFG.lang === 'en';
@@ -567,7 +590,7 @@
     overlay() {
       const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
       const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) + (ov.out ? '|out' : '') + '|' + M().fx : '') + '|' + (toast ? toast.until : '')
-        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '');
+        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '')
         + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang].join('|') : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
@@ -667,7 +690,7 @@
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, lineHeight: 1 } },
             h('span', { style: { fontSize: 40, fontWeight: 800, color: '#f6efe3', letterSpacing: EN() ? 0 : '.02em', textShadow: '0 0 24px rgba(255,190,110,.25)' } }, tr('יזכור', 'We Remember')),
             h('span', { style: { width: 1.5, height: 34, background: 'rgba(233,184,114,.5)' } }),
-            h('span', { dir: 'ltr', style: { fontFamily: "'Lexend',sans-serif", fontSize: 42, fontWeight: 300, color: '#e9b872', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr('7.10', 'Oct 7'))),
+            h('span', { dir: 'ltr', style: { fontFamily: "'Lexend',sans-serif", fontSize: 44, fontWeight: 500, color: '#e9b872', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr('7/10', 'Oct 7'))),
           h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr('מנהלת החלל מרכינה ראש לזכר הנרצחים והנופלים', 'In memory of those murdered and fallen on October 7, 2023')))));
     }
 
@@ -829,7 +852,7 @@
 
       const peopleGrid = D.people.map((p, i) => { const on = p === cur; return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 14, background: on ? 'rgba(111,214,234,.1)' : 'rgba(8,16,34,.35)', border: `1px solid ${on ? p.color : 'rgba(150,190,240,.1)'}`, transition: 'all .6s ease', minWidth: 0 } },
         h('img', { src: window.wallAvatar(96, p.photo, p.name), alt: '', style: { width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', flex: 'none', border: `1.5px solid ${p.color}` } }),
-        h('div', { style: { display: 'flex', flexDirection: 'column', minWidth: 0 } }, h('span', { style: { fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, p.name), h('span', { style: { fontSize: 12, color: p.color, whiteSpace: 'nowrap' } }, p.type))); });
+        h('div', { style: { display: 'flex', flexDirection: 'column', minWidth: 0 } }, h('span', { style: { fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, p.name), h('span', { style: { fontSize: 12, color: p.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, p.type))); });
 
       const panelHead = (title, meta) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
         h('span', { style: { fontSize: 20, fontWeight: 700 } }, title), h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: MUTED, letterSpacing: '.08em' } }, meta));
@@ -875,7 +898,7 @@
         h('div', { dir: 'ltr', style: { display: 'flex', gap: 4, flex: 'none' } }, l.segs.map((s, j) => h('div', { key: j, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 34, padding: '5px 3px', borderRadius: 10, background: 'rgba(6,12,26,.7)', border: '1px solid rgba(150,190,240,.12)' } },
           h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 17, fontWeight: 400, color: l.numColor, lineHeight: 1.1 } }, s.v), h('span', { style: { fontSize: 10, color: '#6f82a6' } }, s.u))))));
       const footer = hidden('launches') ? h('div', { key: 'ft' }) : h('footer', { key: 'ft', 'data-w': 'launches', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
-        h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 3 }, enW('wlFootIn', 1800, 5800)) }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
+        h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 3 }, enW('wlFootIn', 1800, 5800)) }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED, whiteSpace: 'nowrap' } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
         launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), Object.assign({ gridColumn: '2 / -1' }, enW('wlFootIn', 1800, 5900))));
 
       return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer]);
