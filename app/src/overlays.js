@@ -55,7 +55,10 @@ window.makeWallOverlays = (React) => {
   const Party = () => {
     const ref = useRef(null);
     useEffect(() => {
-      const c = ref.current, g = c.getContext('2d'), W = c.width = 1920, H = c.height = 1080;
+      const c = ref.current, g = c.getContext('2d'), W = 1920, H = 1080;
+      // the screen pixels it covers (a 4K screen: twice the wall's size), drawn in stage px
+      const k = Math.min(2, Math.max(0.5, (c.getBoundingClientRect().width / W || 1) * (window.__pageScale ? window.__pageScale() : 1) * (window.devicePixelRatio || 1)));
+      c.width = Math.round(W * k); c.height = Math.round(H * k); g.setTransform(k, 0, 0, k, 0, 0);
       const COLORS = ['#d4f25c', '#6fd6ea', '#e9b872', '#b9a6f5', '#ffffff', '#f2a37a'];
       const conf = Array.from({ length: 180 }, () => ({ x: Math.random() * W, y: -Math.random() * H, vx: (Math.random() - .5) * 1.5, vy: 1.5 + Math.random() * 2.5, r: Math.random() * 6.28, vr: (Math.random() - .5) * .2, w: 8 + Math.random() * 8, h: 4 + Math.random() * 6, c: COLORS[(Math.random() * COLORS.length) | 0] }));
       const rockets = [], sparks = []; let next = 0, raf, t0 = performance.now();
@@ -156,7 +159,8 @@ window.makeWallOverlays = (React) => {
       h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27 } },
         h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, tr('עכשיו במנהלת', 'Happening now')),
         h('span', { style: { fontSize: event.img ? 84 : 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
-        h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, event.start + '–' + event.end + (event.place ? ' · ' + event.place : ''))),
+        // `when`: its hours, or its days for an event of several days ('' all day); older moments carry only start/end
+        h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, [event.when != null ? event.when : event.start + '–' + event.end, event.place].filter(Boolean).join(' · '))),
       event.img ? h('img', { src: event.img, alt: '', onError: (ev) => { ev.currentTarget.style.display = 'none'; }, style: { flex: 'none', display: 'block', maxWidth: 760, maxHeight: 760, borderRadius: 28, border: '1px solid rgba(150,190,240,.22)', boxShadow: '0 30px 80px rgba(0,0,0,.55)', animation: 'popIn 1s cubic-bezier(.2,1.4,.4,1) .3s both' } }) : null),
     h('span', { key: 'end', style: { position: 'absolute', bottom: 77, [EN() ? 'left' : 'right']: 134, fontSize: 29, color: '#8b9dbd' } }, tr('יורד לבד ב-', 'Until ') + (until ? fmtHM.format(new Date(until)) : event.end))
   ]);
@@ -189,7 +193,7 @@ window.makeWallOverlays = (React) => {
     useEffect(() => {
       const c = ref.current, g = c.getContext('2d');
       const st = (c.getBoundingClientRect().width / 1920 || 1) * (window.__pageScale ? window.__pageScale() : 1);
-      const k = preview ? 0.5 : Math.min(1, st * (window.devicePixelRatio || 1));
+      const k = preview ? 0.5 : Math.min(2, st * (window.devicePixelRatio || 1));   // a 4K screen: twice the wall's size
       c.width = Math.round(1920 * k); c.height = Math.round(1080 * k);
       const rnd = mulberry(0x5EED), BANDS = [[1024, 0.5, 0.9, 0.22, 0.5, 0.04], [376, 0.8, 1.3, 0.45, 0.8, 0.07], [82, 1.3, 2.0, 0.75, 1, 0.11]];
       const N = BANDS.reduce((a, b) => a + b[0], 0);
@@ -447,7 +451,7 @@ window.makeWallOverlays = (React) => {
     // The emblem's name: up in Hebrew; in English down, until the title flies into it. The name is fixed when the scene
     // starts, so after a language switch it stays down (and the wall's own emblem brings the right one at the hand-off).
     const wordFits = A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE');
-    const heroEl = heroOn ? h('space-emblem-v2', { ref: set('hero'), globe: 'real', speed: A.speed, sway: A.sway, word: A.word, clock: 'page', events: 'off', intro: 'hold', wordmark: !EN0 && wordFits ? 'up' : 'down', maxpr: '1.25', style: { display: 'block', width: '100%', height: '100%' } }) : null;
+    const heroEl = heroOn ? h('space-emblem-v2', { ref: set('hero'), globe: 'real', speed: A.speed, sway: A.sway, word: A.word, clock: 'page', events: 'off', intro: 'hold', wordmark: !EN0 && wordFits ? 'up' : 'down', maxpr: '2', style: { display: 'block', width: '100%', height: '100%' } }) : null;
     const showDisc = !heroOk;
 
     return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: 'ltr', pointerEvents: 'none', fontFamily: 'Heebo, sans-serif', color: '#e6f1ff', animation: 'ovIn .7s cubic-bezier(.4,0,.2,1) both' } },

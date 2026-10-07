@@ -26,6 +26,8 @@
   const DOWS = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
   const MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
   const BDAY_DAYS = 30;   // birthdays in the upcoming list
+  const LIFE_LEAD = 60;   // a personal event shows at most this many days ahead of its day (lib/feed.ts LIFE_LEAD_MAX)
+  const PEOPLE_TILES = 6, EVENT_ROWS = 4;   // the wall's people and events panels (lib/feed.ts)
   const pad = (n) => String(n).padStart(2, '0');
   const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const mmss = (sec) => pad(Math.floor(sec / 60)) + ':' + pad(Math.floor(sec % 60));
@@ -33,8 +35,7 @@
   const parse = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
   const leap = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
-  /** month-day of a date; 29 February is celebrated on the 28th in a common year. */
-  const mdOf = (d) => pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  /** 29 February is celebrated on the 28th in a common year. */
   const bdayOn = (bday, y) => (bday === '02-29' && !leap(y) ? '02-28' : bday);
   const nextBday = (bday, now) => {
     for (const y of [now.getFullYear(), now.getFullYear() + 1]) { const md = bdayOn(bday, y), d = new Date(y, +md.slice(0, 2) - 1, +md.slice(3)); if (iso(d) >= iso(now)) return d; }
@@ -42,6 +43,12 @@
   };
   const dm = (s) => { const d = parse(s); return d.getDate() + '.' + (d.getMonth() + 1); };
   const toMin = (t) => { const [hh, mm] = (t || '0:0').split(':').map(Number); return hh * 60 + (mm || 0); };
+  /** An event's days and hours: "10:00–11:00", "כל היום", "21.10–22.10 · כל היום", "21.10 22:00 – 22.10 01:00". */
+  const evWhen = (e) => {
+    const multi = e.lastDay && e.lastDay > e.date;
+    if (e.allDay) return multi ? dm(e.date) + '–' + dm(e.lastDay) + ' · כל היום' : 'כל היום';
+    return multi ? dm(e.date) + ' ' + e.start + ' – ' + dm(e.lastDay) + ' ' + e.end : e.start + '–' + e.end;
+  };
   const cnt = (n, one, many) => (n === 1 ? one : n + ' ' + many);   // "אדם אחד" / "3 אנשים"
   const initials = (n) => String(n || '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('');
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
@@ -50,7 +57,8 @@
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
   // The schedules screen ("תזמונים"): what comes up on the whole wall by itself (design.moments, lib/remote-ops.ts MOMENTS0).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
-    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 } };
+    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 },
+    stream: { on: true, which: 'all', before: 5, full: 15, small: true } };
   const minLbl = (m) => (m < 60 ? m + ' דק׳' : m % 60 ? (m / 60).toFixed(1).replace('.0', '') + ' שע׳' : m === 60 ? 'שעה' : m === 120 ? 'שעתיים' : m / 60 + ' שעות');
   const secLbl = (n) => (n < 60 ? n + ' שנ׳' : n % 60 ? Math.floor(n / 60) + ':' + pad(n % 60) + ' דק׳' : n === 60 ? 'דקה' : n / 60 + ' דק׳');
   const SPEC = [
@@ -412,20 +420,21 @@
       const photo = src || (p && p.photo) || null;
       return { bg: p ? colorFor(p) : 'rgba(150,190,240,.25)', ini: p ? initials(p.name) : '?', photoEl: photo ? imgEl(photo, COVER) : null };
     }
-    celebs() {
-      const D = this.D; if (!D) return [];
-      // Greetings go full screen on the day and up to two days after (a Friday birthday is celebrated on Sunday);
-      // mourning only shows quietly in the people panel, for its whole window.
-      const ti = iso(this.state.now), back = [0, 1, 2].map((k) => addDays(this.state.now, -k));
-      const b = [];
-      D.people.forEach((p) => { if (!p.bday || !onWall(p) || !p.showBday) return; const k = back.findIndex((d) => bdayOn(p.bday, d.getFullYear()) === mdOf(d));
-        if (k >= 0) b.push({ key: 'b' + p.id, person: p, type: 'יום הולדת' + (k ? (k === 1 ? ' · אתמול' : ' · שלשום') : ''), note: '', photoSrc: null, tpl: tpl('יום הולדת') }); });
-      const bdayToday = new Set(b.map((x) => x.person.id));
-      const greetDays = (x) => x.date <= ti && ti <= iso(addDays(parse(x.date), 2));
-      const l = D.life.filter((x) => (x.kind === 'bereavement' ? ti >= x.showFrom && ti <= x.showUntil : greetDays(x)) && !(x.kind === 'birthday' && bdayToday.has(x.personId)))
-        .map((x) => ({ key: x.id, lifeId: x.id, person: this.lifeP(x), type: x.type, note: x.note, photoSrc: x.photo === 'upload' ? x.photoSrc : null, noPhoto: x.photo === 'none', tpl: x.kind === 'bereavement' ? tpl('אבל') : tpl(x.type) }))
-        .filter((x) => x.person && onWall(x.person));
-      return [...b, ...l];
+    /** The wall's people panel as it is now (the server works it out as the wall does, lib/feed.ts peopleTiles): each
+     *  tile with what it is, a personal event (life) or a birthday from the people list, and after them the tiles
+     *  that are due but wait for room (the panel has PEOPLE_TILES). */
+    wallPeople() {
+      const D = this.D; if (!D || !D.wall) return [];
+      const ti = iso(this.state.now), one = (t, waiting) => {
+        const l = t.ref.kind === 'life' ? D.life.find((x) => x.id === t.ref.id) || null : null;
+        const person = l ? this.lifeP(l) : this.P(t.ref.personId) || { id: 'n:' + t.name, name: t.name, rank: '', role: '', unit: '', photo: null, active: true, onWall: true, free: true };
+        const ago = t.on < ti ? (t.on === iso(addDays(this.state.now, -1)) ? ' · אתמול' : t.on === iso(addDays(this.state.now, -2)) ? ' · שלשום' : '') : '';
+        const baseType = l ? l.type : 'יום הולדת', type = baseType + (t.full ? ago : '');
+        return { key: (waiting ? 'w' : 't') + (t.ref.id || 'b' + t.ref.personId), tile: t, waiting, life: l, bday: t.ref.kind === 'bday', person, baseType, type, note: l ? l.note : '',
+          lifeId: l ? l.id : null, photoSrc: l && l.photo === 'upload' ? l.photoSrc : null, noPhoto: !!l && l.photo === 'none',
+          tpl: t.quiet ? tpl('אבל') : tpl(l ? l.type : 'יום הולדת') };
+      };
+      return [...D.wall.people.map((t) => one(t, false)), ...D.wall.waiting.map((t) => one(t, true))];
     }
     // (a welcome after "כניסה לצג הבית" stays on the server for the wall's entrance, marked `leaving`: here it is over)
     takeover() { const tk = this.D && this.D.takeover; return tk && !tk.leaving && Date.parse(tk.until) > this.state.now.getTime() ? tk : null; }
@@ -455,8 +464,9 @@
       }
     }
     openEvent(e) {
-      if (e) this.openSheet('event', Object.assign({}, e), 'edit');
-      else this.openSheet('event', { title: '', date: iso(this.state.now), start: '10:00', end: '11:00', place: '', big: false, photo: null });
+      if (e) this.openSheet('event', Object.assign({}, e, { lastDay: e.lastDay && e.lastDay > e.date ? e.lastDay : '', allDay: !!e.allDay,
+        start: e.allDay ? '09:00' : e.start, end: e.allDay ? '17:00' : e.end }), 'edit');
+      else this.openSheet('event', { title: '', date: iso(this.state.now), lastDay: '', allDay: false, start: '10:00', end: '11:00', place: '', big: false, photo: null });
     }
     showNoon() { this.run('noon', {}, 'הופעל סרטון התדמית').catch(() => {}); }
     showCeleb(x) { this.run('celebrate', { personId: x.person.free ? null : x.person.id, lifeId: x.lifeId }, 'מודעה אישית על כל המסך: ' + dn(x.person)).catch(() => {}); }
@@ -465,6 +475,8 @@
     memorial(a, label) { this.run('memorial', a, label).catch(() => {}); }
     showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
     showNews() { this.run('showNews', {}, 'חדשות החלל על כל המסך').catch(() => {}); }
+    /** The launch broadcast on the wall: to the space news corner (small), or ended. */
+    streamCtl(small) { const st = this.D && this.D.stream; if (st) this.run('stream', { key: st.key, small: !!small }, small ? 'שידור השיגור עבר לצד' : 'סיום שידור השיגור').catch(() => {}); }
     /** The schedules: shown at once, saved in the background (the wall picks them up within seconds). */
     moments() { const d = this.design(), m = d.moments || {}, p = this.state.moPend || {}, o = { fx: 'fx' in p ? p.fx : 'fx' in m ? m.fx : MOMENTS0.fx };
       for (const k in MOMENTS0) if (typeof MOMENTS0[k] === 'object') o[k] = Object.assign({}, MOMENTS0[k], m[k], p[k]);
@@ -496,6 +508,12 @@
           time: design.noon ? { label: 'באיזו שעה', value: mo.noon.at, set: (e) => { const t = e.target.value; if (/^\d{2}:\d{2}$/.test(t)) this.setMoment('noon', 'at', t, 'סרטון התדמית ב-' + t); } } : null, selects: [] },
         Object.assign({ key: 'launch', title: 'מצב שיגור', sub: mo.launch.on ? 'ספירה לאחור על כל המסך לפני שיגור שאושר (Go), עד ההמראה' : 'כבוי: שיגורים מופיעים רק בשורת השיגורים',
           selects: mo.launch.on ? [pick('מתחיל לפני השיגור', 'launch', 'lead', mo.launch.lead, [3, 5, 10, 15, 20, 30], minLbl, (t) => 'מצב שיגור ' + t + ' לפני')] : [] }, onOff('launch', 'מצב שיגור')),
+        Object.assign({ key: 'stream', title: 'שידור חי של שיגורים', sub: mo.stream.on ? 'השידור הרשמי של השיגור (YouTube, בלי קול) עולה לבד על כל המסך לפני ההמראה' + (mo.stream.small ? ', ואחר כך עובר לפינת חדשות החלל עד סוף השידור' : '') + '. שיגור בלי שידור ביוטיוב לא יוצג' : 'כבוי: שידורים עולים רק מהסוכן בשלט',
+          selects: mo.stream.on ? [
+            { label: 'אילו שיגורים', value: mo.stream.which, options: [['all', 'כל השיגורים'], ['big', 'רק שיגורים גדולים']], set: (e) => this.setMoment('stream', 'which', e.target.value, e.target.value === 'big' ? 'שידור רק לשיגורים גדולים' : 'שידור לכל השיגורים') },
+            pick('מתחיל לפני השיגור', 'stream', 'before', mo.stream.before, [2, 5, 10, 15, 30], minLbl, (t) => 'שידור שיגור ' + t + ' לפני'),
+            pick('על כל המסך אחרי ההמראה', 'stream', 'full', mo.stream.full, [5, 10, 15, 30, 60], minLbl, (t) => 'שידור שיגור על כל המסך ' + t + ' אחרי'),
+            { label: 'אחר כך', value: mo.stream.small ? '1' : '0', options: [['1', 'עובר לפינה'], ['0', 'נגמר']], set: (e) => this.setMoment('stream', 'small', e.target.value === '1', e.target.value === '1' ? 'שידור ממשיך בפינה' : 'שידור נגמר אחרי המסך המלא') }] : [] }, onOff('stream', 'שידור חי של שיגורים')),
         { key: 'welcome', title: 'ברוכים הבאים', sub: 'עולה רק מהשלט. אפשר לקבוע שייכנס לצג הבית לבד אחרי זמן מסוים', sw: null,
           selects: [pick('נשאר על המסך', 'welcome', 'auto', mo.welcome.auto, [0, 15, 30, 60, 120, 240], (x) => (x ? minLbl(x) : 'עד שלוחצים "כניסה"'), (t) => 'ברוכים הבאים: ' + t)] },
       ].filter(Boolean);
@@ -509,10 +527,11 @@
       const sh = this.state.sheet, f = sh.f, per = this.P(f.personId), name = (f.name || '').replace(/\s+/g, ' ').trim();
       if (!per && name.length < 2) return this.toast('כתבו למי השמחה');
       if (!(f.type || '').trim()) return this.toast('כתבו מה קרה');
+      if (!f.date) return this.toast('בחרו את תאריך האירוע');
       if (f.photo === 'upload' && !f.photoSrc) return this.toast('בחרו תמונה, או "ראשי תיבות"');
-      const edit = sh.mode === 'edit', fix = this.bdayFix(f), date = fix || f.date, showFrom = fix ? (f.showFrom === f.date ? fix : f.showFrom) : f.showFrom || f.date;
+      const edit = sh.mode === 'edit', d = this.lifeDates(f);
       try {
-        await this.run('saveLife', { id: edit ? f.id : undefined, personId: per ? per.id : null, name: per ? undefined : name, free: !per && !!f.noLink, type: f.type.trim(), date, showFrom, photo: f.photo, photoSrc: f.photo === 'upload' ? f.photoSrc : null, note: (f.note || '').trim(), showNow: !!showNow },
+        await this.run('saveLife', { id: edit ? f.id : undefined, personId: per ? per.id : null, name: per ? undefined : name, free: !per && !!f.noLink, type: f.type.trim(), date: d.date, showFrom: d.from, photo: f.photo, photoSrc: f.photo === 'upload' ? f.photoSrc : null, note: (f.note || '').trim(), showNow: !!showNow },
           (edit ? 'עודכן: ' : 'נוסף: ') + f.type.trim() + ' · ' + (per ? dn(per) : name));
         this.closeSheet();
       } catch (e) { /* toasted */ }
@@ -522,19 +541,40 @@
       if (!/הולדת/.test(f.type || '') || !f.date || f.date >= iso(addDays(this.state.now, -3))) return null;
       return iso(nextBday(f.date.slice(5), this.state.now));
     }
+    /** The days a personal event is on the wall, as the server saves them (lib/remote-ops.ts saveLife): its day; from when
+     *  it shows, at most LIFE_LEAD days ahead (a date of birth moved to the anniversary keeps a start picked for that day);
+     *  until ten days after the day; on the full screen from the day to two days after it. */
+    lifeDates(f) {
+      const fix = this.bdayFix(f), date = fix || f.date; if (!date) return null;
+      const lead = iso(addDays(parse(date), -LIFE_LEAD));
+      let from = f.showFrom || date;
+      if (fix && (from > fix || from < lead)) from = fix;
+      if (from < lead) from = lead;
+      return { date, from, until: iso(addDays(parse(from > date ? from : date), 10)), greetUntil: iso(addDays(parse(date), 2)), fix };
+    }
     async saveEvent() {
-      const sh = this.state.sheet, f = sh.f;
+      const sh = this.state.sheet, f = sh.f, last = f.lastDay && f.lastDay > f.date ? f.lastDay : null;
       if (!(f.title || '').trim()) return this.toast('כתבו שם לאירוע');
-      if (toMin(f.end) <= toMin(f.start)) return this.toast('שעת הסיום צריכה להיות אחרי שעת ההתחלה');
+      if (!f.date) return this.toast('בחרו תאריך');
+      if (f.lastDay && f.lastDay < f.date) return this.toast('תאריך הסיום לפני תאריך ההתחלה');
+      if (last && (parse(last) - parse(f.date)) / 864e5 > 31.5) return this.toast('אירוע יכול להימשך עד חודש. בדקו את תאריך הסיום');
+      if (!f.allDay && (!f.start || !f.end)) return this.toast('בחרו שעות, או "כל היום"');
+      if (!f.allDay && !last && toMin(f.end) <= toMin(f.start)) return this.toast('שעת הסיום צריכה להיות אחרי שעת ההתחלה');
       const edit = sh.mode === 'edit';
       try {
-        await this.run('saveEvent', { id: edit ? f.id : undefined, title: f.title.trim(), date: f.date, start: f.start, end: f.end, place: (f.place || '').trim(), big: !!f.big, photo: f.photo || null },
+        await this.run('saveEvent', { id: edit ? f.id : undefined, title: f.title.trim(), date: f.date, lastDay: last, allDay: !!f.allDay, start: f.allDay ? '00:00' : f.start, end: f.allDay ? '00:00' : f.end,
+          place: (f.place || '').trim(), big: !!f.big, photo: f.photo || null },
           (edit ? 'עודכן אירוע: ' : 'נוסף אירוע: ') + f.title.trim());
         this.closeSheet();
       } catch (e) { /* toasted */ }
     }
-    delLife(l) { this.run('deleteLife', { id: l.id }, 'נמחק: ' + l.type + ' · ' + dn(this.lifeP(l))).catch(() => {}); }
+    delLife(l) { return this.run('deleteLife', { id: l.id }, 'נמחק: ' + l.type + ' · ' + dn(this.lifeP(l))).catch(() => {}); }
     delEvent(e) { return this.run('deleteEvent', { id: e.id }, 'נמחק אירוע: ' + e.title).catch(() => {}); }
+    /** A birthday from the people list off the wall: turns off the person's "לחגוג יום הולדת בצג". */
+    hideBday(pp) { return this.run('hideBirthday', { personId: pp.id }, 'יום ההולדת של ' + dn(pp) + ' לא יוצג בצג').catch(() => {}); }
+    /** A tile of the people panel off the wall: its personal event deleted, or the birthday hidden. */
+    dropTile(x) { return x.life ? this.delLife(x.life) : x.bday && !x.person.free ? this.hideBday(x.person) : null; }
+    editTile(x) { return x.life ? this.openLife(x.life) : x.bday && !x.person.free ? this.openPerson(x.person) : null; }
 
     // ---- people ----
     /** back: the sheet to return to after saving a new person (the life sheet's "add new person"), with the new id. */
@@ -757,9 +797,29 @@
       const brightness = s.brightness != null ? s.brightness : D ? D.state.brightness : 100;
       const agent = this.agentInfo(), agentOn = !!D && agent.ready;
       const urgent = D ? D.state.urgent : '';
-      const all = this.celebs(), cel = all.filter((x) => !x.tpl.quiet), quiet = all.filter((x) => x.tpl.quiet);
+      // The schedules (the "תזמונים" screen) say when greetings come up by themselves; a memorial day pauses them.
+      const mo = this.moments(), greetPaused = !!(D && D.memorial && D.memorial.on);
+      // Today's greetings: the tiles the wall greets on the full screen, from the day to two days after it (a Friday birthday
+      // is celebrated on Sunday). Mourning only shows quietly in the panel.
+      const wp = this.wallPeople(), cel = wp.filter((x) => x.tile.full);
+      const canEdit = (x) => !!x.life || (x.bday && !x.person.free);
       const celRow = (x) => ({ key: x.key, name: dn(x.person), type: x.type, color: x.tpl.color, av: this.avatar(x.person, x.noPhoto ? null : x.photoSrc),
-        show: () => this.showCeleb(x), showClose: () => { this.showCeleb(x); this.closeSheet(); } });
+        show: () => this.showCeleb(x), showClose: () => { this.showCeleb(x); this.closeSheet(); }, edit: canEdit(x) ? () => this.editTile(x) : null });
+      const dayWord = (d) => (d === ti ? 'היום' : d === iso(addDays(now, 1)) ? 'מחר' : d === iso(addDays(now, -1)) ? 'אתמול' : d === iso(addDays(now, -2)) ? 'שלשום' : dm(d));
+      // The people panel, tile by tile: when it greets on the full screen, until when it stays, or that it waits for room.
+      const wallPersonRows = wp.map((x) => {
+        const t = x.tile, greetUntil = iso(addDays(parse(t.on), 2));
+        const status = x.waiting ? 'מחכה למקום בצג (יש בו מקום ל-' + PEOPLE_TILES + ')'
+          : t.quiet ? 'מוצג בשקט, עד ' + dm(t.until)
+          : t.full ? (greetPaused ? 'הברכה על כל המסך מושהית היום' : !mo.celebrate.on ? 'ברכה על כל המסך רק מהשלט' : 'ברכה על כל המסך, ' + (greetUntil === ti ? 'היום בפעם האחרונה' : 'עד ' + dm(greetUntil)))
+            + ' · בפאנל עד ' + dm(t.until)
+          : t.on > ti ? 'בפאנל עד ' + dm(t.until) + ' · ברכה על כל המסך מ-' + dm(t.on)
+          : 'בפאנל עד ' + dm(t.until);
+        return { key: x.key, name: dn(x.person), type: x.baseType + ' · ' + dayWord(t.on), color: x.tpl.color, av: this.avatar(x.person, x.noPhoto ? null : x.photoSrc),
+          avFilter: t.quiet ? 'grayscale(1)' : 'none', status, op: x.waiting ? 0.62 : 1,
+          show: t.full ? () => this.showCeleb(x) : null, edit: canEdit(x) ? () => this.editTile(x) : null, del: canEdit(x) ? () => this.dropTile(x) : null,
+          delLabel: x.life ? 'מחיקה: ' + x.baseType + ' · ' + dn(x.person) : 'הסתרת יום ההולדת של ' + dn(x.person) };
+      });
       const tk = this.takeover(), tkK = tk ? tk.kind : '';
       // On a phone or tablet the welcome's card stands in for the live wall: the welcome running inside the preview takes more
       // memory than a phone gives a page (the wall comes back in the preview once "enter" is pressed).
@@ -770,14 +830,18 @@
       const sh = s.sheet, f = sh ? sh.f : {}, kind = sh ? sh.kind : '';
       const events = D ? D.events : [], life = D ? D.life : [], people = D ? D.people : [], history = D ? D.history : [];
 
-      const todayEvents = events.filter((e) => e.date === ti).sort((a, b) => toMin(a.start) - toMin(b.start));
+      // Today's events, also one of several days that runs through today. A long one (all day, or more than 12 hours) doesn't
+      // go full screen by itself, and shown by hand it stays for ten minutes (lib/remote-ops.ts evTakeover).
+      const nowT = now.getTime(), lastOf = (e) => e.lastDay || e.date, isLong = (e) => Date.parse(e.endsAt) - Date.parse(e.startsAt) > 12 * 3600e3;
+      const todayEvents = events.filter((e) => e.date <= ti && ti <= lastOf(e)).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
+      const todayTime = (e) => (e.allDay || (e.date < ti && lastOf(e) > ti) ? 'כל היום' : e.date < ti ? 'עד ' + e.end : lastOf(e) > ti ? 'מ-' + e.start : e.start + '–' + e.end);
       const rows = todayEvents.map((e) => {
-        const past = toMin(e.end) <= nm, live = tk && tk.eventId === e.id;
-        return { key: e.id, m: toMin(e.start), time: e.start + '–' + e.end, title: e.title, op: past ? 0.45 : 1,
-          sub: [e.place, past ? 'הסתיים' : (toMin(e.start) <= nm ? 'מתקיים עכשיו' : ''), e.big && !past ? 'יעלה לבד על כל המסך' : ''].filter(Boolean).join(' · '),
-          hasBtn: !past, btn: live ? 'מוצג עכשיו' : toMin(e.start) - nm > 30 ? 'הצצה ל-10 דק׳' : 'על כל המסך', action: () => (live ? null : this.showEvent(e)), hasToggle: false };
+        const past = Date.parse(e.endsAt) <= nowT, live = tk && tk.eventId === e.id;
+        return { key: e.id, m: e.allDay || e.date < ti ? 0 : toMin(e.start), time: todayTime(e), title: e.title, op: past ? 0.45 : 1,
+          sub: [e.place, past ? 'הסתיים' : (Date.parse(e.startsAt) <= nowT ? 'מתקיים עכשיו' : ''), e.big && !past && !isLong(e) ? 'יעלה לבד על כל המסך' : ''].filter(Boolean).join(' · '),
+          hasBtn: !past, btn: live ? 'מוצג עכשיו' : isLong(e) || Date.parse(e.startsAt) - nowT > 30 * 60e3 ? 'הצצה ל-10 דק׳' : 'על כל המסך', action: () => (live ? null : this.showEvent(e)), hasToggle: false };
       });
-      const mo = this.moments(), noonM = toMin(mo.noon.at), noonPast = nm >= noonM + 15, noonOn = design.noon && noonToday;
+      const noonM = toMin(mo.noon.at), noonPast = nm >= noonM + 15, noonOn = design.noon && noonToday;
       rows.push(Object.assign({ key: 'noon', m: noonM, time: mo.noon.at, title: 'סרטון תדמית', op: noonPast ? 0.45 : 1,
         sub: !design.noon ? 'כבוי בהגדרות העיצוב' : noonPast ? 'הסתיים להיום' : (noonToday ? 'יעלה לבד' : 'דילוג היום'),
         hasBtn: false, hasToggle: design.noon && !noonPast }, sw(noonOn), {
@@ -786,15 +850,27 @@
 
       // Everything ahead: directorate events (a year), personal moments still to show, birthdays in the next 30 days.
       const soon = [], bLim = iso(addDays(now, BDAY_DAYS));
-      events.filter((e) => e.date >= ti).forEach((e) => soon.push({ key: e.id, date: e.date, title: e.title, sub: e.start + '–' + e.end + (e.place ? ' · ' + e.place : '') + (e.big ? ' · מודעה מנהלת' : ''), tag: 'אירועים', tagColor: ICE, img: e.photo || null, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
+      const W = D && D.wall ? D.wall : { people: [], waiting: [], events: [], eventsWaiting: [] };
+      const tileIds = (list) => new Set(list.map((t) => (t.ref.kind === 'life' ? t.ref.id : 'b' + t.ref.personId)));
+      const onWallNow = tileIds(W.people), waitingNow = tileIds(W.waiting);
+      events.filter((e) => lastOf(e) >= ti).forEach((e) => soon.push({ key: e.id, date: e.date < ti ? ti : e.date, title: e.title,
+        sub: [evWhen(e), e.place, e.big ? 'מודעה מנהלת' : ''].filter(Boolean).join(' · '), tag: 'אירועים', tagColor: ICE, img: e.photo || null, editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e) }));
       life.filter((l) => l.showUntil >= ti).forEach((l) => { const pp = this.lifeP(l), tp = l.kind === 'bereavement' ? tpl('אבל') : tpl(l.type);
-        soon.push({ key: l.id, date: l.date, title: dn(pp), sub: (l.note ? l.note + ' · ' : '') + (!onWall(pp) ? 'לא מוצג: ' + (pp.active ? 'ביקש/ה לא להופיע בצג' : 'כבר לא במנהלת') : l.showFrom > ti ? 'יוצג החל מ-' + dm(l.showFrom) : (tp.quiet ? 'מוצג בשקט' : 'מוצג עכשיו')), tag: l.type, tagColor: tp.color, editable: true, edit: () => this.openLife(l), del: () => this.delLife(l) }); });
+        const st = !onWall(pp) ? 'לא מוצג: ' + (pp.active ? 'ביקש/ה לא להופיע בצג' : 'כבר לא במנהלת')
+          : l.dupOf ? 'כפול: אותו אירוע רשום פעמיים, ומוצג פעם אחת'
+          : onWallNow.has(l.id) ? (tp.quiet ? 'מוצג בשקט בצג' : 'מוצג עכשיו בצג')
+          : waitingNow.has(l.id) ? 'מחכה למקום בצג'
+          : l.showFrom > ti ? 'יוצג החל מ-' + dm(l.showFrom) : 'לא מוצג כרגע';
+        soon.push({ key: l.id, date: l.date, title: dn(pp), sub: (l.note ? l.note + ' · ' : '') + st, tag: l.type, tagColor: tp.color, editable: true, edit: () => this.openLife(l), del: () => this.delLife(l) }); });
       (D && D.ticker ? D.ticker : []).forEach((t) => soon.push({ key: t.id, date: t.start < ti ? ti : t.start, title: t.name,
         sub: [t.end ? (t.start < ti ? 'עד ' : dm(t.start) + '–') + dm(t.end) : '', t.place, 'ברצועת האירועים בצג'].filter(Boolean).join(' · '),
         tag: t.kind === 'הזדמנות' ? 'הזדמנות' : 'אירוע בתעשייה', tagColor: '#7fe0c4', editable: true, edit: () => this.openTicker(t), del: () => this.delTicker(t) }));
-      const lifeBdays = new Set(life.filter((l) => l.kind === 'birthday' && l.personId).map((l) => l.personId + '|' + l.date));
-      people.forEach((pp) => { if (!pp.bday || !onWall(pp) || !pp.showBday) return; const d = nextBday(pp.bday, now);
-        if (iso(d) <= bLim && !lifeBdays.has(pp.id + '|' + iso(d))) soon.push({ key: 'b' + pp.id, date: iso(d), title: dn(pp), sub: 'מחושב לבד מתאריך הלידה', tag: 'יום הולדת', tagColor: WARM, editable: false, open: () => this.openPerson(pp) }); });
+      // A birthday typed as a personal event stands for the one worked out from the list (the wall matches them by name).
+      const lifeBdays = new Set(life.filter((l) => l.kind === 'birthday').flatMap((l) => [l.personId, nkey(this.lifeP(l).name)].filter(Boolean).map((k) => k + '|' + l.date)));
+      people.forEach((pp) => { if (!pp.bday || !onWall(pp) || !pp.showBday) return; const d = iso(nextBday(pp.bday, now));
+        if (d <= bLim && !lifeBdays.has(pp.id + '|' + d) && !lifeBdays.has(nkey(pp.name) + '|' + d)) soon.push({ key: 'b' + pp.id, date: d, title: dn(pp),
+          sub: 'מתאריך הלידה ברשימת האנשים' + (onWallNow.has('b' + pp.id) ? ' · מוצג עכשיו בצג' : ''), tag: 'יום הולדת', tagColor: WARM, editable: true,
+          edit: () => this.openPerson(pp), del: () => this.hideBday(pp), delLabel: 'הסתרת יום ההולדת של ' + dn(pp) + ' מהצג' }); });
       soon.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
       let lastMonth = iso(now).slice(0, 7);
       const soonRows = soon.map((r) => { const d = parse(r.date), mk = r.date.slice(0, 7), head = mk !== lastMonth ? MONTHS[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : '') : '';
@@ -815,14 +891,18 @@
       const thisMonth = pad(now.getMonth() + 1), noBirthday = activeP.filter((pp) => !pp.birthday).length;
       const bdaysMonth = activeP.filter((pp) => pp.bday && pp.bday.slice(0, 2) === thisMonth && pp.onWall && pp.showBday).length;
 
-      const nextEv = todayEvents.find((e) => toMin(e.end) > nm);
+      const nextEv = todayEvents.find((e) => Date.parse(e.endsAt) > nowT);
       const nl = D && D.newsletter;
       // Yizkor, on a memorial day (the server's MEMORIALS): the screen now, or Yizkor off (and back) for the rest of it.
       const mem = D && D.memorial, memItems = !mem ? [] : [
         { label: tkK === 'memorial' ? 'חזרה לצג הבית' : 'מסך יזכור', sub: tkK === 'memorial' ? 'מסך היזכור מוצג · הנר עובר לצג הבית' : mem.on ? 'עולה לבד בתחילת כל שעה · ' + mem.label : 'היזכור כבוי היום · לחיצה מחזירה אותו', dot: '#e9b872', bg: 'rgba(233,184,114,.12)', border: 'rgba(233,184,114,.55)', go: () => (tkK === 'memorial' ? this.endTk() : this.memorial({ show: true }, 'מסך יזכור על כל המסך')) }];
       const memMore = !mem ? [] : [{ label: mem.on ? 'סיום היזכור' : 'החזרת היזכור', sub: mem.on ? 'נר יזכור קטן בצג הבית · ' + mem.label : 'היזכור כבוי בצג', dot: '#e9b872', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.memorial({ on: !mem.on }, mem.on ? 'סיום היזכור בצג' : 'היזכור חזר לצג') }];
+      // A launch's broadcast, when the wall shows one (the server's schedules): to the side, or ended.
+      const lst = D && D.stream, streamItems = !lst ? [] : [
+        lst.mode === 'full' ? { label: 'שידור השיגור לצד', sub: 'שידור חי על כל המסך · ' + lst.title, dot: '#ff5a4f', bg: 'rgba(255,90,79,.10)', border: 'rgba(255,120,110,.55)', go: () => this.streamCtl(true) } : null,
+        { label: 'סיום שידור השיגור', sub: (lst.mode === 'full' ? 'על כל המסך' : 'בפינת חדשות החלל') + ' · ' + lst.title, dot: '#ff5a4f', bg: 'rgba(255,90,79,.10)', border: 'rgba(255,120,110,.55)', go: () => this.streamCtl(false) }].filter(Boolean);
       const actGroups = [
-        { title: 'להציג עכשיו על כל המסך', items: [...memItems,
+        { title: 'להציג עכשיו על כל המסך', items: [...streamItems, ...memItems,
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
           { label: tkK === 'news' ? 'חזרה מהחדשות' : 'חדשות החלל', sub: tkK === 'news' ? 'מוצג עכשיו' : 'הידיעה המרכזית הבאה מהניוזלטר' + (mo.news.on ? ' · עולה לבד כל ' + minLbl(mo.news.every) : ''), dot: '#6fd6ea', bg: 'rgba(111,214,234,.09)', border: 'rgba(111,214,234,.4)', go: () => (tkK === 'news' ? this.endTk() : this.showNews()) },
           { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : design.noon ? 'עולה לבד ב-' + mo.noon.at : 'האוטומציה כבויה', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
@@ -845,13 +925,21 @@
       const lfSrc = f.photo === 'upload' ? f.photoSrc : null;
       const lfAvBase = lfP ? this.avatar(lfP, lfSrc) : q ? this.avatar({ id: 'n:' + q, name: q }, lfSrc) : { bg: 'rgba(150,190,240,.25)', ini: '?', photoEl: lfSrc ? imgEl(lfSrc, COVER) : null };
       const lfAv = f.photo === 'none' ? Object.assign({}, lfAvBase, { photoEl: null }) : lfAvBase;
-      const lfFix = kind === 'life' ? this.bdayFix(f) : null, lfDay = lfFix || f.date;
-      const lfW = lfDay ? { from: lfFix ? (f.showFrom === f.date ? lfFix : f.showFrom) : f.showFrom || lfDay, until: iso(addDays(parse(lfDay), 10)), greetUntil: iso(addDays(parse(lfDay), 2)) } : null;
+      const lfW = kind === 'life' ? this.lifeDates(f) : null, lfFix = lfW ? lfW.fix : null;
       const bdayTxt = (pp) => (pp.bday ? 'יום הולדת ' + Number(pp.bday.slice(3)) + '.' + Number(pp.bday.slice(0, 2)) : '');
       const lfSuggest = kind === 'life' && !lfP && q ? people.filter((pp) => pp.active && [pp.name, pp.rank, pp.role, pp.unit].join(' ').includes(q)).slice(0, 5) : [];
 
-      const evShowList = events.filter((e) => e.date > ti || (e.date === ti && toMin(e.end) > nm)).sort((a, b) => ((a.date + a.start) < (b.date + b.start) ? -1 : 1)).slice(0, 6);
-      const soonish = (e) => e.date === ti && toMin(e.start) - nm <= 30;   // running or starting within half an hour: stays until it ends
+      const evShowList = events.filter((e) => Date.parse(e.endsAt) > nowT).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)).slice(0, 6);
+      // running or starting within half an hour: stays until it ends (a long one only peeks)
+      const soonish = (e) => !isLong(e) && Date.parse(e.startsAt) - nowT <= 30 * 60e3;
+      // The events panel, row by row (its first EVENT_ROWS), and those waiting for room.
+      const evById = new Map(events.map((e) => [e.id, e]));
+      const wallEvRows = [...W.events.map((id) => [id, false]), ...W.eventsWaiting.map((id) => [id, true])].filter(([id]) => evById.has(id)).map(([id, waiting]) => {
+        const e = evById.get(id), d = parse(e.date < ti ? ti : e.date), running = Date.parse(e.startsAt) <= nowT;
+        return { key: e.id, day: d.getDate(), dow: e.date <= ti ? 'היום' : DOWS[d.getDay()], img: e.photo || null, title: e.title, op: waiting ? 0.62 : 1,
+          sub: [running ? 'מתקיים עכשיו' : '', evWhen(e), e.place, e.big ? 'מודעה מנהלת' : '', waiting ? 'מחכה למקום בצג (יש בו מקום ל-' + EVENT_ROWS + ')' : ''].filter(Boolean).join(' · '),
+          editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e), delLabel: 'מחיקת האירוע ' + e.title };
+      });
       const last = history.find((x) => x.canRestore);
       const ago = (at) => { const d = new Date(at); return iso(d) === ti ? hhmm(d) : iso(d) === iso(addDays(now, -1)) ? 'אתמול' : d.getDate() + '.' + (d.getMonth() + 1); };
       const nlAt = (at) => { const d = new Date(at); return iso(d) === ti ? 'היום ב-' + hhmm(d) : iso(d) === iso(addDays(now, -1)) ? 'אתמול' : 'ב-' + d.getDate() + '.' + (d.getMonth() + 1); };
@@ -872,7 +960,7 @@
         tkAv: tkK === 'celebrate' ? { bg: tkP ? colorFor(tkP) : OFF, ini: initials(tkP ? tkP.name : tk.person.name), photoEl: tk.person.photo ? imgEl(tk.person.photo, COVER) : null } : { bg: OFF, ini: '', photoEl: null },
         tkColor: tkT ? tkT.color : ICE, tkHead: tkT ? tkT.head : '', tkName: tkK === 'celebrate' ? tk.person.name : '', tkLine: tkP ? pline(tkP) : '',
         tkMsg: tkK === 'celebrate' ? (tk.note || 'מאחלים המון אושר והצלחה — ממשפחת מנהלת החלל') : '',
-        tkEvTitle: tkK === 'event' ? tk.title : '', tkEvMeta: tkK === 'event' ? tk.start + '–' + tk.end + (tk.place ? ' · ' + tk.place : '') : '',
+        tkEvTitle: tkK === 'event' ? tk.title : '', tkEvMeta: tkK === 'event' ? [tk.when != null ? tk.when : tk.start + '–' + tk.end, tk.place].filter(Boolean).join(' · ') : '',
         tkEvEnd: tkK === 'event' ? 'יורד לבד ב-' + hhmm(new Date(tk.until)) : '',
         urgentOn: !!urgent, urgentText: urgent, clearUr: () => this.run('urgent', { text: '' }, 'הוסרה ההודעה הדחופה').catch(() => {}),
         clearUrClose: () => { this.run('urgent', { text: '' }, 'הוסרה ההודעה הדחופה').catch(() => {}); this.closeSheet(); },
@@ -896,9 +984,10 @@
         pInactive: inactiveP.filter(pMatch).map(pRow), showInactive: s.showInactive, toggleInactive: () => this.setState({ showInactive: !s.showInactive }),
         addPerson: () => this.openPerson(), pickImport: () => this.importRef.current && this.importRef.current.click(), onImportFile: (e) => this.onImportFile(e),
         impBtn: s.impBusy ? 'קורא את הקובץ…' : 'ייבוא מאקסל', exportPeople: () => this.exportPeople(),
-        celebs: cel.map(celRow), hasCelebs: cel.length > 0, noCelebs: cel.length === 0,
-        celebAuto: (mo.celebrate.on ? 'עולות לבד על כל המסך כל ' + minLbl(mo.celebrate.every) : 'לא עולות לבד (כבוי בתזמונים)') + ' · לחיצה מציגה עכשיו',
-        hasQuiet: quiet.length > 0, quietNames: quiet.map((x) => dn(x.person)).join(', '),
+        celebs: cel.map(celRow), noCelebs: cel.length === 0,
+        wallPersonRows, wallEvRows, addLifeNew: () => this.openLife(), addEventNew: () => this.openEvent(),
+        peopleHint: 'מה שמוצג עכשיו בפאנל האנשים. ' + (greetPaused ? 'היום, בגלל היזכור, ברכות לא עולות לבד על כל המסך'
+          : mo.celebrate.on ? 'ברכות עולות לבד על כל המסך כל ' + minLbl(mo.celebrate.every) + ', אחת בכל פעם' : 'ברכות לא עולות לבד על כל המסך (כבוי בתזמונים)'),
         todayRows: rows, soonRows,
 
         showActions: !s.studio, actGroups, studio: s.studio,
@@ -957,8 +1046,10 @@
         moCards: kind === 'moments' ? this.momentCards(mo, design, sw) : [], moFx: mo.fx, moFxSw: sw(mo.fx), toggleMoFx: () => this.setMoment('fx', null, !mo.fx, mo.fx ? 'אנימציות מעבר כבויות' : 'אנימציות מעבר פעילות'),
         shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker',
         openLifeNew: () => this.openLife(), openEventNew: () => this.openEvent(),
-        showEvents: evShowList.map((e) => { const live = tk && tk.eventId === e.id; const d = parse(e.date);
-          return { key: e.id, title: e.title, when: (e.date === ti ? 'היום' : 'יום ' + DOWS[d.getDay()] + ' ' + dm(e.date)) + ' · ' + e.start + '–' + e.end + (e.place ? ' · ' + e.place : ''), btn: live ? 'מוצג עכשיו' : soonish(e) ? 'הצגה עכשיו' : 'הצצה ל-10 דק׳', show: () => { if (!live) this.showEvent(e); this.closeSheet(); } }; }),
+        showEvents: evShowList.map((e) => { const live = tk && tk.eventId === e.id, d = parse(e.date), multi = lastOf(e) > e.date;
+          const day = e.date === ti ? 'היום' : e.date < ti ? 'מתקיים עכשיו' : 'יום ' + DOWS[d.getDay()] + ' ' + dm(e.date);
+          return { key: e.id, title: e.title, when: [multi && e.date > ti ? '' : day, evWhen(e), e.place].filter(Boolean).join(' · '),
+            btn: live ? 'מוצג עכשיו' : soonish(e) ? 'הצגה עכשיו' : 'הצצה ל-10 דק׳', show: () => { if (!live) this.showEvent(e); this.closeSheet(); }, edit: () => this.openEvent(e) }; }),
         noShowEvents: evShowList.length === 0,
 
         // Who: free text. A name from the people list is suggested while typing, and picking it (or typing it in full)
@@ -1000,12 +1091,22 @@
         lfPMsg: f.note || (lfT.quiet ? 'משפחת מנהלת החלל משתתפת בצערך' : 'מאחלים המון אושר והצלחה — ממשפחת מנהלת החלל'),
         lfPrevBg: lfT.quiet ? '#0b1120' : 'radial-gradient(circle at 50% 40%, #1b2f5c 0%, #040914 75%)',
         lfQuiet: !!lfT.quiet, lfNotQuiet: !lfT.quiet,
-        lfWindow: lfW ? 'מוצג בפאנל האנשים מ-' + dm(lfW.from) + ' עד ' + dm(lfW.until) + ', ועולה על כל המסך ' + (mo.celebrate.on ? 'כל ' + minLbl(mo.celebrate.every) : 'מהשלט') + ' מ-' + dm(lfDay) + ' עד ' + dm(lfW.greetUntil) : '',
+        lfWindow: lfW ? 'מוצג בפאנל האנשים מ-' + dm(lfW.from) + ' עד ' + dm(lfW.until) + ', ועולה על כל המסך ' + (mo.celebrate.on ? 'כל ' + minLbl(mo.celebrate.every) : 'מהשלט') + ' מ-' + dm(lfW.date) + ' עד ' + dm(lfW.greetUntil) : '',
         lfSaveLabel: sh && sh.mode === 'edit' ? 'שמירת שינויים' : 'שמירה',
+        lfIsEdit: kind === 'life' && sh.mode === 'edit', deleteLife: () => { const l = life.find((x) => x.id === f.id); if (l) this.delLife(l); this.closeSheet(); },
         saveLife: () => this.saveLife(false), saveLifeShow: () => this.saveLife(true),
 
-        evTitle: f.title || '', setEvTitle: this.fv('title'), evDate: f.date || '', setEvDate: this.fv('date'),
+        evTitle: f.title || '', setEvTitle: this.fv('title'), evDate: f.date || '',
+        // moving the first day moves the last one with it, as in a calendar
+        setEvDate: (e) => { const v = e.target.value, span = f.lastDay && f.date && f.lastDay > f.date ? Math.round((parse(f.lastDay) - parse(f.date)) / 864e5) : 0;
+          this.setFV({ date: v, lastDay: span && v ? iso(addDays(parse(v), span)) : f.lastDay && v && f.lastDay > v ? f.lastDay : '' }); },
+        evLastDay: f.lastDay || '', setEvLastDay: this.fv('lastDay'), evLastMin: f.date || '',
+        evAllDay: sw(!!f.allDay), toggleEvAllDay: () => this.setFV({ allDay: !f.allDay }), evTimed: !f.allDay,
         evStart: f.start || '', setEvStart: this.fv('start'), evEnd: f.end || '', setEvEnd: this.fv('end'),
+        evMulti: !!(f.lastDay && f.date && f.lastDay > f.date), clearEvLastDay: () => this.setFV({ lastDay: '' }),
+        evBigHint: f.allDay || (f.lastDay && f.date && f.lastDay > f.date) || toMin(f.end) - toMin(f.start) > 720
+          ? 'אירוע של יום שלם או של כמה ימים לא עולה לבד על כל המסך. אפשר להציג אותו לעשר דקות מ"מודעה מנהלת" בשלט.'
+          : 'האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד כשהוא נגמר',
         evPlace: f.place || '', setEvPlace: this.fv('place'),
         evBigJ: f.big ? 'flex-end' : 'flex-start', evBigBg: f.big ? ICE : OFF, toggleEvBig: () => this.setFV({ big: !f.big }),
         evIsEdit: sh && sh.mode === 'edit', evSaveLabel: sh && sh.mode === 'edit' ? 'שמירת שינויים' : 'שמירה',
@@ -1111,6 +1212,33 @@
           r.tags.length ? el('div', 'display:flex;gap:6px;flex-wrap:wrap;padding-top:2px', null, r.tags.map((t) => el('span', `font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid ${t.c};color:${t.c}`, { key: t.t }, t.t))) : null),
         r.bday ? el('span', "flex:none;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#e9b872;direction:ltr", null, r.bday + ' 🎂') : null);
 
+      // The today tab's lists: a heading with an add button, and rows with show, edit and delete.
+      const listHead = (title, sub, onAdd) => el('div', 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:4px', null,
+        el('div', 'display:flex;flex-direction:column;gap:1px;min-width:0', null, el('span', 'font-size:15px;font-weight:700', null, title), sub ? el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, sub) : null),
+        onAdd ? smallBtn('+ הוספה', onAdd) : null);
+      const rowBtns = (r) => el('div', 'flex:none;display:flex;gap:6px;margin-inline-start:auto', null,
+        r.show ? el('button', 'min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(212,242,92,.45);background:transparent;color:#d4f25c;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap', { onClick: r.show }, 'הצגה') : null,
+        r.edit ? el('button', 'min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:13px;cursor:pointer', { onClick: r.edit }, 'עריכה') : null,
+        r.del ? el('button', 'width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,122,107,.35);background:transparent;color:#ff7a6b;font-size:14px;cursor:pointer', { onClick: r.del, 'aria-label': r.delLabel || 'מחיקה', title: r.delLabel || 'מחיקה' }, '✕') : null);
+      const wallPersonRow = (r) => el('div', `display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:10px 0;border-top:1px solid rgba(150,190,240,.08);opacity:${r.op}`, { key: r.key },
+        avatarDiv(40, 14, r.av, ';filter:' + r.avFilter),
+        el('div', 'flex:1 1 210px;min-width:0;display:flex;flex-direction:column;gap:2px', null,
+          el('span', 'font-size:15px;font-weight:600', null, r.name),
+          el('span', `font-size:12.5px;font-weight:600;color:${r.color}`, null, r.type),
+          el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, r.status)),
+        rowBtns(r));
+      /** A row with its day in a box: the upcoming list, and the events panel on the today tab. */
+      const datedRow = (r, line) => el('div', `display:flex;align-items:center;gap:12px;padding:10px 0;${line}:1px solid rgba(150,190,240,.08);opacity:${r.op || 1}`, { key: r.key },
+        el('div', 'flex:none;width:44px;height:44px;border-radius:10px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.14);display:flex;flex-direction:column;align-items:center;justify-content:center', null,
+          el('span', 'font-size:16px;font-weight:800;line-height:1', null, r.day), el('span', 'font-size:11px;color:#8b9dbd', null, r.dow)),
+        r.img ? el('img', 'flex:none;width:44px;height:44px;border-radius:10px;object-fit:cover;background:#000', { src: r.img, alt: '' }) : null,
+        el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null,
+          el('span', 'font-size:15px;font-weight:600;text-wrap:pretty', null, r.title),
+          el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap', null,
+            r.tag ? el('span', `font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid ${r.tagColor};color:${r.tagColor}`, null, r.tag) : null,
+            el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, r.sub))),
+        r.editable ? rowBtns(r) : null);
+
       // ---- header + banners
       const header = el('header', 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap', null,
         el('div', 'display:flex;align-items:center;gap:12px;min-width:0', null,
@@ -1174,16 +1302,15 @@
       const todayPanel = v.showToday ? el('section', 'border-radius:20px;border:1px solid rgba(150,190,240,.14);background:rgba(14,28,58,.55);padding:14px 16px;display:flex;flex-direction:column;gap:14px;scroll-margin-top:12px', { ref: this.panelRef },
         segWrap(3, v.tabs.map((t) => el('button', `min-height:40px;border-radius:9px;border:none;background:${t.bg};color:${t.fg};font-size:15px;font-weight:700;cursor:pointer`, { key: t.id, onClick: t.pick }, t.label))),
         v.tabToday ? h(React.Fragment, null,
-          el('div', 'display:flex;flex-direction:column;gap:10px', null,
-            el('div', 'display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap', null,
-              el('span', 'font-size:15px;font-weight:700', null, 'מודעות אישיות היום'),
-              el('span', 'font-size:12px;color:#8b9dbd', null, v.celebAuto)),
-            v.hasCelebs ? el('div', 'display:flex;flex-wrap:wrap;gap:8px', null, v.celebs.map((c) =>
-              el('button', 'display:flex;align-items:center;gap:8px;padding:5px 5px 5px 14px;border-radius:999px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.5);color:#e6f1ff;cursor:pointer;text-align:right', { key: c.key, onClick: c.show },
-                avatarDiv(34, 13, c.av),
-                el('div', 'display:flex;flex-direction:column;gap:0', null, el('span', 'font-size:14px;font-weight:600', null, c.name), el('span', `font-size:12px;color:${c.color}`, null, c.type))))) : null,
-            v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין מודעות אישיות היום', v.hasPeople ? null : h(React.Fragment, null, ' · רשימת האנשים עדיין ריקה: ', linkBtn('להוספת אנשים', v.toPeople))) : null,
-            v.hasQuiet ? el('span', 'font-size:13px;color:#8b9dbd', null, 'מוצג בשקט בפאנל האנשים: ' + v.quietNames) : null),
+          el('div', 'display:flex;flex-direction:column', null,
+            listHead('אנשי המנהלת בצג', v.peopleHint, v.addLifeNew),
+            v.wallPersonRows.map(wallPersonRow),
+            v.wallPersonRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:8px 0;text-wrap:pretty', null, 'אין עכשיו אנשים בצג',
+              v.hasPeople ? null : h(React.Fragment, null, ' · רשימת האנשים עדיין ריקה: ', linkBtn('להוספת אנשים', v.toPeople)))),
+          el('div', 'display:flex;flex-direction:column', null,
+            listHead('אירועים בצג', 'מה שמוצג עכשיו בפאנל האירועים (השבוע הקרוב)', v.addEventNew),
+            v.wallEvRows.map((r) => datedRow(r, 'border-top')),
+            v.wallEvRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:8px 0', null, 'אין אירועים בצג בשבוע הקרוב')),
           el('div', 'display:flex;flex-direction:column', null,
             el('span', 'font-size:15px;font-weight:700;padding-bottom:6px', null, 'לוח הזמנים היום'),
             v.todayRows.map((r) => el('div', `display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid rgba(150,190,240,.08);opacity:${r.op}`, { key: r.key },
@@ -1197,19 +1324,7 @@
           v.soonRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:10px 0;text-wrap:pretty', null, 'עוד אין אירועים קרובים. אפשר להוסיף לאירועים, לאנשי המנהלת או לרצועת האירועים בכפתורים למעלה.'),
           v.soonRows.map((r) => h(React.Fragment, { key: r.key },
             r.head ? el('span', 'padding:14px 0 2px;font-size:13px;font-weight:700;color:#9fdcff', null, r.head) : null,
-            el('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(150,190,240,.08)', null,
-              el('div', 'flex:none;width:44px;height:44px;border-radius:10px;background:rgba(4,9,20,.6);border:1px solid rgba(150,190,240,.14);display:flex;flex-direction:column;align-items:center;justify-content:center', null,
-                el('span', 'font-size:16px;font-weight:800;line-height:1', null, r.day), el('span', 'font-size:11px;color:#8b9dbd', null, r.dow)),
-              r.img ? el('img', 'flex:none;width:44px;height:44px;border-radius:10px;object-fit:cover;background:#000', { src: r.img, alt: '' }) : null,
-              el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null,
-                el('span', 'font-size:15px;font-weight:600;text-wrap:pretty', null, r.title),
-                el('div', 'display:flex;align-items:center;gap:8px;flex-wrap:wrap', null,
-                  el('span', `font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid ${r.tagColor};color:${r.tagColor}`, null, r.tag),
-                  el('span', 'font-size:12px;color:#8b9dbd', null, r.sub))),
-              r.editable ? el('div', 'flex:none;display:flex;gap:6px', null,
-                el('button', 'min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:13px;cursor:pointer', { onClick: r.edit }, 'עריכה'),
-                el('button', 'width:36px;height:36px;border-radius:10px;border:1px solid rgba(255,122,107,.35);background:transparent;color:#ff7a6b;font-size:14px;cursor:pointer', { onClick: r.del, 'aria-label': 'מחיקה' }, '✕')) : null,
-              r.open ? el('button', 'flex:none;min-height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:13px;cursor:pointer', { onClick: r.open }, 'פרטים') : null))),
+            datedRow(Object.assign({}, r, { key: 'r' }), 'border-bottom'))),
           el('span', 'padding-top:12px;font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'ימי ההולדת מחושבים לבד מתאריכי הלידה ברשימת האנשים, 30 יום קדימה. ברצועת האירועים בצג מופיעים גם האירועים מהניוזלטר השבועי. ',
             linkBtn('לרשימת האנשים', v.toPeople))) : null,
         v.tabPeople ? el('div', 'display:flex;flex-direction:column;gap:10px', null,
@@ -1336,17 +1451,19 @@
           v.shCeleb ? h(React.Fragment, null,
             el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'המודעה האישית עולה על כל המסך לדקה, ואז הצג חוזר לתצוגה הרגילה.'),
             el('div', 'display:flex;flex-direction:column;gap:8px', null, v.celebs.map((c) =>
-              el('button', 'display:flex;align-items:center;gap:12px;padding:10px;border-radius:14px;border:1px solid rgba(150,190,240,.14);background:rgba(4,9,20,.5);color:#e6f1ff;cursor:pointer;text-align:right', { key: c.key, onClick: c.showClose },
+              el('div', 'display:flex;align-items:center;gap:10px;padding:10px;border-radius:14px;border:1px solid rgba(150,190,240,.14);background:rgba(4,9,20,.5)', { key: c.key },
                 avatarDiv(46, 16, c.av),
                 el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:2px', null, el('span', 'font-size:16px;font-weight:600', null, c.name), el('span', `font-size:13px;color:${c.color}`, null, c.type)),
-                el('span', 'flex:none;font-size:14px;font-weight:700;color:#d4f25c', null, 'הצגה')))),
+                c.edit ? el('button', 'flex:none;min-height:40px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:14px;cursor:pointer', { onClick: c.edit }, 'עריכה') : null,
+                el('button', 'flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:none;background:#d4f25c;color:#0b1400;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap', { onClick: c.showClose }, 'הצגה')))),
             v.noCelebs ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין מודעות אישיות היום.') : null,
             el('button', 'min-height:44px;border-radius:12px;border:1px dashed rgba(159,220,255,.35);background:transparent;color:#9fdcff;font-size:15px;cursor:pointer', { onClick: v.openLifeNew }, '+ הוספה לאנשי המנהלת')) : null,
           v.shEvShow ? h(React.Fragment, null,
             el('span', 'font-size:14px;color:#8b9dbd;text-wrap:pretty', null, 'האירוע עולה על כל המסך ויורד לבד כשהוא מסתיים לפי היומן.'),
             el('div', 'display:flex;flex-direction:column;gap:8px', null, v.showEvents.map((e) =>
               el('div', 'display:flex;align-items:center;gap:12px;padding:12px;border-radius:14px;border:1px solid rgba(150,190,240,.14);background:rgba(4,9,20,.5)', { key: e.key },
-                el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null, el('span', 'font-size:16px;font-weight:600;text-wrap:pretty', null, e.title), el('span', 'font-size:13px;color:#8b9dbd', null, e.when)),
+                el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;gap:3px', null, el('span', 'font-size:16px;font-weight:600;text-wrap:pretty', null, e.title), el('span', 'font-size:13px;color:#8b9dbd;text-wrap:pretty', null, e.when)),
+                el('button', 'flex:none;min-height:40px;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#e6f1ff;font-size:14px;cursor:pointer', { onClick: e.edit }, 'עריכה'),
                 el('button', 'flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:none;background:#9fdcff;color:#040914;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap', { onClick: e.show }, e.btn)))),
             v.noShowEvents ? el('span', 'font-size:14px;color:#8b9dbd', null, 'אין אירועים קרובים ביומן.') : null,
             el('button', 'min-height:44px;border-radius:12px;border:1px dashed rgba(159,220,255,.35);background:transparent;color:#9fdcff;font-size:15px;cursor:pointer', { onClick: v.openEventNew }, '+ אירוע חדש')) : null,
@@ -1397,13 +1514,18 @@
               v.lfNotQuiet ? el('span', 'font-size:13px;color:#8b9dbd', null, v.lfWindow) : null),
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
               el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.saveLife, disabled: s.busyAct || s.photoBusy }, v.lfSaveLabel),
-              v.lfNotQuiet ? el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:1px solid rgba(212,242,92,.5);background:transparent;color:#d4f25c;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.saveLifeShow, disabled: s.busyAct || s.photoBusy }, 'שמירה והצגה עכשיו') : null)) : null,
+              v.lfNotQuiet ? el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:1px solid rgba(212,242,92,.5);background:transparent;color:#d4f25c;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.saveLifeShow, disabled: s.busyAct || s.photoBusy }, 'שמירה והצגה עכשיו') : null,
+              v.lfIsEdit ? delBtn('מחיקה', v.deleteLife) : null)) : null,
           v.shEvent ? h(React.Fragment, null,
             el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:16px', { value: v.evTitle, onChange: v.setEvTitle, placeholder: 'שם האירוע, למשל: ביקור משלחת מיפן', maxLength: 80 }),
             el('div', 'display:flex;gap:10px;flex-wrap:wrap', null,
-              el('label', 'flex:2;min-width:150px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'תאריך', el('input', dateField, { type: 'date', value: v.evDate, onChange: v.setEvDate })),
-              el('label', 'flex:1;min-width:100px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'מ-', el('input', dateField, { type: 'time', value: v.evStart, onChange: v.setEvStart })),
-              el('label', 'flex:1;min-width:100px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'עד', el('input', dateField, { type: 'time', value: v.evEnd, onChange: v.setEvEnd }))),
+              el('label', 'flex:1;min-width:140px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'תאריך', el('input', dateField, { type: 'date', value: v.evDate, onChange: v.setEvDate })),
+              el('label', 'flex:1;min-width:140px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, 'עד תאריך (לא חובה)', el('input', dateField, { type: 'date', value: v.evLastDay, min: v.evLastMin, onChange: v.setEvLastDay }))),
+            v.evMulti ? el('span', 'font-size:12px;color:#8b9dbd;margin-top:-8px', null, 'אירוע של כמה ימים: מוצג בצג בכל הימים. ', linkBtn('יום אחד בלבד', v.clearEvLastDay)) : null,
+            toggleRow('כל היום', v.evMulti ? 'בלי שעות, בכל הימים' : 'בלי שעות', v.evAllDay, v.toggleEvAllDay),
+            v.evTimed ? el('div', 'display:flex;gap:10px;flex-wrap:wrap', null,
+              el('label', 'flex:1;min-width:120px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, v.evMulti ? 'משעה (ביום הראשון)' : 'משעה', el('input', dateField, { type: 'time', value: v.evStart, onChange: v.setEvStart })),
+              el('label', 'flex:1;min-width:120px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', null, v.evMulti ? 'עד שעה (ביום האחרון)' : 'עד שעה', el('input', dateField, { type: 'time', value: v.evEnd, onChange: v.setEvEnd }))) : null,
             el('input', field, { value: v.evPlace, onChange: v.setEvPlace, placeholder: 'מקום, למשל: אולם א׳', maxLength: 60 }),
             el('div', 'display:flex;align-items:center;gap:14px', null,
               v.evHasPhoto ? el('div', 'flex:none;width:72px;height:72px;border-radius:12px;overflow:hidden;background:#000', null, v.evThumbEl) : null,
@@ -1411,7 +1533,7 @@
                 el('button', 'min-height:38px;padding:0 14px;border-radius:10px;border:1px dashed rgba(159,220,255,.4);background:transparent;color:#9fdcff;font-size:14px;cursor:pointer', { onClick: v.pickEvPhoto }, v.evPhotoBtn),
                 v.evHasPhoto ? linkBtn('הסרת התמונה', v.clearEvPhoto) : el('span', 'font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'תמונה (לא חובה): מוצגת ליד האירוע בצג, וגדולה כשהוא על כל המסך'))),
             el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
-              el('div', 'display:flex;flex-direction:column;gap:2px', null, el('span', 'font-size:15px;font-weight:600', null, 'מודעה מנהלת'), el('span', 'font-size:13px;color:#8b9dbd;text-wrap:pretty', null, 'האירוע עולה לבד על כל המסך כשהוא מתחיל, ויורד כשהוא נגמר')),
+              el('div', 'display:flex;flex-direction:column;gap:2px', null, el('span', 'font-size:15px;font-weight:600', null, 'מודעה מנהלת'), el('span', 'font-size:13px;color:#8b9dbd;text-wrap:pretty', null, v.evBigHint)),
               toggleBtn(true, v.evBigJ, v.evBigBg, v.toggleEvBig, 'מודעה מנהלת')),
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
               el('button', 'flex:1;min-width:140px;min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.saveEvent, disabled: s.busyAct || s.photoBusy }, v.evSaveLabel),

@@ -25,7 +25,7 @@
     feed: q.get('feed') || '/api/feed',
     key: displayKey(),
     refresh: Math.max(10, num('refresh', 60)),
-    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial
+    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream
     memorial: bool('memorial', false),             // the small Yizkor on the home wall without a memorial day (demos)
     sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
     noonShow: bool('noon', true),
@@ -137,7 +137,8 @@
   // The schedules from the remote (lib/remote-ops.ts MOMENTS0, the same defaults): what comes up by itself, how often
   // (every, lead: minutes) and for how long (secs: seconds), and the shared entry and exit transition (fx).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
-    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 } };
+    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 },
+    stream: { on: true, which: 'all', before: 5, full: 15, small: true } };
   function M() {
     const raw = CFG.moments || {}, out = { fx: typeof raw.fx === 'boolean' ? raw.fx : MOMENTS0.fx };
     for (const k in MOMENTS0) { const d = MOMENTS0[k]; if (typeof d !== 'object') continue; const r = raw[k] || {}; out[k] = {}; for (const f in d) out[k][f] = typeof r[f] === typeof d[f] ? r[f] : d[f]; }
@@ -146,6 +147,9 @@
   // The shared transition: a moment leaves in OUT ms (overlays.js Moment) while the wall assembles under it in BACK ms
   // (render: `back`, the welcome's entrance on a shorter clock).
   const MV = { OUT: 1300, BACK: 3000 };
+  // A launch's broadcast (/api/live `stream`, lib/launch-stream.ts): one video layer that moves between the whole screen
+  // and the space news corner (the featured story's box) in MOVE ms; the wall rests under it once it has covered it.
+  const ST = { MOVE: 1400, COVER: 1600, STRIP: 54 };
   // Yizkor (a memorial day, from /api/live): the small candle on the home wall is drawn at MM_K px per candle unit
   // (overlays.js Candle), and the Yizkor screen's candle lands on it.
   const isMemorial = (ov) => !!ov && ov.kind === 'memorial';
@@ -153,7 +157,7 @@
 
   class Wall extends React.Component {
     constructor(p) {
-      super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false, wl: null, back: 0 };
+      super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false, wl: null, back: 0, sCov: false, sRect: null, demoStream: null };
       this._wlT = [];
       this.embRef = (el) => { this.embEl = el; };
       this.onWlReveal = (at, ok, hero) => { if (at) this._wlRevealAt = at; this._wlHeroOk = !!ok; this._wlHero = ok ? hero : null; };
@@ -173,15 +177,17 @@
         else if ((k === 'enter' || k === ' ') && isWelcome(ov) && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
         else if ((k === 'enter' || k === ' ') && isMemorial(ov) && ov.demo) this.leaveMemorial();
         else if (k === 'escape') { if (isWelcome(ov) || isMemorial(ov)) { this.clearLeave(); this.setState({ ov: null, wl: null }); } else this.closeOv(); }
-        else if (k === 'h') this.demo('news'); };
+        else if (k === 'h') this.demo('news');
+        else if (k === 'v') this.demo('stream'); };
       addEventListener('keydown', this.onKey);
       this.load();
       this.pollLive();
     }
-    componentWillUnmount() { removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearTimeout(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); clearTimeout(this._outT); clearTimeout(this._backT); this.clearLeave(); removeEventListener('resize', this.fit); }
+    componentWillUnmount() { clearTimeout(this._sCovT); removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearTimeout(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); clearTimeout(this._outT); clearTimeout(this._backT); this.clearLeave(); removeEventListener('resize', this.fit); }
     /** A full-screen moment covers the wall once it has faded in (`covered`); until it ends the wall under it rests (render). */
     componentDidUpdate(_, prev) {
       const ov = this.state.ov;
+      this.streamUpdate();
       // A welcome's way out that something else cut short (a key, a launch): drop its steps.
       if (this.state.wl && !this.wl) { this.clearLeave(); this.setState({ wl: null }); }
       // A welcome just came up: ask the remote often from now on, so "enter" starts at once.
@@ -274,6 +280,52 @@
       this.setState({ ov: Object.assign({}, ov, { out: t }), covered: false, back: t });
       this._outT = setTimeout(() => { const o = this.state.ov; if (o && o.out === t) this.setState({ ov: null }); }, MV.OUT);
       this._backT = setTimeout(() => { if (this.state.back === t) this.setState({ back: 0 }); }, MV.BACK);
+    }
+    // ---- a launch's live broadcast ----------------------------------------------------------------
+    /** The broadcast on the wall: the server's (when the schedules allow it), or the V demo. */
+    stream() { const L = this.state.live; return this.state.demoStream || (L && L.stream && L.stream.videoId ? L.stream : null); }
+    streamFull() { const s = this.stream(); return !!s && s.mode === 'full'; }
+    /** After each render: the wall rests under a full-screen broadcast once it is covered, and wakes (assembling, as after
+     *  any moment) when the broadcast moves to the corner; the corner is the featured story's box as laid out now. */
+    streamUpdate() {
+      const s = this.stream(), full = !!s && s.mode === 'full';
+      if (full !== !!this._sFull) {
+        this._sFull = full; clearTimeout(this._sCovT);
+        if (full) this._sCovT = setTimeout(() => { if (this.streamFull()) this.setState({ sCov: true }); }, ST.COVER);
+        else if (this.state.sCov) {
+          const t = Date.now(); clearTimeout(this._backT);
+          this.setState({ sCov: false, back: M().fx && !this.state.ov ? t : 0 });
+          this._backT = setTimeout(() => { if (this.state.back === t) this.setState({ back: 0 }); }, MV.BACK);
+        }
+      }
+      if (!s || full) return;
+      const st = document.querySelector('[data-w="stage"]'), f = st && st.querySelector('[data-w="featured"]');
+      let r = null;
+      // (by layout, not by what is drawn, so the panels' entrance animation doesn't move it)
+      if (f && f.offsetWidth) { let x = 0, y = 0, e = f; while (e && e !== st) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; } if (e === st) r = { x, y, w: f.offsetWidth }; }
+      const o = this.state.sRect;
+      if (r && (!o || o.x !== r.x || o.y !== r.y || o.w !== r.w)) this.setState({ sRect: r });
+    }
+    /** One video layer (kept while it moves, so the broadcast never reloads): the whole screen, or the featured story's box
+     *  in the space news panel with a strip under it. Under the full-screen moments; the remote's preview shows a picture. */
+    streamLayer() {
+      const s = this.stream();
+      if (!s) return null;
+      const full = s.mode === 'full', fx = M().fx;
+      const r = full ? { x: 0, y: 0, w: 1920 } : this.state.sRect || { x: EN() ? 1414 : 36, y: 168, w: 470 };
+      const k = r.w / 1920, vh = Math.round(1080 * k), ease = 'cubic-bezier(.65,0,.35,1)';
+      const tr8 = fx ? ['left', 'top', 'width', 'height', 'border-radius'].map((p) => p + ' ' + ST.MOVE + 'ms ' + ease).join(',') : 'none';
+      const src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(s.videoId) + '?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&modestbranding=1&iv_load_policy=3';
+      const dot = h('span', { style: { width: full ? 14 : 10, height: full ? 14 : 10, borderRadius: '50%', background: '#ff5a4f', boxShadow: '0 0 14px #ff5a4f', flex: 'none', animation: 'breathe 1.4s ease-in-out infinite' } });
+      const words = tr('שידור חי', 'LIVE') + ' · ' + s.title;
+      return h('div', { 'data-w': 'stream', style: { position: 'absolute', zIndex: 40, left: r.x, top: r.y, width: r.w, height: full ? 1080 : vh + ST.STRIP, borderRadius: full ? 0 : 22, overflow: 'hidden', background: '#000',
+          boxShadow: full ? 'none' : '0 0 0 1px rgba(255,120,110,.45), 0 20px 50px rgba(0,0,0,.45)', transition: tr8, animation: 'ovIn .9s ease both' } },
+        h('div', { style: { position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, transform: 'scale(' + k + ')', transformOrigin: '0 0', transition: fx ? 'transform ' + ST.MOVE + 'ms ' + ease : 'none' } },
+          CFG.preview ? h('div', { style: { position: 'absolute', inset: 0, background: '#02050c url(https://i.ytimg.com/vi/' + encodeURIComponent(s.videoId) + '/hqdefault.jpg) center/cover no-repeat' } })
+            : h('iframe', { key: s.videoId, src, title: s.title || 'Live', allow: 'autoplay; encrypted-media; picture-in-picture', referrerPolicy: 'strict-origin-when-cross-origin', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, pointerEvents: 'none' } })),
+        full ? h('div', { key: 'tag', style: { position: 'absolute', top: 36, [EN() ? 'left' : 'right']: 40, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 22px', borderRadius: 999, background: 'rgba(6,12,26,.78)', border: '1px solid rgba(255,120,110,.6)', fontSize: 26, fontWeight: 700, whiteSpace: 'nowrap', maxWidth: 1200, overflow: 'hidden', textOverflow: 'ellipsis', animation: 'rise .8s ease .4s both' } }, dot, words)
+          : h('div', { key: 'strip', style: { position: 'absolute', left: 0, right: 0, top: vh, height: ST.STRIP, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', background: 'rgba(8,16,34,.96)', fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', animation: 'rise .8s ease ' + (fx ? ST.MOVE : 0) + 'ms both' } },
+            dot, h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, words)));
     }
     /** The space news item for the next news moment: the newsletter's central stories in turn (the remote's own first),
      *  carried on from where this screen left off. */
@@ -439,6 +491,11 @@
         return;
       }
       if (kind === 'noon') { const t = serverNow(); return this.setState({ ov: { kind: 'noon', id: t, demo: true, until: t + 15 * 60e3 } }); }
+      // ?demo=stream or V: a launch broadcast, full screen, then (V again) in the news corner, then (V) gone.
+      if (kind === 'stream') {
+        const d = this.state.demoStream, vid = q.get('video') || 'M7lc1UVf-VE';
+        return this.setState({ demoStream: !d ? { key: 'demo', videoId: vid, title: 'Demo launch', mode: 'full' } : d.mode === 'full' ? Object.assign({}, d, { mode: 'small' }) : null });
+      }
       if (kind === 'news') {
         const item = this.nextNews(), t = serverNow(), secs = M().news.secs;
         if (item) this.setState({ ov: { kind: 'news', id: t, demo: true, item, secs, until: t + secs * 1000 } });
@@ -476,6 +533,8 @@
       const mem = this.memorialOn(), S = M(), [nh, nm] = S.noon.at.split(':').map(Number);
       if (!this.liveOk && !mem && CFG.noonShow && T.h === nh && T.m === nm && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
       if (!D) return;
+      // A launch broadcast on the whole screen: no countdown (the broadcast has its own) and nothing else comes up by itself.
+      if (this.streamFull()) { if (ov && ov.kind === 'launch' && !ov.demo) this.closeOv(); return; }
       // Launch mode only for a launch Launch Library calls Go (and recently): never for TBD/TBC/Hold.
       const L = S.launch.on && D.launches.find((l) => { const d = Date.parse(l.at) - now; return d > -12000 && d <= S.launch.lead * 60e3 && goNow(l, now); });
       if (L) { if (!ov || ov.kind !== 'launch' || ov.launch.at !== L.at) this.setState({ ov: { kind: 'launch', id: L.at, launch: L, until: Date.parse(L.at) + 12000 } }); return; }
@@ -494,9 +553,10 @@
       if (due.c) { const P = this.celebratable(T.iso), k = due.c.k; due.c = null; if (P.length) return this.setState({ ov: { kind: 'celebrate', id: now, person: P[k % P.length], until: now + S.celebrate.secs * 1000 } }); }
       if (due.n) { due.n = null; const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: now, item, secs: S.news.secs, until: now + S.news.secs * 1000 } }); }
     }
-    /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment. */
+    /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment or
+     *  during a launch broadcast. */
     maybeReload(T, ov) {
-      if (ov || this.wl || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
+      if (ov || this.wl || this.stream() || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
       const nightly = T.h === 4 && T.m < 20 && Date.now() - this.t0 > 3600e3;
       if (!nightly && (this._newBuild || 0) < 2) return;
       this._reloadTry = Date.now() + 60e3;
@@ -705,7 +765,7 @@
       // Under a full-screen moment the wall rests: its layers are not drawn and the 3D emblem stops, so a lobby computer
       // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
       const ov = this.state.ov, wl = this.wl, wlUp = isWelcome(ov);
-      const rest = !!ov && this.state.covered && !(wl && wl.woke) && !(isMemorial(ov) && ov.leaving);
+      const rest = (!!ov && this.state.covered && !(wl && wl.woke) && !(isMemorial(ov) && ov.leaving)) || (!ov && this.state.sCov);
       // On the welcome's way out the wall wakes under it and assembles around the arriving emblem: the column the Earth
       // crosses first, then the other, header, ticker and launches, then light runs down the panels' inner edges as the
       // emblem docks. All in one commit (the wake), with fixed delays (ms) measured from it.
@@ -720,7 +780,7 @@
       const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
         h('div', { 'data-w': 'stage', dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) ' + (hidden('ticker') ? '0px ' : '50px ') + (hidden('launches') ? '16px' : '118px') } },
           h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers, h(React.Fragment, { key: 'fx' }, !asm && !(wlUp && this.state.covered) ? this.ambientFx() : null)),
-          h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
+          h(React.Fragment, { key: 'sv' }, this.streamLayer()), h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
       const ago = D && this.updatedAgo(D);
       const dot = ago && h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
       const timeBox = (big, small, extra, smallStyle) => h('div', { 'data-w': 'clock', style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },

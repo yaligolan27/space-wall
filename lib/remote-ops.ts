@@ -4,12 +4,13 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db, must } from './db.js';
-import { addDays, isoDateIL, timeIL } from './dates.js';
-import { birthdayCard, buildFeed, displayName, lifeCard } from './feed.js';
+import { addDays, dayDiff, isoDateIL, nextYearly, shortDate, timeIL } from './dates.js';
+import { LIFE_LEAD_MAX, birthdayCard, buildFeed, displayName, eventEnd, greetsToday, lifeCard, lifeWindow, wallPanels, type PeopleTile } from './feed.js';
 import { DATE, TIME, PERSON_KINDS, NewsletterContent, assertRealDate, ilToIso, importNewsletter } from './wall-ops.js';
 import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from './newsletter.js';
 import { storeNewsletterImages } from './newsletter-images.js';
 import { syncForumEvents } from './newsletter-forum.js';
+import { launchStream } from './launch-stream.js';
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { headers: { accept: 'text/html', 'user-agent': 'space-wall-remote/1.0' }, signal: AbortSignal.timeout(15000) });
@@ -44,6 +45,8 @@ export const DesignPatch = z.object({
 const NOON_MS = 150e3;            // 10 s countdown + the 107 s promo, with a margin
 const EVENT_FALLBACK_MS = 30 * 60e3;
 const EVENT_PREVIEW_MS = 10 * 60e3;
+const LONG_EVENT_MS = 12 * 3600e3;   // an all-day or multi-day event: never on the full screen for its whole length
+const EVENT_MAX_DAYS = 31;
 const WELCOME_MS = 12 * 3600e3;   // the welcome screen waits for "enter" (endTakeover); a forgotten one still ends
 const WELCOME_LEAVE_MS = 20e3;    // after "enter": the wall's entrance (about 12 s), during which nothing else takes the screen
 const MEMORIAL_MS = 15 * 60e3;    // the Yizkor screen from the remote; "חזרה לצג הבית" ends it sooner
@@ -79,6 +82,9 @@ export const MOMENTS0 = {
   noon: { at: '12:00' },                            // the promo video's time
   launch: { on: true, lead: 10 },                   // launch mode, `lead` minutes before a Go launch
   welcome: { auto: 0 },                             // minutes until the welcome enters the wall by itself; 0 = waits for "enter"
+  // a launch's official broadcast (lib/launch-stream.ts): full screen from `before` minutes before liftoff to `full`
+  // minutes after it, then (small) in the space news corner until it ends; which: 'all' launches or 'big' ones only
+  stream: { on: true, which: 'all', before: 5, full: 15, small: true },
 };
 export type Moments = typeof MOMENTS0;
 const on = z.boolean(), int = (min: number, max: number) => z.number().int().min(min).max(max);
@@ -90,6 +96,7 @@ export const MomentsPatch = z.object({
   noon: z.object({ at: TIME }).partial().strict(),
   launch: z.object({ on, lead: int(2, 30) }).partial().strict(),
   welcome: z.object({ auto: int(0, 720) }).partial().strict(),
+  stream: z.object({ on, which: z.enum(['all', 'big']), before: int(1, 60), full: int(1, 240), small: on }).partial().strict(),
 }).partial().strict();
 /** The stored schedules over the defaults (anything malformed falls back to its default). */
 export function momentsOf(design: Row | null | undefined): Moments {
@@ -100,6 +107,7 @@ export function momentsOf(design: Row | null | undefined): Moments {
     const r = raw[k] && typeof raw[k] === 'object' ? raw[k] : {};
     out[k] = Object.fromEntries(Object.entries(d).map(([f, v]) => [f, typeof r[f] === typeof v ? r[f] : v]));
   }
+  if (!['all', 'big'].includes(out.stream.which)) out.stream.which = MOMENTS0.stream.which;
   return out as Moments;
 }
 const withMoments = <T extends Row>(design: T): T & { moments: Moments } => ({ ...design, moments: momentsOf(design) });
@@ -118,20 +126,35 @@ async function wallState(): Promise<Row> {
 }
 const minutesIL = (d: Date) => { const [h, m] = timeIL(d).split(':').map(Number); return h * 60 + m; };
 
-/** An event on the full screen until it ends. Shown from the remote ahead of time, it stays only a short preview
- *  (unless it starts within half an hour), so a click on next week's event can't hold the wall for days. */
-function evTakeover(e: Row, auto: boolean, now = Date.now(), slot?: { k: number; until: number }): Row {
-  const start = new Date(e.starts_at), end = e.ends_at ? Date.parse(e.ends_at) : start.getTime() + 60 * 60e3;
-  const until = slot ? slot.until : end <= now ? now + EVENT_FALLBACK_MS : start.getTime() - now > 30 * 60e3 ? now + EVENT_PREVIEW_MS : end;
-  return { id: (auto ? 'event:' : 'rt:' + now + ':') + e.id + (slot ? ':' + slot.k : ''), kind: 'event', auto, eventId: e.id, title: e.title, place: e.place || '',
-    start: timeIL(start), end: timeIL(new Date(end)), img: e.photo_url || null, until: new Date(until).toISOString() };
+/** A directorate event's days and hours in Israel time. An all-day event runs from midnight to the midnight after its
+ *  last day (the newsletter's Forum events are kept so); one that ends on a later day has a lastDay after its date. */
+export function eventSpan(e: Row) {
+  const s = new Date(e.starts_at), en = new Date(eventEnd(e));
+  const date = isoDateIL(s), start = timeIL(s), end = timeIL(en), endDay = isoDateIL(en);
+  const allDay = start === '00:00' && end === '00:00' && endDay > date;
+  return { date, start, end, lastDay: allDay ? addDays(endDay, -1) : endDay, allDay };
+}
+/** "10:00–11:00", "21.10–22.10" (all day), "21.10 22:00 – 22.10 01:00"; '' for a single all-day. */
+export function spanText(sp: ReturnType<typeof eventSpan>): string {
+  if (sp.allDay) return sp.lastDay > sp.date ? `${shortDate(sp.date)}–${shortDate(sp.lastDay)}` : '';
+  return sp.lastDay > sp.date ? `${shortDate(sp.date)} ${sp.start} – ${shortDate(sp.lastDay)} ${sp.end}` : `${sp.start}–${sp.end}`;
 }
 
-/** Important events running right now. */
+/** An event on the full screen until it ends, or for its turn under the schedules (slot). Shown from the remote ahead
+ *  of time, it stays only a short preview (unless it starts within half an hour), so a click on next week's event can't
+ *  hold the wall for days; so does an all-day or multi-day one. */
+function evTakeover(e: Row, auto: boolean, now = Date.now(), slot?: { k: number; until: number }): Row {
+  const start = new Date(e.starts_at), end = eventEnd(e), long = end - start.getTime() > LONG_EVENT_MS, sp = eventSpan(e);
+  const until = slot ? slot.until : end <= now ? now + EVENT_FALLBACK_MS : (long && !auto) || start.getTime() - now > 30 * 60e3 ? now + EVENT_PREVIEW_MS : end;
+  return { id: (auto ? 'event:' : 'rt:' + now + ':') + e.id + (slot ? ':' + slot.k : ''), kind: 'event', auto, eventId: e.id, title: e.title, place: e.place || '',
+    start: sp.start, end: sp.end, when: spanText(sp), img: e.photo_url || null, until: new Date(until).toISOString() };
+}
+
+/** Important events running right now. An all-day or multi-day one isn't among them: it would hide the wall for a day. */
 async function bigEventsNow(now: Date): Promise<Row[]> {
   const rows = must(await db().from('directorate_events').select('id,title,place,starts_at,ends_at,photo_url').eq('takeover', true).eq('approved', true)
     .lte('starts_at', now.toISOString()).gte('starts_at', new Date(now.getTime() - 864e5).toISOString()), 'big events') as Row[];
-  return rows.filter(e => (e.ends_at ? Date.parse(e.ends_at) : Date.parse(e.starts_at) + 60 * 60e3) > now.getTime());
+  return rows.filter(e => eventEnd(e) > now.getTime() && eventEnd(e) - Date.parse(e.starts_at) <= LONG_EVENT_MS);
 }
 
 /** A running important event's turn on the full screen under the schedules: the whole event (every 0), or `secs`
@@ -189,8 +212,9 @@ export async function live() {
   const [st, big] = await Promise.all([wallState(), bigEventsNow(now)]);
   const design = withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) });
   design.news = liveNews(design.news, now.getTime());
+  const stream = await launchStream(design.moments.stream, st.dismissed, now.getTime());
   return { design, brightness: st.brightness ?? 100, urgent: st.urgent || null,
-    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), memorial: memorialNow(st, now), at: now.toISOString(), build: BUILD };
+    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), memorial: memorialNow(st, now), stream, at: now.toISOString(), build: BUILD };
 }
 
 // ---- snapshot for the remote ------------------------------------------------------------------------
@@ -204,34 +228,57 @@ const personOut = (p: Row) => ({
   notes: p.notes || '', photo: p.photo_url || null, active: p.active !== false, profile: p.profile || {},
 });
 
+/** A tile of the wall's people panel, for the remote: what it is (ref), and whether the wall greets it full screen today. */
+const tileOut = (c: PeopleTile, today: string) => ({ ref: c.ref, name: c.name, type: c.type, on: c.on, until: c.until, full: greetsToday(c, today), quiet: !c.celebrate });
+
 export async function snapshot() {
-  const s = db(), now = new Date(), today = isoDateIL(now);
-  const [st, big, people, life, events, ticker, nl, hist] = await Promise.all([
+  const s = db(), now = new Date(), today = isoDateIL(now), dayStart = new Date(ilToIso(today, '00:00')).toISOString();
+  const [st, big, people, life, events, ticker, nl, hist, panels] = await Promise.all([
     wallState(), bigEventsNow(now),
     s.from('people').select(PERSON_COLS).order('display_name'),
+    // the last month, and every one still showing (a window can start long after its day)
     s.from('life_events').select('id,person_id,name,type,label,event_date,show_from,show_until,text_he,photo_mode,photo_url')
-      .gte('event_date', addDays(today, -30)).lte('event_date', addDays(today, 365)).order('event_date'),
+      .or(`event_date.gte.${addDays(today, -30)},show_until.gte.${today}`).lte('event_date', addDays(today, 400)).order('event_date'),
+    // today's and later ones, and those still running (an event of several days)
     s.from('directorate_events').select('id,title,starts_at,ends_at,place,takeover,photo_url').eq('approved', true)
-      .gte('starts_at', ilToIso(today, '00:00')).lt('starts_at', ilToIso(addDays(today, EVENTS_DAYS + 1), '00:00')).order('starts_at'),
+      .or(`starts_at.gte.${dayStart},ends_at.gt.${dayStart}`).lt('starts_at', ilToIso(addDays(today, EVENTS_DAYS + 1), '00:00')).order('starts_at'),
     s.from('industry_events').select('id,name,kind,starts_on,ends_on,place_he,url').eq('approved', true)
       .gte('starts_on', addDays(today, -120)).lte('starts_on', addDays(today, EVENTS_DAYS)).order('starts_on'),
     s.from('newsletter_issues').select('source_url,content,imported_at').order('issue_date', { ascending: false }).limit(1),
     s.from('remote_history').select('id,at,who,label,undo').is('undone_at', null).order('id', { ascending: false }).limit(50),
+    wallPanels(now),
   ]);
   const issue = (must(nl, 'newsletter') as Row[])[0];
+  // The same moment entered twice (same person or name, wording and day): the wall shows one of them, and the others say
+  // which one they repeat.
+  const lifeAll = must(life, 'life') as Row[], dupKey = (l: Row) => [l.type, l.label || '', l.person_id || (l.name || '').trim(), l.event_date].join('|');
+  const tiles = [...panels.people.shown, ...panels.people.waiting], onWall = new Set(tiles.map(c => (c.ref.kind === 'life' ? c.ref.id : '')));
+  const keeper = new Map<string, string>();
+  for (const l of lifeAll) { const k = dupKey(l), cur = keeper.get(k); if (!cur || (onWall.has(l.id) && !onWall.has(cur))) keeper.set(k, l.id); }
+  const lifeRows = lifeAll.map(l => {
+    const keep = keeper.get(dupKey(l)), w = lifeWindow(l);
+    return { id: l.id, personId: l.person_id || null, name: l.name || '', kind: l.type, type: l.label || HE_TYPE[l.type] || 'אירוע', date: l.event_date,
+      showFrom: w.from, showUntil: w.until, note: l.text_he || '', photo: l.photo_mode || 'crm', photoSrc: l.photo_url || null, dupOf: keep && keep !== l.id ? keep : null };
+  });
   return {
     now: now.toISOString(), today,
     people: (must(people, 'people') as Row[]).map(personOut),
-    life: (must(life, 'life') as Row[]).map(l => ({ id: l.id, personId: l.person_id || null, name: l.name || '', kind: l.type, type: l.label || HE_TYPE[l.type] || 'אירוע', date: l.event_date,
-      showFrom: l.show_from || addDays(l.event_date, -10), showUntil: l.show_until || addDays(l.event_date, 3), note: l.text_he || '', photo: l.photo_mode || 'crm', photoSrc: l.photo_url || null })),
-    events: (must(events, 'events') as Row[]).map(e => { const st0 = new Date(e.starts_at), en = e.ends_at ? new Date(e.ends_at) : new Date(st0.getTime() + 60 * 60e3);
-      return { id: e.id, title: e.title, date: isoDateIL(st0), start: timeIL(st0), end: timeIL(en), place: e.place || '', big: !!e.takeover, photo: e.photo_url || null }; }),
+    life: lifeRows,
+    events: (must(events, 'events') as Row[]).map(e => ({ id: e.id, title: e.title, ...eventSpan(e), startsAt: new Date(e.starts_at).toISOString(),
+      endsAt: new Date(eventEnd(e)).toISOString(), place: e.place || '', big: !!e.takeover, photo: e.photo_url || null })),
+    // What the wall's people and events panels show now, worked out as the wall's feed does (lib/feed.ts); `waiting`
+    // are due too but the panel is full.
+    wall: {
+      people: panels.people.shown.map(c => tileOut(c, today)), waiting: panels.people.waiting.map(c => tileOut(c, today)), doubles: panels.people.doubles,
+      events: panels.events.shown.map(e => e.id as string), eventsWaiting: panels.events.waiting.map(e => e.id as string),
+    },
     // The wall's ticker ("אירועים והזדמנויות") items kept in the database; the newsletter adds its own on top.
     ticker: (must(ticker, 'ticker') as Row[]).filter(t => (t.ends_on || t.starts_on) >= today)
       .map(t => ({ id: t.id, name: t.name, kind: t.kind || 'אירוע', start: t.starts_on, end: t.ends_on || null, place: t.place_he || '', url: t.url || '' })),
     newsletter: issue ? { range: issue.content?.issue?.range || '', url: issue.source_url, count: (issue.content?.news || []).length, at: issue.imported_at } : null,
     state: { design: withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) }), brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
     takeover: effectiveTakeover(st, big, now),
+    stream: await launchStream(momentsOf(st.design).stream, st.dismissed, now.getTime()),
     memorial: (() => { const m = memorialPeriod(now); return m ? { id: m.id, label: m.label, on: !!memorialNow(st, now) } : null; })(),
     history: (must(hist, 'history') as Row[]).map(h => ({ id: h.id, at: h.at, who: h.who, text: h.label, canRestore: Array.isArray(h.undo) && h.undo.length > 0 })),
   };
@@ -327,6 +374,8 @@ const LifeInput = z.object({
 });
 const EventInput = z.object({
   id: UUID.optional(), title: z.string().trim().min(2).max(80), date: DATE, start: TIME, end: TIME, place: z.string().trim().max(60).optional(), big: z.boolean().optional(),
+  lastDay: DATE.nullable().optional(),   // an event of several days: its last day (start and end are then the first day's start and the last day's end)
+  allDay: z.boolean().optional(),        // no hours: start and end are ignored
   photo: z.string().url().nullable().optional(),   // left out: an edit keeps the event's picture
 });
 const TickerInput = z.object({
@@ -392,9 +441,10 @@ async function lifeWho(personId: string | null | undefined, name: string | undef
 /** The person a life event row is about: from the list, or its own name. */
 const lifeRowPerson = async (e: Row): Promise<Row> => (e.person_id ? personRow(e.person_id) : { display_name: e.name || '' });
 
-/** person = the wall's card; type/note = the operator's wording, for the remote's preview. */
-function celebrateTakeover(card: Row, personId: string | null, type: string, note: string, M: Moments, now = Date.now()): Row {
-  return { id: 'rt:' + now, kind: 'celebrate', personId, person: card, type, note, at: new Date(now).toISOString(), until: new Date(now + M.celebrate.manual * 1e3).toISOString() };
+/** person = the wall's card; type/note = the operator's wording, for the remote's preview; lifeId = the life event
+ *  greeted (none for a birthday from the people list), so deleting it ends the greeting too. */
+function celebrateTakeover(card: Row, personId: string | null, type: string, note: string, M: Moments, lifeId: string | null = null, now = Date.now()): Row {
+  return { id: 'rt:' + now, kind: 'celebrate', personId, lifeId, person: card, type, note, at: new Date(now).toISOString(), until: new Date(now + M.celebrate.manual * 1e3).toISOString() };
 }
 const momentsNow = async () => momentsOf((await wallState()).design);
 
@@ -439,9 +489,10 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     } else {
       p = await personRow(personId!);
       assertOnWall(p);
-      card = birthdayCard(p, today, today);
+      // the birthday of the last two days ("חגג/ה אתמול" on a Sunday for Friday's), else today
+      card = birthdayCard(p, (p.birthday && nextYearly(p.birthday.slice(5), addDays(today, -2), 2)) || today, today);
     }
-    await record(who, 'מודעה אישית על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note, await momentsNow()) }, who)]);
+    await record(who, 'מודעה אישית על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note, await momentsNow(), lifeId || null) }, who)]);
   },
   async showEvent(a, who) {
     const { eventId } = z.object({ eventId: UUID }).parse(a);
@@ -472,6 +523,13 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     if (on === false) return record(who, 'סיום היזכור בצג', [await patchState({ dismissed: withDismissed(dis, key), ...(st.takeover?.kind === 'memorial' ? { takeover: null } : {}) }, who)]);
     if (on === true) return record(who, 'היזכור חזר לצג', [await patchState(back, who)]);
   },
+  /** The launch broadcast on the wall (live().stream): small: from full screen to the space news corner; else ended.
+   *  Kept in `dismissed` per launch, so the remote's undo brings it back. */
+  async stream(a, who) {
+    const { key, small } = z.object({ key: z.string().max(80), small: z.boolean().optional() }).parse(a);
+    const st = await wallState();
+    await record(who, small ? 'שידור השיגור עבר לצד' : 'סיום שידור השיגור', [await patchState({ dismissed: withDismissed(st.dismissed, (small ? 'streamfull:' : 'stream:') + key) }, who)]);
+  },
   async noonToday(a, who) {
     const { on } = z.object({ on: z.boolean() }).parse(a);
     await record(who, on ? 'סרטון התדמית יעלה היום' : 'דילוג על סרטון התדמית היום', [await patchState({ noon_skip: on ? null : isoDateIL() }, who)]);
@@ -481,7 +539,10 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     assertRealDate(f.date); if (f.showFrom) assertRealDate(f.showFrom);
     const { p, personId, name } = await lifeWho(f.personId, f.name, f.free), kind = classifyLife(f.type);
     if (f.photo === 'upload' && !f.photoSrc) throw new Error('בחרו תמונה להעלאה');
-    const row: Row = { person_id: personId, name, type: kind, label: f.type, event_date: f.date, show_from: f.showFrom || f.date, show_until: addDays(f.date, 10),
+    // On the wall from showFrom (at most LIFE_LEAD_MAX days ahead) for ten days past the day, or past showFrom when it
+    // starts after the day (a moment added late still shows).
+    const lead = addDays(f.date, -LIFE_LEAD_MAX), from = !f.showFrom ? f.date : f.showFrom < lead ? lead : f.showFrom;
+    const row: Row = { person_id: personId, name, type: kind, label: f.type, event_date: f.date, show_from: from, show_until: addDays(from > f.date ? from : f.date, 10),
       text_he: f.note || null, photo_mode: f.photo, photo_url: f.photo === 'upload' ? f.photoSrc : null };
     const undo: (UndoOp | null)[] = [];
     let saved: Row;
@@ -494,7 +555,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
       saved = must(await db().from('life_events').insert({ ...row, created_by: 'remote:' + who }).select('*').single(), 'add life') as Row;
       undo.push({ op: 'del', table: 'life_events', id: saved.id });
     }
-    if (f.showNow && kind !== 'bereavement') undo.push(await patchState({ takeover: celebrateTakeover(lifeCard(saved, p, isoDateIL()), personId, f.type, f.note || '', await momentsNow()) }, who));
+    if (f.showNow && kind !== 'bereavement') undo.push(await patchState({ takeover: celebrateTakeover(lifeCard(saved, p, isoDateIL()), personId, f.type, f.note || '', await momentsNow(), saved.id) }, who));
     await record(who, (f.id ? 'עודכן: ' : 'נוסף: ') + f.type + ' · ' + displayName(p), undo);
     return { id: saved.id };
   },
@@ -503,14 +564,37 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const prev = await rowOf('life_events', id);
     if (!prev) throw new Error('האירוע לא נמצא');
     const p = await lifeRowPerson(prev).catch(() => null);
+    const undo: (UndoOp | null)[] = [];
+    const st = await wallState();
+    if (st.takeover?.kind === 'celebrate' && st.takeover.lifeId === id) undo.push(await patchState({ takeover: null }, who));   // its greeting on the full screen now
     must(await db().from('life_events').delete().eq('id', id).select('id'), 'delete life');
-    await record(who, 'נמחק: ' + (prev.label || HE_TYPE[prev.type]) + (p ? ' · ' + displayName(p) : ''), [{ op: 'put', table: 'life_events', row: prev }]);
+    undo.push({ op: 'put', table: 'life_events', row: prev });
+    await record(who, 'נמחק: ' + (prev.label || HE_TYPE[prev.type]) + (p ? ' · ' + displayName(p) : ''), undo);
+  },
+  /** A birthday from the people list off the wall: the person's "לחגוג יום הולדת בצג" turned off (the remote's people
+   *  screen turns it on again). */
+  async hideBirthday(a, who) {
+    const { personId } = z.object({ personId: UUID }).parse(a);
+    const prev = await rowOf('people', personId);
+    if (!prev) throw new Error('האדם לא נמצא');
+    if (prev.show_birthday === false) return;
+    const undo: (UndoOp | null)[] = [];
+    const st = await wallState();
+    if (st.takeover?.kind === 'celebrate' && st.takeover.personId === personId && !st.takeover.lifeId) undo.push(await patchState({ takeover: null }, who));
+    must(await db().from('people').update({ show_birthday: false }).eq('id', personId).select('id'), 'hide birthday');
+    undo.push({ op: 'put', table: 'people', row: prev });
+    await record(who, 'יום ההולדת של ' + prev.display_name + ' לא יוצג בצג', undo);
   },
   async saveEvent(a, who) {
     const f = EventInput.parse(a);
-    assertRealDate(f.date);
-    if (f.end <= f.start) throw new Error('שעת הסיום צריכה להיות אחרי שעת ההתחלה');
-    const row: Row = { title: f.title, starts_at: ilToIso(f.date, f.start), ends_at: ilToIso(f.date, f.end), place: f.place || null, takeover: !!f.big };
+    assertRealDate(f.date); if (f.lastDay) assertRealDate(f.lastDay);
+    if (f.lastDay && f.lastDay < f.date) throw new Error('תאריך הסיום לפני תאריך ההתחלה');
+    const last = f.lastDay && f.lastDay > f.date ? f.lastDay : f.date;
+    if (dayDiff(f.date, last) > EVENT_MAX_DAYS) throw new Error('אירוע יכול להימשך עד חודש. בדקו את תאריך הסיום');
+    if (!f.allDay && last === f.date && f.end <= f.start) throw new Error('שעת הסיום צריכה להיות אחרי שעת ההתחלה');
+    // All day: from midnight to the midnight after the last day. Several days: from the first day's start to the last day's end.
+    const row: Row = { title: f.title, starts_at: ilToIso(f.date, f.allDay ? '00:00' : f.start), ends_at: f.allDay ? ilToIso(addDays(last, 1), '00:00') : ilToIso(last, f.end),
+      place: f.place || null, takeover: !!f.big };
     if (f.photo !== undefined) row.photo_url = f.photo;
     let undo: UndoOp, id: string;
     if (f.id) {
