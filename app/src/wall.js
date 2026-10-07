@@ -507,7 +507,7 @@
     overlay() {
       const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
       const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) + (ov.out ? '|out' : '') + '|' + M().fx : '') + '|' + (toast ? toast.until : '')
-        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '');
+        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '')
         + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang].join('|') : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
@@ -607,7 +607,7 @@
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, lineHeight: 1 } },
             h('span', { style: { fontSize: 40, fontWeight: 800, color: '#f6efe3', letterSpacing: EN() ? 0 : '.02em', textShadow: '0 0 24px rgba(255,190,110,.25)' } }, tr('יזכור', 'We Remember')),
             h('span', { style: { width: 1.5, height: 34, background: 'rgba(233,184,114,.5)' } }),
-            h('span', { dir: 'ltr', style: { fontFamily: "'Lexend',sans-serif", fontSize: 42, fontWeight: 300, color: '#e9b872', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr('7.10', 'Oct 7'))),
+            h('span', { dir: 'ltr', style: { fontFamily: "'Lexend',sans-serif", fontSize: 44, fontWeight: 500, color: '#e9b872', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr('7/10', 'Oct 7'))),
           h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr('מנהלת החלל מרכינה ראש לזכר הנרצחים והנופלים', 'In memory of those murdered and fallen on October 7, 2023')))));
     }
 

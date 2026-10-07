@@ -589,7 +589,7 @@ window.makeWallOverlays = (React) => {
   // Light on purpose (the lobby computer, phones): CSS animations on transform/opacity, WAAPI for the way out.
   const MM_K = 1.15;
   const Memorial = ({ fx, preview, leaving, target, onDone }) => {
-    const en = EN(), CX = en ? 1380 : 540, CY = 380;
+    const en = EN(), CX = en ? 1380 : 540, CY = 440;
     const r = useRef({}).current, set = (n) => r['_' + n] || (r['_' + n] = (el) => { r[n] = el; });
     const cb = useRef(onDone); cb.current = onDone;
     useEffect(() => {
@@ -627,7 +627,7 @@ window.makeWallOverlays = (React) => {
           h('div', { style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K } },
             h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, part: 'flame' })))),
       // the words
-      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 118, width: 920, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }, side) },
+      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 0, bottom: 40, width: 920, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start' }, side) },
         h('div', { style: rise(1200, 2200, { display: 'flex', alignItems: 'center', gap: 22 }) },
           // the directorate's 3D emblem (a still of the wall's own emblem-v2, so no second WebGL scene)
           h('img', { src: '/assets/emblem-3d.png', alt: '', style: { width: 124, height: 124, flex: 'none', margin: '-16px -8px -16px -12px', filter: 'drop-shadow(0 0 18px rgba(90,160,255,.28))' } }),
@@ -640,12 +640,12 @@ window.makeWallOverlays = (React) => {
           const title = h('div', { style: { position: 'relative', lineHeight: 1 } },
             h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 140 : 230, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
             h('div', { style: { position: 'relative', fontSize: en ? 140 : 230, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember')));
-          const date = (size, extra) => h('div', { dir: 'ltr', style: rise(1600, 4200, Object.assign({ fontFamily: LEX, fontSize: size, fontWeight: 300, lineHeight: 1, letterSpacing: '.03em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, tr('7.10', 'Oct 7'));
+          const date = (size, extra) => h('div', { dir: 'ltr', style: rise(1600, 4200, Object.assign({ fontFamily: LEX, fontSize: size, fontWeight: 500, lineHeight: 1, letterSpacing: '.03em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, tr('7/10', 'Oct 7'));
           if (below) return h('div', { style: { marginTop: 22 } }, title, date(en ? 76 : 96, { marginTop: 18, textAlign: en ? 'left' : 'right' }));
           return h('div', { style: { marginTop: 22, display: 'flex', alignItems: 'center', gap: 44 } },
             title,
-            h('div', { style: { width: 2, height: 170, flex: 'none', background: 'linear-gradient(180deg, transparent, rgba(233,184,114,.9) 30%, rgba(233,184,114,.9) 70%, transparent)', animation: 'mmTitleIn 1600ms ease 3800ms both' } }),
-            date(120, { marginTop: 18 }));
+            h('div', { style: { width: 2, height: 190, flex: 'none', background: 'linear-gradient(180deg, transparent, rgba(233,184,114,.9) 30%, rgba(233,184,114,.9) 70%, transparent)', animation: 'mmTitleIn 1600ms ease 3800ms both' } }),
+            date(170, { marginTop: 22 }));
         })(),
         h('div', { style: { marginTop: 28, width: 520, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.35) 60%, transparent)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } }),
         h('div', { style: rise(1200, 4400, { marginTop: 28, fontSize: 36, fontWeight: 300, lineHeight: 1.42, color: '#ece4d6', maxWidth: 900, textWrap: 'pretty' }) },
