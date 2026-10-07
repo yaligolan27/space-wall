@@ -428,6 +428,7 @@
       if (!tk) return '';
       if (tk.kind === 'noon') return 'סרטון תדמית';
       if (tk.kind === 'welcome') return 'ברוכים הבאים' + (tk.guest ? ' · ' + tk.guest : '');
+      if (tk.kind === 'memorial') return 'יזכור';
       if (tk.kind === 'event') return tk.title;
       if (tk.kind === 'image') return 'תמונה' + (tk.caption ? ' · ' + tk.caption : '');
       if (tk.kind === 'stream') return 'שידור חי' + (tk.title ? ' · ' + tk.title : '');
@@ -455,6 +456,7 @@
     showCeleb(x) { this.run('celebrate', { personId: x.person.free ? null : x.person.id, lifeId: x.lifeId }, 'מודעה אישית על כל המסך: ' + dn(x.person)).catch(() => {}); }
     showEvent(e) { this.run('showEvent', { eventId: e.id }, 'על כל המסך: ' + e.title).catch(() => {}); }
     endTk() { const w = (this.takeover() || {}).kind === 'welcome'; this.run('endTakeover', {}, w ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה').catch(() => {}); }
+    memorial(a, label) { this.run('memorial', a, label).catch(() => {}); }
     showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
     async saveLife(showNow) {
       const sh = this.state.sheet, f = sh.f, per = this.P(f.personId), name = (f.name || '').replace(/\s+/g, ' ').trim();
@@ -768,8 +770,12 @@
 
       const nextEv = todayEvents.find((e) => toMin(e.end) > nm);
       const nl = D && D.newsletter;
+      // Yizkor, on a memorial day (the server's MEMORIALS): the screen now, or Yizkor off (and back) for the rest of it.
+      const mem = D && D.memorial, memItems = !mem ? [] : [
+        { label: tkK === 'memorial' ? 'חזרה לצג הבית' : 'מסך יזכור', sub: tkK === 'memorial' ? 'מסך היזכור מוצג · הנר עובר לצג הבית' : mem.on ? 'עולה לבד בתחילת כל שעה · ' + mem.label : 'היזכור כבוי היום · לחיצה מחזירה אותו', dot: '#e9b872', bg: 'rgba(233,184,114,.12)', border: 'rgba(233,184,114,.55)', go: () => (tkK === 'memorial' ? this.endTk() : this.memorial({ show: true }, 'מסך יזכור על כל המסך')) }];
+      const memMore = !mem ? [] : [{ label: mem.on ? 'סיום היזכור' : 'החזרת היזכור', sub: mem.on ? 'נר יזכור קטן בצג הבית · ' + mem.label : 'היזכור כבוי בצג', dot: '#e9b872', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.memorial({ on: !mem.on }, mem.on ? 'סיום היזכור בצג' : 'היזכור חזר לצג') }];
       const actGroups = [
-        { title: 'להציג עכשיו על כל המסך', items: [
+        { title: 'להציג עכשיו על כל המסך', items: [...memItems,
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
           { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : 'עולה לבד ב-12:00', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
           { label: 'מודעה אישית', sub: cel.length ? 'היום: ' + dn(cel[0].person) + (cel.length > 1 ? ' ועוד ' + (cel.length - 1) : '') : 'אין מודעות אישיות היום', dot: WARM, bg: 'rgba(233,184,114,.09)', border: 'rgba(233,184,114,.4)', go: () => this.openSheet('celebrate') },
@@ -781,6 +787,7 @@
           { label: 'רשימת האנשים', sub: activeP.length ? activeP.length + ' ברשימה · הוספה, עריכה וייבוא' : 'הרשימה ריקה · הוספה או ייבוא מאקסל', dot: WARM, bg: 'rgba(14,28,58,.55)', border: activeP.length ? 'rgba(150,190,240,.16)' : 'rgba(233,184,114,.45)', go: () => this.goPeople() }] },
         { title: 'עוד', items: [
           { label: design.lang === 'en' ? 'חזרה לעברית' : 'הצג באנגלית', sub: s.langBusy ? 'מתרגם את הצג…' : design.lang === 'en' ? 'הצג מוצג עכשיו באנגלית' : 'כל הצג באנגלית, למשלחות מחו״ל', dot: '#7fe0c4', bg: design.lang === 'en' ? 'rgba(127,224,196,.09)' : 'rgba(14,28,58,.55)', border: design.lang === 'en' ? 'rgba(127,224,196,.45)' : 'rgba(150,190,240,.16)', go: () => this.setLang(design.lang === 'en' ? 'he' : 'en') },
+          ...memMore,
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
           { label: 'עיצוב הצג', sub: 'גלובוס ' + (design.globeStyle === 'real' ? 'ריאליסטי' : 'הולוגרפי') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
       ];
@@ -810,7 +817,7 @@
         openHistory: () => this.openSheet('history'),
 
         tkOn: !!tk, tkTitle: this.tkTitle(tk), tkRemain: tk && tkK !== 'welcome' ? 'נותרו ' + mmss(remain) : '', endTk: () => this.endTk(),
-        tkEndLabel: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'חזרה לתצוגה רגילה', tkWelcome: tkK === 'welcome', tkGuest: tkK === 'welcome' ? tk.guest || '' : '',
+        tkEndLabel: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : tkK === 'memorial' ? 'חזרה לצג הבית' : 'חזרה לתצוגה רגילה', tkWelcome: tkK === 'welcome', tkGuest: tkK === 'welcome' ? tk.guest || '' : '',
         tkNoon: tkK === 'noon', tkCeleb: tkK === 'celebrate', tkEvent: tkK === 'event',
         tkPct: tk ? Math.max(0, Math.min(100, (now.getTime() - t0) / (Date.parse(tk.until) - t0) * 100)).toFixed(1) + '%' : '0%',
         tkAv: tkK === 'celebrate' ? { bg: tkP ? colorFor(tkP) : OFF, ini: initials(tkP ? tkP.name : tk.person.name), photoEl: tk.person.photo ? imgEl(tk.person.photo, COVER) : null } : { bg: OFF, ini: '', photoEl: null },

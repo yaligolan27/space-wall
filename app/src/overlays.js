@@ -536,6 +536,116 @@ window.makeWallOverlays = (React) => {
         h('div', { ref: set('bloom'), style: circle(gc.x, gc.y, 1400, { opacity: 0, background: 'radial-gradient(circle closest-side, rgba(235,248,255,.55) 0, rgba(159,220,255,.25) 22%, rgba(60,130,255,.08) 48%, transparent 72%)' }) })) : null);
   };
 
+  // ---------- Yizkor (a memorial day: the server's top-of-the-hour moment, or the remote's) ----------
+  // A memorial candle, lit: wax lit from within, a wick, and a flame that sways, flickers and now and then catches a
+  // draught, its light breathing with it. Drawn at `k` px per unit in a box 200 wide and `len` tall, the wick's tip at
+  // (100, 190), so the small candle on the home wall is the same drawing at its own size, not a scaled-down layer.
+  // ignite: ms until the flame catches (0: lit from the start). fade: the wax sinks into the dark. part: 'body' (wax and
+  // wick) or 'flame' (the flame and its light) alone, so the Yizkor screen can send its flame on by itself. fx off: still.
+  let candleN = 0;
+  const FLAME = 'M30 4C33 34 50 62 54 98C57 128 46 158 30 158C14 158 3 128 6 98C10 62 27 34 30 4Z';
+  const CORE = 'M30 72C33 93 41 108 41 127C41 145 36 154 30 154C24 154 19 145 19 127C19 108 27 93 30 72Z';
+  const stops = (list) => list.map(([o, c], i) => h('stop', { key: i, offset: o, stopColor: c }));
+  const Candle = ({ k, len, fx, ignite, fade, part }) => {
+    const id = useRef('mmc' + ++candleN).current, u = (x) => x * k, body = part !== 'flame', flame = part !== 'body';
+    const live = (a) => (fx ? { animation: a } : {});
+    const origin = { position: 'absolute', inset: 0, transformOrigin: '50% 92%' };
+    return h('div', { 'data-mm': 'candle', style: { position: 'relative', width: u(200), height: u(len), flex: 'none' } },
+      // its light on what is around it
+      flame && h('div', { style: Object.assign({ position: 'absolute', left: u(-200), top: u(-150), width: u(600), height: u(600), pointerEvents: 'none' }, ignite ? { animation: `wlIn 2600ms ease ${ignite}ms both` } : {}) },
+        h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,196,120,.34), rgba(255,150,60,.11) 42%, transparent)' }, live('mmGlow 2.3s ease-in-out infinite')) })),
+      // the wax, lit from within under the flame
+      body && h('div', { style: { position: 'absolute', left: u(40), top: u(200), width: u(120), height: u(len - 200), borderRadius: `${u(4)}px ${u(4)}px ${u(10)}px ${u(10)}px`, overflow: 'hidden', background: 'linear-gradient(90deg, #5e3a1a 0%, #b9844a 13%, #e8c28e 32%, #f7e2bc 47%, #eed0a0 62%, #c08b4c 84%, #5a3818 100%)' } },
+        h('div', { style: Object.assign({ position: 'absolute', left: 0, right: 0, top: 0, height: u(190) }, ignite ? { animation: `wlIn 2600ms ease ${ignite}ms both` } : {}) },
+          h('div', { style: Object.assign({ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,214,140,.8), rgba(255,176,90,.28) 45%, rgba(255,160,80,0))' }, live('mmGlow 2.3s ease-in-out -.6s infinite')) })),
+        fade ? h('div', { style: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '62%', background: 'linear-gradient(180deg, rgba(3,4,8,0), rgba(3,4,8,.85) 70%, #030408)' } }) : null),
+      // the rim and its melt pool
+      body && h('div', { style: { position: 'absolute', left: u(40), top: u(188), width: u(120), height: u(26), borderRadius: '50%', background: 'radial-gradient(ellipse at 50% 42%, #fff6e2 0%, #f8dcaa 38%, #dcaa68 78%, #9c6a36 100%)' } }),
+      // the wick
+      body && h('div', { style: { position: 'absolute', left: u(100) - Math.max(1, u(2)), top: u(172), width: Math.max(2, u(4)), height: u(28), borderRadius: u(2), background: 'linear-gradient(180deg, #ffb060 0%, #4a2c16 30%, #1c120a 100%)' } }),
+      // the flame: a draught now and then, a slow sway, a quick flicker (three periods that never line up)
+      flame && h('div', { style: Object.assign({ position: 'absolute', left: u(70), top: u(30), width: u(60), height: u(165), transformOrigin: '50% 92%' }, ignite ? { animation: `mmIgnite 1700ms cubic-bezier(.2,.8,.3,1) ${ignite}ms both` } : {}) },
+        h('div', { style: Object.assign({}, origin, live('mmGust 13s ease-in-out -4s infinite')) },
+          h('div', { style: Object.assign({}, origin, live('mmSway 4.7s ease-in-out infinite')) },
+            h('div', { style: Object.assign({}, origin, live('mmFlick 1.3s ease-in-out infinite')) },
+              h('svg', { width: '100%', height: '100%', viewBox: '0 0 60 165', style: { position: 'absolute', inset: 0, overflow: 'visible' } },
+                h('defs', null,
+                  h('radialGradient', { id: id + 'h', cx: '50%', cy: '55%', r: '50%' }, stops([[0, 'rgba(255,214,150,.55)'], [0.45, 'rgba(255,170,80,.18)'], [1, 'rgba(255,150,60,0)']])),
+                  h('radialGradient', { id: id + 'o', cx: '50%', cy: '80%', r: '72%', fx: '50%', fy: '86%' }, stops([[0, '#ffffff'], [0.2, '#fff6d8'], [0.42, '#ffd47e'], [0.66, '#ffa53a'], [0.86, 'rgba(255,120,36,.7)'], [1, 'rgba(255,96,24,.12)']])),
+                  h('radialGradient', { id: id + 'c', cx: '50%', cy: '75%', r: '60%' }, stops([[0, 'rgba(255,255,255,1)'], [0.55, 'rgba(255,250,232,.85)'], [1, 'rgba(255,240,200,0)']])),
+                  h('radialGradient', { id: id + 'b', cx: '50%', cy: '60%', r: '55%' }, stops([[0, 'rgba(120,160,255,.75)'], [0.6, 'rgba(90,130,255,.3)'], [1, 'rgba(80,120,255,0)']]))),
+                h('ellipse', { cx: 30, cy: 96, rx: 58, ry: 96, fill: `url(#${id}h)` }),
+                h('path', { d: FLAME, fill: `url(#${id}o)` }),
+                h('path', { d: CORE, fill: `url(#${id}c)` }),
+                h('ellipse', { cx: 30, cy: 150, rx: 10, ry: 12, fill: `url(#${id}b)` })))))));
+  };
+  // a faint star tile for the Yizkor sky (made once)
+  const starTile = () => window.__mmStars || (window.__mmStars = (() => { const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d'); for (let i = 0; i < 180; i++) { const x = (i * 97.7) % 512, y = (i * 61.3 + (i * i) % 37) % 512, r = 0.4 + ((i * 13) % 7) / 10, a = 0.08 + ((i * 7) % 5) * 0.04; g.fillStyle = `rgba(230,236,250,${a})`; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill(); } return c.toDataURL(); })());
+
+  // The Yizkor screen, in the wall's deep space: the candle catches and stays alive, the directorate's emblem above the
+  // words. On its way out (`leaving`, a performance.now() stamp; the home wall wakes under it at once) the words go, the
+  // candle dims, and its flame alone travels to the small candle on the home wall (target(): its wick in stage px and its
+  // k) and joins it, while the dark lifts.
+  // Light on purpose (the lobby computer, phones): CSS animations on transform/opacity, WAAPI for the way out.
+  const MM_K = 1.15;
+  const Memorial = ({ fx, preview, leaving, target, onDone }) => {
+    const en = EN(), CX = en ? 1380 : 540, CY = 380;
+    const r = useRef({}).current, set = (n) => r['_' + n] || (r['_' + n] = (el) => { r[n] = el; });
+    const cb = useRef(onDone); cb.current = onDone;
+    useEffect(() => {
+      if (!leaving) return;
+      const anims = [], at = (T) => T - (performance.now() - leaving);
+      const run = (el, kf, T, dur, easing) => { if (el) anims.push(el.animate(kf, { delay: at(T), duration: dur, easing: easing || 'linear', fill: 'both' })); };
+      run(r.words, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${en ? -70 : 70}px)` }], 0, 1000, 'cubic-bezier(.45,0,.3,1)');
+      run(r.body, [{ opacity: 1 }, { opacity: 0 }], 600, 1100, 'ease-in-out');
+      run(r.bg, [{ opacity: 1 }, { opacity: 0 }], 1400, 1900, 'cubic-bezier(.45,0,.55,1)');
+      const t = target && target();
+      if (t) {
+        run(r.rig, [{ transform: 'none' }, { transform: `translate(${t.x - CX}px,${t.y - CY}px) scale(${t.k / MM_K})` }], 900, 2400, 'cubic-bezier(.55,0,.15,1)');
+        run(r.rigFade, [{ opacity: 1 }, { opacity: 0 }], 3250, 450, 'ease-in-out');
+      } else run(r.rigFade, [{ opacity: 1 }, { opacity: 0 }], 900, 1400, 'ease-in-out');
+      const done = setTimeout(() => cb.current && cb.current(), at(3900));
+      return () => { clearTimeout(done); anims.forEach((a) => { try { a.cancel(); } catch (e) {} }); };
+    }, [leaving]);
+    const rise = (ms, delay, extra) => Object.assign({ animation: `mmRise ${ms}ms cubic-bezier(.16,1,.3,1) ${delay}ms both` }, extra);
+    const motes = fx && !preview ? Array.from({ length: 14 }, (_, i) => h('span', { key: i, style: { position: 'absolute', left: CX - 170 + ((i * 53) % 340), top: CY + 40 + ((i * 37) % 160), width: i % 4 ? 2 : 3, height: i % 4 ? 2 : 3, borderRadius: '50%', background: '#ffd9a0', boxShadow: '0 0 6px rgba(255,200,120,.8)', '--dx': ((i % 5) - 2) * 18 + 'px', animation: `mmMote ${9 + (i % 6) * 1.3}s ease-in-out ${-(i * 1.7)}s infinite` } })) : null;
+    const side = en ? { left: 200 } : { right: 200 };
+    return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: en ? 'ltr' : 'rtl', fontFamily: 'Heebo, sans-serif', color: '#f3ede2', pointerEvents: 'none', animation: 'ovIn 1.2s ease both' } },
+      // the dark, the sky and the candle's warmth on it
+      h('div', { key: 'bg', ref: set('bg'), style: { position: 'absolute', inset: 0 } },
+        h('div', { style: { position: 'absolute', inset: 0, background: `url(${dither()}) 0 0/128px 128px repeat, radial-gradient(circle 900px at ${CX}px ${CY + 120}px, rgba(120,70,24,.30), rgba(60,34,14,.12) 45%, transparent 75%), radial-gradient(ellipse 1300px 900px at ${en ? 360 : 1560}px 420px, rgba(26,52,110,.22), transparent 70%), radial-gradient(ellipse 125% 105% at 50% 48%, transparent 55%, rgba(0,0,0,.6) 100%), #030408` } }),
+        h('div', { style: { position: 'absolute', left: 0, top: -512, width: 2432, height: 1592, opacity: 0.5, animation: fx && !preview ? 'tileX 300s linear infinite' : 'none' } },
+          h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${starTile()})`, backgroundSize: '512px 512px' } })),
+        h('div', { style: { position: 'absolute', left: CX - 700, top: CY - 560, width: 1400, height: 1400, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,180,100,.13), rgba(255,150,70,.04) 50%, transparent)', animation: 'wlIn 3000ms ease 1400ms both' } },
+          h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, fx ? { animation: 'mmGlow 2.3s ease-in-out infinite' } : {}) })),
+        motes),
+      // the candle: its body stays, its flame (moved only through rig / rigFade) leaves for the home wall
+      h('div', { key: 'body', ref: set('body'), style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K, animation: 'wlIn 1400ms ease 300ms both' } },
+        h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, fade: true, part: 'body' })),
+      h('div', { key: 'rig', ref: set('rig'), style: { position: 'absolute', inset: 0, transformOrigin: `${CX}px ${CY}px` } },
+        h('div', { ref: set('rigFade'), style: { position: 'absolute', inset: 0 } },
+          h('div', { style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K } },
+            h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, part: 'flame' })))),
+      // the words
+      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 214, width: 900, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }, side) },
+        h('div', { style: rise(1200, 2200, { display: 'flex', alignItems: 'center', gap: 22 }) },
+          h('div', { style: { position: 'relative', width: 92, height: 92, flex: 'none' } },
+            h('div', { style: { position: 'absolute', inset: -9, borderRadius: '50%', border: '1px dashed rgba(233,184,114,.4)', animation: fx ? 'spin 40s linear infinite' : 'none' } }),
+            h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #fbf6ee, #e2d8c8 60%, #b8a88e)', boxShadow: '0 0 34px rgba(255,190,120,.25)', overflow: 'hidden' } },
+              h('img', { src: '/assets/logo-mark.png', alt: '', style: { position: 'absolute', left: '50%', top: '50%', width: 96, height: 'auto', marginLeft: -50.5, marginTop: -41.4, clipPath: 'inset(0 0 23% 0)' } }))),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('span', { style: { fontSize: 30, fontWeight: 700, color: '#e8dcc6', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
+            h('span', { style: { fontFamily: MONO, fontSize: 17, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('שלוש שנים · 7.10', 'THREE YEARS · 7.10')))),
+        h('div', { style: { position: 'relative', marginTop: 34, lineHeight: 1 } },
+          h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 150 : 270, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 2900ms both${fx ? ', mmTitleGlow 6s ease-in-out 5300ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
+          h('div', { style: { position: 'relative', fontSize: en ? 150 : 270, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2700ms both' } }, tr('יזכור', 'We Remember'))),
+        h('div', { style: { marginTop: 30, width: 520, height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.35) 60%, transparent)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 3900ms both' } }),
+        h('div', { style: rise(1200, 4300, { marginTop: 32, fontSize: 40, fontWeight: 300, lineHeight: 1.4, color: '#ece4d6', maxWidth: 880 }) },
+          en ? 'The Space Program Office remembers those murdered and fallen on October 7 and in the war that followed.' : ['מנהלת החלל מתייחדת עם זכרם של הנרצחים והנופלים', h('br', { key: 'br' }), 'במתקפת השבעה באוקטובר ובמלחמה']),
+        h('div', { style: rise(1200, 4900, { marginTop: 26, fontSize: 34, fontWeight: 500, color: '#e9b872' }) }, tr('יהי זכרם ברוך', 'May their memory be a blessing')),
+        h('div', { dir: 'ltr', style: rise(1200, 5400, { marginTop: 22, fontFamily: MONO, fontSize: 20, letterSpacing: '.22em', color: 'rgba(200,184,156,.7)', unicodeBidi: 'plaintext' }) }, tr('7.10.2023 · כ״ב בתשרי תשפ״ד', 'OCTOBER 7, 2023'))));
+  };
+
   // ---------- small toast (e.g. "שוגר") ----------
   const Toast = ({ title, line }) => h('div', { style: { position: 'absolute', top: 104, left: '50%', transform: 'translateX(-50%)', zIndex: 40, display: 'flex', alignItems: 'center', gap: 16, padding: '14px 26px', borderRadius: 999, background: 'rgba(10,20,40,.92)', border: '1px solid rgba(233,184,114,.6)', boxShadow: '0 20px 50px rgba(0,0,0,.5), 0 0 30px rgba(233,184,114,.2)', animation: 'toastIn .7s cubic-bezier(.2,1.3,.4,1) both', direction: EN() ? 'ltr' : 'rtl', fontFamily: 'Heebo', color: '#e6f1ff', whiteSpace: 'nowrap' } },
     h('span', { style: { width: 12, height: 12, borderRadius: '50%', background: '#e9b872', boxShadow: '0 0 14px #e9b872', animation: 'breathe 1s ease-in-out infinite' } }),
@@ -564,5 +674,5 @@ window.makeWallOverlays = (React) => {
       tag]);
   };
 
-  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream };
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, Memorial, Candle };
 };

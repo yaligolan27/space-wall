@@ -25,7 +25,8 @@
     feed: q.get('feed') || '/api/feed',
     key: displayKey(),
     refresh: Math.max(10, num('refresh', 60)),
-    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome
+    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial
+    memorial: bool('memorial', false),             // the small Yizkor on the home wall without a memorial day (demos)
     sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
     noonShow: bool('noon', true),
     showQr: bool('qr', true),
@@ -131,6 +132,10 @@
   // POLL_FAST ms, so "enter" starts at once; after one, no local moment for QUIET ms and no reload for NO_RELOAD ms.
   const WL = { COVER: 800, REVEAL_CAP: 6000, MIN_AFTER_REVEAL: 4400, WAKE: 400, EMB_WAKE: 8200, EMB_SHOW: 8600, EMB_SHOW_CAP: 1500, SETTLE: 10400, DONE: 12000, POLL_FAST: 1500, QUIET: 20000, NO_RELOAD: 60000 };
   const isWelcome = (ov) => !!ov && ov.kind === 'welcome';
+  // Yizkor (a memorial day, from /api/live): the small candle on the home wall is drawn at MM_K px per candle unit
+  // (overlays.js Candle), and the Yizkor screen's candle lands on it.
+  const isMemorial = (ov) => !!ov && ov.kind === 'memorial';
+  const MM_K = 0.24;
 
   class Wall extends React.Component {
     constructor(p) {
@@ -139,6 +144,8 @@
       this.embRef = (el) => { this.embEl = el; };
       this.onWlReveal = (at, ok, hero) => { if (at) this._wlRevealAt = at; this._wlHeroOk = !!ok; this._wlHero = ok ? hero : null; };
       this.onWlHeroGone = () => { if (this.state.wl) this.setWl({ heroGone: true }, () => this.maybeFinishWl()); };
+      this.memTarget = () => this.memorialCandle();
+      this.onMemDone = (id) => { const o = this.state.ov; if (isMemorial(o) && o.id === id) this.setState({ ov: null }); };
     }
 
     // ---- lifecycle ----------------------------------------------------------------------------
@@ -148,8 +155,9 @@
       this.fit(); addEventListener('resize', this.fit); this.fitRetry = setTimeout(this.fit, 800);
       this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } }, 1000);
       this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(), ov = this.state.ov;
-        if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome');
+        if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome'); else if (k === 'y') this.demo('memorial');
         else if ((k === 'enter' || k === ' ') && isWelcome(ov) && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
+        else if ((k === 'enter' || k === ' ') && isMemorial(ov) && ov.demo) this.leaveMemorial();
         else if (k === 'escape') { this.clearLeave(); this.setState({ ov: null, wl: null }); } };
       addEventListener('keydown', this.onKey);
       this.load();
@@ -216,7 +224,7 @@
     syncTakeover() {
       const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow(), wlUp = isWelcome(ov);
       // Forget what was shown once the server reports none, so the remote's undo of "back to normal" brings it back.
-      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else this.setState({ ov: null }); } return; }
+      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else if (isMemorial(ov)) this.leaveMemorial(); else this.setState({ ov: null }); } return; }
       // A welcome's way out counts as its own state, so the remote's undo of "enter" (the same welcome, no longer
       // leaving) brings it back once the entrance is over.
       const seen = tk.id + (tk.leaving ? '|leaving' : '');
@@ -237,6 +245,22 @@
       else if (tk.kind === 'welcome') this.welcomeUp({ id: tk.id, live: true, guest: tk.guest || '', until: until + 60e3 });
       else if (tk.kind === 'image' && tk.url) this.setState({ ov: { kind: 'image', id: tk.id, live: true, url: tk.url, caption: tk.caption || '', captionEn: tk.captionEn || '', until } });
       else if (tk.kind === 'stream' && tk.videoId) this.setState({ ov: { kind: 'stream', id: tk.id, live: true, videoId: tk.videoId, title: tk.title || '', until } });
+      else if (tk.kind === 'memorial') this.setState({ ov: { kind: 'memorial', id: tk.id, live: true, until } });
+    }
+    /** Yizkor today (the server says so; ?memorial=1 or the Yizkor demo without one): the small candle on the home wall. */
+    memorialOn() { const L = this.state.live; return CFG.memorial || CFG.demo === 'memorial' || isMemorial(this.state.ov) && this.state.ov.demo || !!(L && L.memorial); }
+    /** The Yizkor screen's way out: the wall wakes under it and its candle lands in the small one (overlays.js Memorial). */
+    leaveMemorial() {
+      const ov = this.state.ov;
+      if (!isMemorial(ov) || ov.leaving) return;
+      this.setState({ ov: Object.assign({}, ov, { leaving: performance.now(), until: serverNow() + 8000 }) });
+    }
+    /** The small candle's wick on the stage (1920×1080 px) and its scale, or null when the home wall has none. */
+    memorialCandle() {
+      const st = document.querySelector('[data-w="stage"]'), c = st && st.querySelector('[data-w="memorial"] [data-mm="candle"]');
+      if (!c || !this.memorialOn()) return null;
+      const a = c.getBoundingClientRect(), b = st.getBoundingClientRect(), k = b.width / 1920;
+      return a.width && k ? { x: (a.left - b.left) / k + 100 * MM_K, y: (a.top - b.top) / k + 190 * MM_K, k: MM_K } : null;
     }
     /** Shows a welcome. One already up only takes the new words (its scene and emblem stay); one on its way out starts over. */
     welcomeUp(o) {
@@ -378,6 +402,8 @@
         return;
       }
       if (kind === 'noon') { const t = serverNow(); return this.setState({ ov: { kind: 'noon', id: t, demo: true, until: t + 15 * 60e3 } }); }
+      // ?demo=memorial&leaveAfter=N: the Yizkor screen, landing on the home wall after N seconds (else Enter, or an hour)
+      if (kind === 'memorial') { const t = serverNow(); return this.setState({ ov: { kind: 'memorial', id: t, demo: true, until: t + (num('leaveAfter', 0) > 0 ? num('leaveAfter', 0) * 1000 : 3600e3) } }); }
       if (kind !== 'launch' && kind !== 'greeting') return;
       const pick = (S) => (kind === 'launch' ? S.launches : S.people.filter((p) => p.celebrate !== false)) || [];
       let list = this.D ? pick(this.D) : [];
@@ -392,6 +418,7 @@
       let ov = this.state.ov;
       if (ov && now > ov.until) {
         if (isWelcome(ov) && !ov.leaving) this.leaveWelcome();   // a forgotten welcome still ends with its entrance
+        else if (isMemorial(ov) && !ov.leaving) this.leaveMemorial();   // the Yizkor screen lands on the home wall
         else { if (ov.kind === 'launch' && !ov.demo) this.setState({ toast: { title: tr('שוגר', 'Liftoff'), line: ov.launch.mission + ' · ' + ov.launch.vehicle, until: now + 45000 } }); ov = null; this.clearLeave(); this.setState({ ov: null, wl: null }); }
       }
       if (this.state.toast && now > this.state.toast.until) this.setState({ toast: null });
@@ -400,7 +427,9 @@
       if (ov && (ov.kind === 'noon' || ov.live)) return;
       if (Date.now() < (this._wlWakeAt || 0) + WL.QUIET) return;   // the wall has just made its entrance: let it be seen
       // The 12:00 show is decided by the server (it can be skipped or stopped from the remote); locally only as a fallback.
-      if (!this.liveOk && CFG.noonShow && T.h === 12 && T.m === 0 && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
+      // On a memorial day neither the 12:00 promo nor the half-hourly celebrations.
+      const mem = this.memorialOn();
+      if (!this.liveOk && !mem && CFG.noonShow && T.h === 12 && T.m === 0 && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
       if (!D) return;
       // Launch mode only for a launch Launch Library calls Go (and recently): never for TBD/TBC/Hold.
       const L = D.launches.find((l) => { const d = Date.parse(l.at) - now; return d > -12000 && d <= 600e3 && goNow(l, now); });
@@ -409,7 +438,7 @@
       if (ov && ov.kind === 'launch' && !ov.demo && now < ov.until && !D.launches.some((l) => l.at === ov.launch.at && l.code === 'Go')) { ov = null; this.setState({ ov: null }); }
       // A personal celebration every half hour (:00 and :30), cycling through the people whose day it is.
       const slotKey = T.day + T.h + ':' + T.m;
-      if (!ov && (T.m === 0 || T.m === 30) && T.s < 5 && this._celebSlot !== slotKey) { this._celebSlot = slotKey; const P = this.celebratable(T.iso); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[(T.h * 2 + (T.m ? 1 : 0)) % P.length], until: now + 14000 } }); }
+      if (!ov && !mem && (T.m === 0 || T.m === 30) && T.s < 5 && this._celebSlot !== slotKey) { this._celebSlot = slotKey; const P = this.celebratable(T.iso); if (P.length) this.setState({ ov: { kind: 'celebrate', id: now, person: P[(T.h * 2 + (T.m ? 1 : 0)) % P.length], until: now + 14000 } }); }
     }
     /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment. */
     maybeReload(T, ov) {
@@ -424,7 +453,8 @@
     overlay() {
       const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
       const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) : '') + '|' + (toast ? toast.until : '')
-        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '');
+        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '')
+        + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang].join('|') : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
       const O = this._O || (this._O = window.makeWallOverlays(React));
@@ -439,6 +469,7 @@
       // Keyed per welcome scene, not per remote press: new words for a welcome already up keep its emblem.
       if (wlUp) el = h(O.Welcome, { key: 'welcome' + this._wlKey, guest: ov.guest, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, woke: !!(wl && wl.woke), embShown: !!(wl && wl.embShown),
         mode: (wl && wl.mode) || '', target: wl && wl.target, attrs: this._wlAttrs, onReveal: this.onWlReveal, onHeroGone: this.onWlHeroGone });
+      if (isMemorial(ov)) el = h(O.Memorial, { key: mk, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, target: this.memTarget, onDone: () => this.onMemDone(ov.id) });
       if (ov && ov.kind === 'image') el = h(O.ImageMoment, { key: mk, url: ov.url, caption: (EN() && ov.captionEn) || ov.caption });
       // The remote's preview (often a phone) shows a card for a stream instead of loading the video player.
       if (ov && ov.kind === 'stream') el = h(O.LiveStream, { key: mk, videoId: ov.videoId, title: ov.title, preview: CFG.preview });
@@ -503,6 +534,21 @@
           h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } })),
         h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, ref: this.embRef, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off',
           paused: paused ? '' : null, clock: page ? 'page' : null, events: evOff ? 'off' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, opacity: hidden ? 0 : 1 } })));
+    }
+
+    /** Yizkor on the home wall: a lit candle and a line under the emblem, all day on a memorial day. */
+    memorialCard() {
+      const k = CFG.lang + CFG.ambientFx;
+      if (this._mm && this._mmK === k) return this._mm;
+      this._mmK = k;
+      const O = this._O || (this._O = window.makeWallOverlays(React));
+      return (this._mm = h('div', { key: 'mm', 'data-w': 'memorial', style: { flex: 'none', alignSelf: 'center', position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 22, height: 112, padding: EN() ? '0 44px 0 30px' : '0 30px 0 44px', borderRadius: 26, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(50,36,22,.55), rgba(10,14,26,.8))', border: '1px solid rgba(233,184,114,.32)', boxShadow: '0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,228,186,.10)', animation: 'rise 1.2s ease both' } },
+        h('div', { style: { position: 'absolute', top: -60, [EN() ? 'left' : 'right']: -40, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,180,100,.18), transparent)', pointerEvents: 'none' } }),
+        h('div', { style: { position: 'relative', width: 200 * MM_K, height: 112, flex: 'none' } },
+          h('div', { style: { position: 'absolute', left: 0, top: 9 } }, h(O.Candle, { k: MM_K, len: 400, fx: CFG.ambientFx }))),
+        h('div', { style: { position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 } },
+          h('span', { style: { fontSize: 40, fontWeight: 800, lineHeight: 1, color: '#f6efe3', letterSpacing: EN() ? 0 : '.02em', textShadow: '0 0 24px rgba(255,190,110,.25)' } }, tr('יזכור', 'We Remember')),
+          h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr('מנהלת החלל מתייחדת עם זכר הנרצחים והנופלים · 7.10.2023', 'Remembering those murdered and fallen on October 7, 2023')))));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
@@ -599,7 +645,7 @@
       // Under a full-screen moment the wall rests: its layers are not drawn and the 3D emblem stops, so a lobby computer
       // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
       const ov = this.state.ov, wl = this.wl, wlUp = isWelcome(ov);
-      const rest = !!ov && this.state.covered && !(wl && wl.woke);
+      const rest = !!ov && this.state.covered && !(wl && wl.woke) && !(isMemorial(ov) && ov.leaving);
       // On the welcome's way out the wall wakes under it and assembles around the arriving emblem: the column the Earth
       // crosses first, then the other, header, ticker and launches, then light runs down the panels' inner edges as the
       // emblem docks. All in one commit (the wake), with fixed delays (ms) measured from it.
@@ -676,7 +722,8 @@
           D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null) : null);
 
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
-        h('div', { 'data-w': 'emblem', style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest, entering)));
+        h('div', { 'data-w': 'emblem', style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest, entering)),
+        this.memorialOn() ? this.memorialCard() : null);
 
       const left = !showNews ? null : h('section', { key: 'l', 'data-w': 'news', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, enW('wlPanelIn', 2600, leftFirst)) },
         this.sheen(3, 9), seam('insetInlineStart', 8400), edgeFlash(8450),

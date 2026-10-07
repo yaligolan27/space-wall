@@ -39,7 +39,8 @@ personal celebration with fireworks every half hour at :00 and :30 (cycling thro
 | --- | --- | --- |
 | `key` | | `DISPLAY_KEY`, if the backend requires one; remembered by the browser for later visits without it |
 | `sample` | `0` | `1` shows the bundled sample feed instead of `/api/feed` (design demos) |
-| `demo` | `off` | `launch`, `greeting` or `noon`: trigger a moment on load (keys L, G, N do the same; Esc closes) |
+| `demo` | `off` | `launch`, `greeting`, `noon`, `welcome` or `memorial`: trigger a moment on load (keys L, G, N, W, Y do the same; Esc closes). `memorial` lands on the home wall after `leaveAfter` seconds, or on Enter |
+| `memorial` | `0` | `1` shows the small Yizkor candle on the home wall without a memorial day |
 | `noon` | `1` | `0` disables the 12:00 show |
 | `qr` | `1` | `0` hides the QR codes |
 | `feature` | `12` | seconds per featured article (6–30) |
