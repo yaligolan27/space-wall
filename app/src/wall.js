@@ -25,8 +25,9 @@
     feed: q.get('feed') || '/api/feed',
     key: displayKey(),
     refresh: Math.max(10, num('refresh', 60)),
-    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream
+    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream | occasion
     memorial: bool('memorial', false),             // the small Yizkor on the home wall without a memorial day (demos)
+    occ: q.get('occ') || '',                       // an occasion's key (lib/occasions.ts): its card, full screen or Yizkor (demos)
     sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
     noonShow: bool('noon', true),
     showQr: bool('qr', true),
@@ -177,6 +178,9 @@
   // (overlays.js Candle), and the Yizkor screen's candle lands on it.
   const isMemorial = (ov) => !!ov && ov.kind === 'memorial';
   const MM_K = 0.24;
+  // The year's occasions (lib/occasions.ts, from the feed): what kind of day each is, in the events panel.
+  const OCC_KIND = { holiday: ['חג', 'Holiday'], national: ['יום לאומי', 'National day'], space: ['יום החלל', 'Space day'], memorial: ['יום זיכרון', 'Remembrance day'], remember: ['יום זיכרון', 'Remembrance'] };
+  const isOccasion = (ov) => !!ov && ov.kind === 'occasion';
 
   class Wall extends React.Component {
     constructor(p) {
@@ -196,7 +200,7 @@
       this.fit(); addEventListener('resize', this.fit); this.fitRetry = setTimeout(this.fit, 800);
       this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } }, 1000);
       this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(), ov = this.state.ov;
-        if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome'); else if (k === 'y') this.demo('memorial');
+        if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome'); else if (k === 'y') this.demo('memorial'); else if (k === 'o') this.demo('occasion');
         else if ((k === 'enter' || k === ' ') && isWelcome(ov) && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
         else if ((k === 'enter' || k === ' ') && isMemorial(ov) && ov.demo) this.leaveMemorial();
         else if (k === 'escape') { if (isWelcome(ov) || isMemorial(ov)) { this.clearLeave(); this.setState({ ov: null, wl: null }); } else this.closeOv(); }
@@ -360,6 +364,8 @@
       const n = list[i % list.length];
       return Object.assign({}, n, { image: n.image || D.catImage[n.cat] || '', color: D.catColor[n.cat] || '#9fdcff', issue: D.issue.range || '' });
     }
+    /** Which memorial day's words the Yizkor speaks (/api/live's memorial.key; ?occ= in a demo): 7/10 unless told. */
+    memorialKey() { const L = this.state.live, k = L && L.memorial && L.memorial.key; return k || (CFG.occ && /^(oct7|shoah|zikaron)$/.test(CFG.occ) ? CFG.occ : 'oct7'); }
     /** Yizkor today (the server says so; ?memorial=1 or the Yizkor demo without one): the small candle on the home wall. */
     memorialOn() { const L = this.state.live; return CFG.memorial || CFG.demo === 'memorial' || isMemorial(this.state.ov) && this.state.ov.demo || !!(L && L.memorial); }
     /** The Yizkor screen's way out: the wall wakes under it and its candle lands in the small one (overlays.js Memorial). */
@@ -455,7 +461,7 @@
       let wait = CFG.refresh;
       const lang = CFG.lang;
       try {
-        const body = await this.fetchText(CFG.sample ? '/data/feed.json' : CFG.feed, 20e3);
+        const body = await this.fetchText(CFG.sample ? '/data/feed.json' : CFG.occ ? CFG.feed + (CFG.feed.includes('?') ? '&' : '?') + 'occ=' + encodeURIComponent(CFG.occ) : CFG.feed, 20e3);
         // The language changed while this was on its way: ask again in the new one.
         if (lang !== CFG.lang) { wait = 0; return; }
         // English with some text still being translated (it shows in Hebrew meanwhile): look again soon.
@@ -527,6 +533,12 @@
       }
       // ?demo=memorial&leaveAfter=N: the Yizkor screen, landing on the home wall after N seconds (else Enter, or an hour)
       if (kind === 'memorial') { const t = serverNow(); return this.setState({ ov: { kind: 'memorial', id: t, demo: true, until: t + (num('leaveAfter', 0) > 0 ? num('leaveAfter', 0) * 1000 : 3600e3) } }); }
+      // ?demo=occasion (&occ=<key>) or O: today's occasion on the whole wall, else the next one in the events panel.
+      if (kind === 'occasion') {
+        const D = this.D, o = this.occasionToday() || (D && (D.directorate.find((d) => d.occ && d.occ.kind !== 'memorial' && d.occ.kind !== 'remember') || {}).occ), t = serverNow();
+        if (o) this.setState({ ov: { kind: 'occasion', id: t, demo: true, occ: Object.assign({ title: o.title || '' }, o), until: t + (num('leaveAfter', 0) > 0 ? num('leaveAfter', 0) * 1000 : 30e3) } });
+        return;
+      }
       if (kind !== 'launch' && kind !== 'greeting') return;
       const pick = (S) => (kind === 'launch' ? S.launches : S.people.filter((p) => p.celebrate !== false)) || [];
       let list = this.D ? pick(this.D) : [];
@@ -574,7 +586,15 @@
       if (ns && due.nSlot !== ns) { due.nSlot = ns; due.n = now; }
       for (const k of ['c', 'n']) if (due[k] && now - (due[k].at || due[k]) > 120e3) due[k] = null;
       if (ov) return;
-      if (due.c) { const P = this.celebratable(T.iso), k = due.c.k; due.c = null; if (P.length) return this.setState({ ov: { kind: 'celebrate', id: now, person: P[k % P.length], until: now + S.celebrate.secs * 1000 } }); }
+      // Today's holiday, national day or day of space takes a turn in the celebrations, first (lib/occasions.ts), unless the
+      // remote's agent built a screen scheduled for today: then that one is the day's screen, never two.
+      if (due.c) {
+        const L = this.state.live, built = L && L.design && Array.isArray(L.design.scenes) && L.design.scenes.some((x) => x.schedule && x.schedule.from <= T.iso && T.iso <= x.schedule.to);
+        const o = !built && (D.occasions || []).find((x) => x.kind === 'holiday' || x.kind === 'national' || x.kind === 'space'), P = [...(o ? [o] : []), ...this.celebratable(T.iso)], k = due.c.k, pick = P[k % P.length];
+        due.c = null;
+        if (pick === o && o) return this.setState({ ov: { kind: 'occasion', id: now, occ: o, until: now + Math.max(20, S.celebrate.secs) * 1000 } });
+        if (pick) return this.setState({ ov: { kind: 'celebrate', id: now, person: pick, until: now + S.celebrate.secs * 1000 } });
+      }
       if (due.n) { due.n = null; const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: now, item, secs: S.news.secs, until: now + S.news.secs * 1000 } }); }
     }
     /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment or
@@ -592,7 +612,7 @@
       const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
       const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) + (ov.out ? '|out' : '') + '|' + M().fx : '') + '|' + (toast ? toast.until : '')
         + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '')
-        + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang].join('|') : '');
+        + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang, this.memorialKey()].join('|') : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
       const O = this._O || (this._O = window.makeWallOverlays(React));
@@ -607,7 +627,8 @@
       // Keyed per welcome scene, not per remote press: new words for a welcome already up keep its emblem.
       if (wlUp) el = h(O.Welcome, { key: 'welcome' + this._wlKey, guest: ov.guest, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, woke: !!(wl && wl.woke), embShown: !!(wl && wl.embShown),
         mode: (wl && wl.mode) || '', target: wl && wl.target, attrs: this._wlAttrs, onReveal: this.onWlReveal, onHeroGone: this.onWlHeroGone });
-      if (isMemorial(ov)) el = h(O.Memorial, { key: mk, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, target: this.memTarget, onDone: () => this.onMemDone(ov.id) });
+      if (isMemorial(ov)) el = h(O.Memorial, { key: mk, which: this.memorialKey(), fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, target: this.memTarget, onDone: () => this.onMemDone(ov.id) });
+      if (isOccasion(ov)) el = h(O.OccasionMoment, { key: mk, occ: ov.occ, fx: CFG.ambientFx && !CFG.preview });
       if (ov && ov.kind === 'image') el = h(O.ImageMoment, { key: mk, url: ov.url, caption: (EN() && ov.captionEn) || ov.caption });
       // The remote's preview (often a phone) shows a card for a stream instead of loading the video player.
       if (ov && ov.kind === 'stream') el = h(O.LiveStream, { key: mk, videoId: ov.videoId, title: ov.title, preview: CFG.preview });
@@ -678,12 +699,43 @@
           paused: paused ? '' : null, clock: page ? 'page' : null, events: evOff ? 'off' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, opacity: hidden ? 0 : 1 } })));
     }
 
+    /** An occasion in the events panel (lib/occasions.ts): its glyph on its own colours instead of a picture, what kind
+     *  of day it is instead of an hour, and "היום" while it runs. */
+    occasionRow(d, i, today) {
+      const o = d.occ, c = o.color, O = this._O || (this._O = window.makeWallOverlays(React));
+      return h('div', { key: i, 'data-w': 'occasion-row', style: { display: 'grid', gridTemplateColumns: '62px 58px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: `linear-gradient(${EN() ? 90 : 270}deg, ${c}${today ? '2e' : '1a'}, rgba(8,16,34,.35) 70%)`, border: `1px solid ${c}${today ? '80' : '40'}` } },
+        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: `1px solid ${c}40` } },
+          h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
+        h('div', { style: { width: 58, height: 58, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `radial-gradient(circle at 50% 35%, ${c}55, ${o.deep} 75%)`, border: `1px solid ${c}66`, boxShadow: today ? `0 0 18px ${c}40` : 'none' } }, h(O.Glyph, { k: o.key, c, s: 40, w: 6 })),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } }, h('span', { style: { fontSize: 17, fontWeight: 600, lineHeight: 1.25, textWrap: 'pretty' } }, d.name), h('span', { style: { fontSize: 13, color: c } }, OCC_KIND[o.kind] ? tr(OCC_KIND[o.kind][0], OCC_KIND[o.kind][1]) : '')),
+        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), h('span', { style: { fontSize: 12, fontWeight: 500, color: c } }, today ? tr('היום', 'TODAY') : '')));
+    }
+    /** Today's occasion on the home wall (not a memorial day, which has its candle): a card under the emblem, from the day
+     *  the wall starts greeting it to its last day (lib/occasions.ts occasionGreets). ?occ=<key> shows one (demos). */
+    occasionToday() {
+      const D = this.D, list = (D && D.occasions) || [];
+      return list.find((o) => o.key === CFG.occ) || list.find((o) => o.kind !== 'memorial') || null;
+    }
+    occasionCard(o) {
+      const today = this.ilParts(serverNow()).iso, k = [CFG.lang, CFG.ambientFx, o.key, o.title, o.greet, o.first, o.last, today].join('|');
+      if (this._oc && this._ocK === k) return this._oc;
+      this._ocK = k;
+      const c = o.color, quiet = o.kind === 'remember', O = this._O || (this._O = window.makeWallOverlays(React));
+      const eve = !quiet && o.first > today;
+      return (this._oc = h('div', { key: 'oc', 'data-w': 'occasion', style: { flex: 'none', alignSelf: 'center', position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 22, height: 112, padding: EN() ? '0 44px 0 26px' : '0 26px 0 44px', borderRadius: 26, overflow: 'hidden', background: `linear-gradient(180deg, ${c}26, ${o.deep}d9)`, border: `1px solid ${c}59`, boxShadow: `0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 ${c}22`, animation: 'rise 1.2s ease both' } },
+        h('div', { style: { position: 'absolute', top: -60, [EN() ? 'left' : 'right']: -40, width: 220, height: 220, borderRadius: '50%', background: `radial-gradient(circle closest-side, ${c}30, transparent)`, pointerEvents: 'none' } }),
+        quiet ? h('div', { style: { position: 'relative', width: 200 * MM_K, height: 112, flex: 'none' } }, h('div', { style: { position: 'absolute', left: 0, top: 9 } }, h(O.Candle, { k: MM_K, len: 400, fx: CFG.ambientFx })))
+          : h('div', { style: { position: 'relative', width: 80, height: 80, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 52, lineHeight: 1, borderRadius: '50%', background: `radial-gradient(circle at 50% 35%, ${c}50, ${o.deep} 72%)`, border: `1.5px solid ${c}80`, boxShadow: `0 0 30px ${c}40` } }, h(O.Glyph, { k: o.key, c, s: 54, w: 5 })),
+        h('div', { style: { position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 } },
+          h('span', { style: { fontSize: 38, fontWeight: 800, lineHeight: 1, color: '#fff', whiteSpace: 'nowrap', textShadow: `0 0 24px ${c}55` } }, quiet ? o.title : o.greet),
+          h('span', { style: { fontSize: 17, color: c, whiteSpace: 'nowrap' } }, quiet ? o.greet : (eve ? tr('ערב ', 'Eve of ') : '') + o.title + ' · ' + tr('מנהלת החלל', 'Space Program Office')))));
+    }
     /** Yizkor on the home wall: a lit candle and a line under the emblem, all day on a memorial day. */
     memorialCard() {
-      const k = CFG.lang + CFG.ambientFx;
+      const k = CFG.lang + CFG.ambientFx + this.memorialKey();
       if (this._mm && this._mmK === k) return this._mm;
       this._mmK = k;
-      const O = this._O || (this._O = window.makeWallOverlays(React));
+      const O = this._O || (this._O = window.makeWallOverlays(React)), W = O.MM_TEXT[this.memorialKey()] || O.MM_TEXT.oct7;
       return (this._mm = h('div', { key: 'mm', 'data-w': 'memorial', style: { flex: 'none', alignSelf: 'center', position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 22, height: 112, padding: EN() ? '0 44px 0 30px' : '0 30px 0 44px', borderRadius: 26, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(50,36,22,.55), rgba(10,14,26,.8))', border: '1px solid rgba(233,184,114,.32)', boxShadow: '0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,228,186,.10)', animation: 'rise 1.2s ease both' } },
         h('div', { style: { position: 'absolute', top: -60, [EN() ? 'left' : 'right']: -40, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,180,100,.18), transparent)', pointerEvents: 'none' } }),
         h('div', { style: { position: 'relative', width: 200 * MM_K, height: 112, flex: 'none' } },
@@ -692,8 +744,8 @@
           h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, lineHeight: 1 } },
             h('span', { style: { fontSize: 40, fontWeight: 800, color: '#f6efe3', letterSpacing: EN() ? 0 : '.02em', textShadow: '0 0 24px rgba(255,190,110,.25)' } }, tr('יזכור', 'We Remember')),
             h('span', { style: { width: 1.5, height: 34, background: 'rgba(233,184,114,.5)' } }),
-            h('span', { dir: 'ltr', style: { fontFamily: "'Lexend',sans-serif", fontSize: 44, fontWeight: 500, color: '#e9b872', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr('7/10', 'Oct 7'))),
-          h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr('מנהלת החלל מרכינה ראש לזכר הנרצחים והנופלים', 'In memory of those murdered and fallen on October 7, 2023')))));
+            h('span', { dir: W.lex ? 'ltr' : null, style: { fontFamily: W.lex ? "'Lexend',sans-serif" : 'Heebo, sans-serif', fontSize: W.lex ? 44 : 36, fontWeight: W.lex ? 500 : 800, color: '#e9b872', whiteSpace: 'nowrap', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr(W.tag[0], W.tag[1]))),
+          h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr(W.line[0], W.line[1])))));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
@@ -843,6 +895,7 @@
       // Events that have ended drop out between feed updates too; "עכשיו" while one runs, "הבא" only for the next to come.
       let nextTagged = false;
       const directorate = D.directorate.filter((d) => !d.end || Date.parse(d.end) > now).map((d, i) => {
+        if (d.occ) return this.occasionRow(d, i, d.start && Date.parse(d.start) <= now);
         const tag = d.start && Date.parse(d.start) <= now ? tr('עכשיו', 'NOW') : nextTagged ? '' : ((nextTagged = true), tr('הבא', 'NEXT'));
         return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: d.img ? '62px 58px minmax(0,1fr) auto' : '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
           h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } },
@@ -869,9 +922,10 @@
           D.people.length ? this.spotlight(D, pIdx) : quiet(tr('אין ימי הולדת או רגעים אישיים בימים הקרובים', 'No birthdays or personal moments in the coming days')),
           D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null) : null);
 
+      let occ = null;
       const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
         h('div', { 'data-w': 'emblem', style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest, entering ? 'wl' : back ? 'back' : '')),
-        this.memorialOn() ? this.memorialCard() : null);
+        this.memorialOn() ? this.memorialCard() : (occ = this.occasionToday()) ? this.occasionCard(occ) : null);
 
       const left = !showNews ? null : h('section', { key: 'l', 'data-w': 'news', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, enW('wlPanelIn', 2600, leftFirst)) },
         this.sheen(3, 9), seam('insetInlineStart', 8400), edgeFlash(8450),

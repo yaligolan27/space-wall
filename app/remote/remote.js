@@ -1099,7 +1099,7 @@
       const evById = new Map(events.map((e) => [e.id, e]));
       const wallEvRows = [...W.events.map((id) => [id, false]), ...W.eventsWaiting.map((id) => [id, true])].filter(([id]) => evById.has(id)).map(([id, waiting]) => {
         const e = evById.get(id), d = parse(e.date < ti ? ti : e.date), running = Date.parse(e.startsAt) <= nowT;
-        return { key: e.id, day: d.getDate(), dow: e.date <= ti ? 'היום' : DOWS[d.getDay()], img: e.photo || null, title: e.title, op: waiting ? 0.62 : 1,
+        return { key: e.id, day: d.getDate(), dow: e.date <= ti ? 'היום' : DOWS[d.getDay()], img: e.photo || null, title: (e.icon ? e.icon + ' ' : '') + e.title, op: waiting ? 0.62 : 1,
           sub: [running ? 'מתקיים עכשיו' : '', evWhen(e), e.place, e.big ? 'מודעה מנהלת' : '', waiting ? 'מחכה למקום בצג (יש בו מקום ל-' + EVENT_ROWS + ')' : ''].filter(Boolean).join(' · '),
           editable: true, edit: () => this.openEvent(e), del: () => this.delEvent(e), delLabel: 'מחיקת האירוע ' + e.title };
       });
@@ -1220,7 +1220,7 @@
         openLifeNew: () => this.openLife(), openEventNew: () => this.openEvent(),
         showEvents: evShowList.map((e) => { const live = tk && tk.eventId === e.id, d = parse(e.date), multi = lastOf(e) > e.date;
           const day = e.date === ti ? 'היום' : e.date < ti ? 'מתקיים עכשיו' : 'יום ' + DOWS[d.getDay()] + ' ' + dm(e.date);
-          return { key: e.id, title: e.title, when: [multi && e.date > ti ? '' : day, evWhen(e), e.place].filter(Boolean).join(' · '),
+          return { key: e.id, title: (e.icon ? e.icon + ' ' : '') + e.title, when: [multi && e.date > ti ? '' : day, evWhen(e), e.place].filter(Boolean).join(' · '),
             btn: live ? 'מוצג עכשיו' : soonish(e) ? 'הצגה עכשיו' : 'הצצה ל-10 דק׳', show: () => { if (!live) this.showEvent(e); this.closeSheet(); }, edit: () => this.openEvent(e) }; }),
         noShowEvents: evShowList.length === 0,
 

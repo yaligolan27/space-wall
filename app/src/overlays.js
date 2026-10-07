@@ -592,8 +592,27 @@ window.makeWallOverlays = (React) => {
   // k) and joins it, while the dark lifts.
   // Light on purpose (the lobby computer, phones): CSS animations on transform/opacity, WAAPI for the way out.
   const MM_K = 1.15;
-  const Memorial = ({ fx, preview, leaving, target, onDone }) => {
-    const en = EN(), CX = en ? 1520 : 400, CY = 430;
+  // The Yizkor's words for each memorial day (lib/occasions.ts keys; the server's /api/live `memorial.key`): the tag beside
+  // the title (a date in Lexend, or the day's name), the text after "יזכור", the line on the home wall's card and the foot.
+  const MM_TEXT = {
+    oct7: { tag: ['7/10', 'Oct 7'], lex: true,
+      text: ['עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
+        'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.'],
+      line: ['מנהלת החלל מרכינה ראש לזכר הנרצחים והנופלים', 'In memory of those murdered and fallen on October 7, 2023'],
+      foot: ['כ״ב בתשרי תשפ״ד · 7.10.2023', 'OCTOBER 7, 2023'] },
+    shoah: { tag: ['יום השואה', 'Holocaust Remembrance Day'],
+      text: ['עם ישראל את ששת מיליוני היהודים שנרצחו בשואה, את הקהילות שנחרבו ואת גבורת הלוחמים, המורדים וחסידי אומות העולם.',
+        'Israel remembers the six million Jews murdered in the Holocaust, the communities destroyed, and the heroism of the fighters, the rebels and the Righteous Among the Nations.'],
+      line: ['מנהלת החלל מרכינה ראש לזכר קורבנות השואה', 'In memory of the victims of the Holocaust'],
+      foot: ['יום הזיכרון לשואה ולגבורה', 'HOLOCAUST AND HEROISM REMEMBRANCE DAY'] },
+    zikaron: { tag: ['יום הזיכרון', 'Memorial Day'],
+      text: ['עם ישראל את בניו ובנותיו, חללי מערכות ישראל ונפגעי פעולות האיבה, אשר מסרו את נפשם על קיומה ועצמאותה של מדינת ישראל.',
+        'Israel remembers its sons and daughters, the fallen of Israel\'s wars and the victims of terror, who gave their lives for the existence and independence of the State of Israel.'],
+      line: ['מנהלת החלל מרכינה ראש לזכר החללים ונפגעי פעולות האיבה', 'In memory of the fallen and the victims of terror'],
+      foot: ['יום הזיכרון לחללי מערכות ישראל ולנפגעי פעולות האיבה', 'MEMORIAL DAY FOR THE FALLEN AND VICTIMS OF TERROR'] },
+  };
+  const Memorial = ({ fx, preview, leaving, target, onDone, which }) => {
+    const en = EN(), CX = en ? 1520 : 400, CY = 430, W = MM_TEXT[which] || MM_TEXT.oct7, T = (pair) => tr(pair[0], pair[1]);
     const r = useRef({}).current, set = (n) => r['_' + n] || (r['_' + n] = (el) => { r[n] = el; });
     const cb = useRef(onDone); cb.current = onDone;
     useEffect(() => {
@@ -645,7 +664,7 @@ window.makeWallOverlays = (React) => {
             const title = h('div', { style: { position: 'relative', lineHeight: 1 } },
               h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 136 : 210, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
               h('div', { style: { position: 'relative', fontSize: en ? 136 : 210, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember')));
-            const date = (size, extra) => h('div', { dir: 'ltr', style: rise(1600, 4200, Object.assign({ fontFamily: LEX, fontSize: size, fontWeight: 600, lineHeight: 1, letterSpacing: '.02em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, tr('7/10', 'Oct 7'));
+            const date = (size, extra) => h('div', { dir: W.lex ? 'ltr' : null, style: rise(1600, 4200, Object.assign({ fontFamily: W.lex ? LEX : 'Heebo, sans-serif', fontSize: W.lex ? size : Math.round(size * (en ? 0.62 : 0.76)), fontWeight: W.lex ? 600 : 800, lineHeight: 1, letterSpacing: '.02em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, T(W.tag));
             const rule = h('div', { style: { marginTop: 30, width: '100%', height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.5) 70%, rgba(233,184,114,.15))`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } });
             const row = en ? h('div', null, title, date(84, { marginTop: 14 }))
               : h('div', { style: { display: 'flex', alignItems: 'center', gap: 40 } }, title,
@@ -654,10 +673,93 @@ window.makeWallOverlays = (React) => {
             return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'stretch' } }, row, rule);
           })(),
           h('div', { style: rise(1200, 4400, { marginTop: 34, fontSize: 34, fontWeight: 300, lineHeight: 1.5, color: '#ece4d6', maxWidth: 860, textWrap: 'pretty' }) },
-            tr('עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
-              'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.')),
+            T(W.text)),
           h('div', { style: rise(1200, 5000, { marginTop: 28, fontSize: 30, fontWeight: 500, color: '#e9b872', maxWidth: 860 }) }, tr('מנהלת החלל מרכינה ראש · יהי זכרם ברוך', 'The Space Program Office bows its head · May their memory be a blessing'))),
-        h('div', { style: rise(1200, 5500, { fontFamily: MONO, fontSize: 18, letterSpacing: '.2em', color: 'rgba(200,184,156,.6)' }) }, tr('כ״ב בתשרי תשפ״ד · 7.10.2023', 'OCTOBER 7, 2023'))));
+        h('div', { style: rise(1200, 5500, { fontFamily: MONO, fontSize: 18, letterSpacing: '.2em', color: 'rgba(200,184,156,.6)' }) }, T(W.foot))));
+  };
+
+  // ---------- an occasion (lib/occasions.ts): a holiday, a national day or a day of space, on the whole wall ----------
+  // In the half-hourly celebrations while the wall greets it (wall.js). Each occasion brings its glyph and two colours; the
+  // kind sets the scene: a holiday's glyphs float up like lanterns, a national day flies blue stripes and a slowly turning
+  // Star of David, a day of space sends a craft across the stars. The glyph sits in a breathing medallion on one side and the
+  // greeting takes the reading side. Light on purpose: CSS animations on transform and opacity only, ~20 elements.
+  const STAR = (c, w) => h('svg', { viewBox: '-50 -50 100 100', width: '100%', height: '100%', style: { display: 'block', overflow: 'visible' } },
+    h('path', { d: 'M0,-46 L39.8,23 L-39.8,23 Z M0,46 L-39.8,-23 L39.8,-23 Z', fill: 'none', stroke: c, strokeWidth: w, strokeLinejoin: 'round' }));
+  // Each occasion's glyph (lib/occasions.ts keys), drawn as line art in its colour: the same on every screen (an emoji
+  // differs from one computer to the next, and some draw a menorah in a purple box). Parts: [path, how] where how is
+  // 's' a line, 'f' a line over a faint fill, 'F' solid.
+  const menorah = (() => {
+    const p = [['M30 92 H70', 's'], ['M50 92 V40', 's']];
+    for (const r of [12, 24, 36]) p.push([`M${50 - r} 30 V40 A${r} ${r * 0.8} 0 0 0 ${50 + r} 40 V30`, 's']);
+    for (const x of [14, 26, 38, 62, 74, 86]) p.push([`M${x} 22 c3 3 3 7 0 7 c-3 0 -3 -4 0 -7 z`, 'F']);
+    p.push(['M50 12 c3.5 3.5 3.5 8 0 8 c-3.5 0 -3.5 -4.5 0 -8 z', 'F'], ['M50 20 V30', 's']);
+    return p;
+  })();
+  const candle = [['M40 44 H60 V90 H40 Z', 'f'], ['M50 44 V38', 's'], ['M50 14 c7 8 9 15 3 20 c-4 3 -10 1 -10 -5 c0 -5 4 -9 7 -15 z', 'F']];
+  const GLYPHS = {
+    hanukkah: menorah,
+    'rosh-hashana': [['M50 30 C35 18 12 28 16 52 C19 75 36 90 50 84 C64 90 81 75 84 52 C88 28 65 18 50 30 Z', 'f'], ['M50 30 C50 22 53 15 58 10', 's'], ['M54 21 C62 9 76 10 79 14 C71 23 61 25 54 21 Z', 'F']],
+    'yom-kippur': [['M14 58 C28 40 56 38 70 46 L88 38 L82 54 C74 72 44 76 26 66 Z', 'f'], ['M38 52 C44 30 60 18 82 16 C74 32 64 44 52 52', 'f'], ['M86 41 L96 38', 's'], ['M92 39 c2 -5 6 -6 8 -5', 's']],
+    sukkot: [['M20 90 V40 M80 90 V40', 's'], ['M12 40 H88', 's'], ['M12 40 L22 28 L32 40 L42 28 L52 40 L62 28 L72 40 L82 28 L90 38', 's'], ['M34 40 V52 M50 40 V58 M66 40 V50', 's'], ['M34 56 a4 4 0 1 0 0.1 0 M50 62 a4 4 0 1 0 0.1 0 M66 54 a4 4 0 1 0 0.1 0', 'F']],
+    'simchat-torah': [['M33 26 H67 V74 H33 Z', 'f'], ['M27 14 V86 M73 14 V86', 's'], ['M40 38 H60 M40 48 H60 M40 58 H54', 's']],
+    'tu-bishvat': [['M50 40 m-30 0 a30 28 0 1 0 60 0 a30 28 0 1 0 -60 0', 'f'], ['M50 92 V56 M50 72 L38 60 M50 66 L62 54', 's']],
+    purim: [['M16 30 C30 24 70 24 84 30 C84 60 72 82 50 84 C28 82 16 60 16 30 Z', 'f'], ['M30 46 Q37 38 44 46 M56 46 Q63 38 70 46', 's'], ['M36 62 Q50 76 64 62', 's'], ['M16 30 L8 18 M84 30 L92 18', 's']],
+    pesach: [['M30 16 H70 C70 44 61 56 50 56 C39 56 30 44 30 16 Z', 's'], ['M32 30 H68 C67 46 59 53 50 53 C41 53 33 46 32 30 Z', 'F'], ['M50 56 V82 M34 86 H66', 's']],
+    'lag-baomer': [['M50 12 C62 30 76 44 70 66 C66 80 56 84 50 84 C40 84 30 78 30 64 C30 50 42 46 44 34 C48 44 54 48 54 56 C60 46 56 30 50 12 Z', 'f'], ['M22 94 L78 82 M22 82 L78 94', 's']],
+    'yom-yerushalayim': [['M12 88 V58 H88 V88', 's'], ['M12 58 V50 H20 V58 M28 58 V50 H36 V58 M64 58 V50 H72 V58 M80 58 V50 H88 V58', 's'], ['M34 58 C34 34 66 34 66 58', 'f'], ['M50 36 V24', 's'], ['M44 88 V74 A6 6 0 0 1 56 74 V88', 's']],
+    shavuot: (() => { const p = [['M50 94 V18', 's']]; for (let i = 0; i < 5; i++) { const y = 26 + i * 12; p.push([`M50 ${y + 6} C42 ${y + 4} 38 ${y - 2} 38 ${y - 6} C46 ${y - 4} 50 ${y} 50 ${y + 6} Z`, 'F'], [`M50 ${y + 6} C58 ${y + 4} 62 ${y - 2} 62 ${y - 6} C54 ${y - 4} 50 ${y} 50 ${y + 6} Z`, 'F']); } return p; })(),
+    'tu-beav': [['M50 84 C20 62 12 44 22 30 C32 18 46 22 50 34 C54 22 68 18 78 30 C88 44 80 62 50 84 Z', 'f']],
+    gagarin: [['M50 8 C64 22 66 44 62 66 H38 C34 44 36 22 50 8 Z', 'f'], ['M50 38 m-7 0 a7 7 0 1 0 14 0 a7 7 0 1 0 -14 0', 's'], ['M38 54 L24 74 L38 70 M62 54 L76 74 L62 70', 's'], ['M43 72 Q50 94 57 72', 'F']],
+    'space-week': [['M40 40 H60 V60 H40 Z', 'f'], ['M10 38 H32 V62 H10 Z M68 38 H90 V62 H68 Z', 'f'], ['M32 50 H40 M60 50 H68 M21 38 V62 M79 38 V62', 's'], ['M50 40 V30 M42 26 Q50 18 58 26', 's']],
+    'tisha-beav': candle, columbia: candle, oct7: candle, shoah: candle, zikaron: candle,
+    atzmaut: [['M50 4 L89.8 73 L10.2 73 Z M50 96 L10.2 27 L89.8 27 Z', 's']],
+  };
+  const Glyph = ({ k, c, s, w }) => h('svg', { viewBox: '0 0 100 100', width: s, height: s, style: { display: 'block', overflow: 'visible', filter: `drop-shadow(0 0 ${Math.max(3, s / 14)}px ${c}aa)` } },
+    (GLYPHS[k] || candle).map(([d, how], i) => h('path', { key: i, d, fill: how === 'F' ? c : how === 'f' ? c + '30' : 'none', stroke: how === 'F' ? 'none' : c, strokeWidth: w || 5, strokeLinecap: 'round', strokeLinejoin: 'round' })));
+
+  const OccasionMoment = ({ occ, fx }) => {
+    const o = occ, c = o.color, en = EN(), MX = en ? 1430 : 490, MY = 520, kind = o.kind;
+    const space = kind === 'space', head = space ? o.title : o.greet, sub = space ? o.greet : o.title;
+    const big = head.length > 16 ? 104 : head.length > 11 ? 128 : 156;
+    const side = en ? { left: 150 } : { right: 150 };
+    const scene = [];
+    if (kind === 'holiday' && fx) for (let i = 0; i < 16; i++) {
+      const x = ((i * 137.5 + 40) % 1840), sz = 44 + ((i * 29) % 46), dur = 16 + ((i * 7) % 10);
+      scene.push(h('div', { key: 'f' + i, style: { position: 'absolute', left: x, top: 1110, opacity: 0, willChange: 'transform,opacity', '--r': ((i % 5) - 2) * 14 + 'deg', animation: `occFloat ${dur}s linear ${-((i * 3.7) % dur)}s infinite` } }, h(Glyph, { k: o.key, c: i % 3 ? c : '#ffffff', s: sz, w: 4 })));
+    }
+    if (kind === 'holiday' || kind === 'national') for (let i = 0; i < 26; i++)
+      scene.push(h('span', { key: 's' + i, style: { position: 'absolute', left: (i * 211.7) % 1920, top: (i * 97.3) % 1080, width: i % 4 ? 3 : 5, height: i % 4 ? 3 : 5, borderRadius: '50%', background: i % 2 ? c : '#fff', boxShadow: `0 0 10px ${c}`, opacity: 0.5, animation: fx ? `twinkle ${3 + (i % 4)}s ease-in-out ${-(i * 0.7)}s infinite` : 'none' } }));
+    if (kind === 'national') {
+      const stripe = (top) => h('div', { key: 'st' + top, style: { position: 'absolute', left: -40, right: -40, top, height: 64, background: `linear-gradient(90deg, transparent, ${c} 18%, #2f6fd6 50%, ${c} 82%, transparent)`, opacity: 0.55, boxShadow: `0 0 50px ${c}88`, animation: 'wlDrawX 1600ms cubic-bezier(.16,1,.3,1) 300ms both' } });
+      scene.push(stripe(90), stripe(926));
+      scene.push(h('div', { key: 'mag', style: { position: 'absolute', left: MX - 430, top: MY - 430, width: 860, height: 860, opacity: 0.22, animation: fx ? 'spin 90s linear infinite' : 'none' } }, STAR(c, 2.2)));
+    }
+    if (space) {
+      scene.push(h('div', { key: 'stars', style: { position: 'absolute', left: 0, top: -512, width: 2432, height: 1592, opacity: 0.9, animation: fx ? 'tileX 200s linear infinite' : 'none' } },
+        h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${starTile()})`, backgroundSize: '512px 512px' } })));
+      if (fx) scene.push(h('div', { key: 'craft', style: { position: 'absolute', left: -120, top: 860, willChange: 'transform', animation: 'occCross 22s linear 1s infinite' } }, h('div', { style: { transform: 'rotate(60deg)' } }, h(Glyph, { k: 'gagarin', c, s: 70, w: 4 }))));
+    }
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: `url(${dither()}) 0 0/128px 128px repeat, radial-gradient(circle 900px at ${MX}px ${MY}px, ${c}38, ${o.deep}f0 55%, #02040a 100%)` } }),
+      h('div', { key: 'scene', style: { position: 'absolute', inset: 0, pointerEvents: 'none' } }, scene),
+      // the medallion: a ring of light turning around the glyph
+      h('div', { key: 'med', style: { position: 'absolute', left: MX - 280, top: MY - 280, width: 560, height: 560, animation: 'popIn 1.1s cubic-bezier(.2,1.3,.4,1) .3s both' } },
+        h('div', { style: { position: 'absolute', inset: -70, borderRadius: '50%', background: `radial-gradient(circle closest-side, ${c}40, transparent)`, animation: fx ? 'breathe 5s ease-in-out infinite' : 'none' } }),
+        h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', background: `conic-gradient(from 0deg, ${c}, transparent 30%, ${c}88 50%, transparent 80%, ${c})`, WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px))', mask: 'radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px))', animation: fx ? 'spin 14s linear infinite' : 'none' } }),
+        h('div', { style: { position: 'absolute', inset: 22, borderRadius: '50%', background: `radial-gradient(circle at 50% 35%, ${c}55, ${o.deep} 72%)`, border: `1px solid ${c}55`, boxShadow: `inset 0 0 80px ${o.deep}, 0 0 90px ${c}33`, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+          h(Glyph, { k: o.key, c: kind === 'national' ? '#ffffff' : c, s: 300, w: 3.4 }))),
+      // the words
+      h('div', { key: 'words', style: Object.assign({ position: 'absolute', top: 120, bottom: 120, width: 960, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start', gap: 0 }, side) },
+        h('span', { style: { fontSize: 34, fontWeight: 600, color: c, letterSpacing: en ? '.06em' : '.02em', animation: 'rise .9s ease .5s both' } },
+          space ? tr('היום מציינים', 'Today we mark') : tr('מנהלת החלל מאחלת', 'The Space Program Office wishes you')),
+        h('span', { style: { marginTop: 18, fontSize: big, fontWeight: 800, lineHeight: 1.05, color: '#fff', textWrap: 'balance', textShadow: `0 0 50px ${c}66, 0 6px 30px rgba(0,0,0,.5)`, animation: 'rise 1.1s cubic-bezier(.16,1,.3,1) .8s both' } }, head),
+        h('div', { style: { marginTop: 34, width: 620, maxWidth: '100%', height: 3, borderRadius: 2, background: `linear-gradient(${en ? 90 : 270}deg, ${c}, ${c}00)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1300ms cubic-bezier(.16,1,.3,1) 1.3s both' } }),
+        h('span', { style: { marginTop: 30, fontSize: 52, fontWeight: 600, color: c, lineHeight: 1.2, textWrap: 'balance', animation: 'rise 1s ease 1.5s both' } }, sub),
+        h('div', { style: { marginTop: 70, display: 'flex', alignItems: 'center', gap: 18, animation: 'rise 1s ease 2s both' } },
+          h('img', { src: '/assets/emblem-3d.png', alt: '', style: { width: 84, height: 84, margin: '-10px -6px -10px -8px', filter: 'drop-shadow(0 0 14px rgba(90,160,255,.3))' } }),
+          h('span', { style: { fontSize: 26, fontWeight: 700, color: '#e6f1ff', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
+          h('span', { style: { fontFamily: MONO, fontSize: 16, color: 'rgba(230,241,255,.55)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL'))))
+    ]);
   };
 
   // ---------- small toast (e.g. "שוגר") ----------
@@ -739,5 +841,5 @@ window.makeWallOverlays = (React) => {
       out ? null : h('div', { key: 'edge', style: { position: 'absolute', inset: 14, zIndex: 2, borderRadius: 30, border: '1px solid rgba(212,242,92,.7)', pointerEvents: 'none', animation: 'wlEdge 1200ms ease 700ms both' } }));
   };
 
-  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, CustomScene, NewsMoment, Moment, Memorial, Candle };
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, CustomScene, NewsMoment, Moment, Memorial, Candle, MM_TEXT, OccasionMoment, Glyph };
 };

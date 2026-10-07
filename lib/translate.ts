@@ -143,7 +143,9 @@ export async function feedInEnglish(feed: Row, budgetMs: number): Promise<Row & 
   for (const n of feed.news || []) add(n.cat, n.title, n.dek, n.src, n.date);
   for (const t of feed.ticker || []) add(t.kind, t.date, t.name);
   for (const l of feed.launches || []) add(l.mission, l.vehicle, l.siteEn ? '' : l.site);
-  for (const d of feed.directorate || []) add(d.name, d.place, d.dow, d.mon);
+  // An occasion the office kept as added carries its English name (occ.en, lib/occasions.ts); one it renamed is translated.
+  for (const d of feed.directorate || []) add(d.occ?.en ? '' : d.name, d.place, d.dow, d.mon);
+  for (const o of feed.occasions || []) add(o.en ? '' : o.title);
   for (const p of feed.people || []) add(p.type, p.name, p.line);
   const T = await translateAll(texts, budgetMs), t = T.get;
 
@@ -158,7 +160,8 @@ export async function feedInEnglish(feed: Row, budgetMs: number): Promise<Row & 
     catImage: { ...feed.catImage, ...recolor(feed.catImage) },
     ticker: (feed.ticker || []).map((x: Row) => ({ ...x, kind: t(x.kind), date: t(x.date), name: t(x.name) })),
     launches: (feed.launches || []).map((l: Row) => ({ ...l, mission: t(l.mission), vehicle: t(l.vehicle), site: l.siteEn || t(l.site), status: LAUNCH_EN[l.code] || 'TBD' })),
-    directorate: (feed.directorate || []).map((d: Row) => ({ ...d, name: t(d.name), place: t(d.place), dow: t(d.dow), mon: t(d.mon) })),
+    directorate: (feed.directorate || []).map((d: Row) => ({ ...d, name: d.occ?.en || t(d.name), place: t(d.place), dow: t(d.dow), mon: t(d.mon) })),
+    occasions: (feed.occasions || []).map((o: Row) => ({ ...o, title: o.en || t(o.title), greet: o.greetEn })),
     people: (feed.people || []).map((p: Row) => ({ ...p, type: t(p.type), name: t(p.name), line: t(p.line) })),
     translated: { missing: T.missing, error: T.error },
   };

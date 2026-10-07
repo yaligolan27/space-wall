@@ -11,6 +11,7 @@ import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from './newsletter.js'
 import { storeNewsletterImages } from './newsletter-images.js';
 import { syncForumEvents } from './newsletter-forum.js';
 import { launchStream } from './launch-stream.js';
+import { occasionLook, occasionsBetween } from './occasions.js';
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { headers: { accept: 'text/html', 'user-agent': 'space-wall-remote/1.0' }, signal: AbortSignal.timeout(15000) });
@@ -212,8 +213,18 @@ function eventSlot(e: Row, M: Moments, t: number): { k: number; until: number } 
 // screen comes up by itself for the first minutes of every hour; the remote can show it, or end Yizkor early (kept in
 // `dismissed` as "memorial:<id>", so it is undoable). The 12:00 promo, the half-hourly celebrations and the space news
 // pause on those days.
-export const MEMORIALS = [{ id: 'oct7-2026', from: '2026-10-07', to: '2026-10-08', label: 'יזכור · 7 באוקטובר' }];
-export function memorialPeriod(now = new Date()) { const d = isoDateIL(now); return MEMORIALS.find(m => m.from <= d && d <= m.to) || null; }
+// The memorial days come from the year's occasions (lib/occasions.ts: 7/10, Holocaust Remembrance Day, Memorial Day);
+// MEMORIALS adds days by hand, and wins on its days (2026: Yizkor on 7/10 and 8/10). `key` picks the Yizkor's words.
+export const MEMORIALS = [{ id: 'oct7-2026', key: 'oct7', from: '2026-10-07', to: '2026-10-08', label: 'יזכור · 7 באוקטובר' }];
+let memDay = { d: '', m: null as null | { id: string; key: string; from: string; to: string; label: string } };
+export function memorialPeriod(now = new Date()) {
+  const d = isoDateIL(now);
+  if (memDay.d !== d) {
+    const o = occasionsBetween(d, d).find(x => x.kind === 'memorial');
+    memDay = { d, m: MEMORIALS.find(m => m.from <= d && d <= m.to) || (o ? { id: o.id, key: o.key, from: o.from, to: o.to, label: 'יזכור · ' + o.title } : null) };
+  }
+  return memDay.m;
+}
 /** The memorial on the wall now: today's, unless the remote ended it. */
 function memorialNow(st: Row, now: Date) { const m = memorialPeriod(now); return m && !(st.dismissed || []).includes('memorial:' + m.id) ? m : null; }
 /** dismissed, with `id` added: the newest 20 automatic moments, and the memorial ends however many came after them. */
@@ -293,7 +304,7 @@ export async function snapshot() {
     s.from('life_events').select('id,person_id,name,type,label,event_date,show_from,show_until,text_he,photo_mode,photo_url')
       .or(`event_date.gte.${addDays(today, -30)},show_until.gte.${today}`).lte('event_date', addDays(today, 400)).order('event_date'),
     // today's and later ones, and those still running (an event of several days)
-    s.from('directorate_events').select('id,title,starts_at,ends_at,place,takeover,photo_url').eq('approved', true)
+    s.from('directorate_events').select('id,title,starts_at,ends_at,place,takeover,photo_url,created_by').eq('approved', true)
       .or(`starts_at.gte.${dayStart},ends_at.gt.${dayStart}`).lt('starts_at', ilToIso(addDays(today, EVENTS_DAYS + 1), '00:00')).order('starts_at'),
     s.from('industry_events').select('id,name,kind,starts_on,ends_on,place_he,url').eq('approved', true)
       .gte('starts_on', addDays(today, -120)).lte('starts_on', addDays(today, EVENTS_DAYS)).order('starts_on'),
@@ -318,7 +329,8 @@ export async function snapshot() {
     people: (must(people, 'people') as Row[]).map(personOut),
     life: lifeRows,
     events: (must(events, 'events') as Row[]).map(e => ({ id: e.id, title: e.title, ...eventSpan(e), startsAt: new Date(e.starts_at).toISOString(),
-      endsAt: new Date(eventEnd(e)).toISOString(), place: e.place || '', big: !!e.takeover, photo: e.photo_url || null })),
+      endsAt: new Date(eventEnd(e)).toISOString(), place: e.place || '', big: !!e.takeover, photo: e.photo_url || null,
+      icon: occasionLook(e)?.icon || null })),
     // What the wall's people and events panels show now, worked out as the wall's feed does (lib/feed.ts); `waiting`
     // are due too but the panel is full.
     wall: {
@@ -332,7 +344,7 @@ export async function snapshot() {
     state: { design: (d => Object.assign(d, customMeta(d)))(withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) })), store: storeOrigin(), brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
     takeover: effectiveTakeover(st, big, now),
     stream: await launchStream(momentsOf(st.design).stream, st.dismissed, now.getTime()),
-    memorial: (() => { const m = memorialPeriod(now); return m ? { id: m.id, label: m.label, on: !!memorialNow(st, now) } : null; })(),
+    memorial: (() => { const m = memorialPeriod(now); return m ? { id: m.id, key: m.key, label: m.label, on: !!memorialNow(st, now) } : null; })(),
     history: (must(hist, 'history') as Row[]).map(h => ({ id: h.id, at: h.at, who: h.who, text: h.label, canRestore: Array.isArray(h.undo) && h.undo.length > 0 })),
   };
 }
