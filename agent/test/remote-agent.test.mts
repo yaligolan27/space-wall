@@ -3,7 +3,7 @@
 //
 //   npm test
 import { AgentInput, ApiError, TOOLS, apiErrorHe, brief, conversation } from '../../lib/remote-agent.js';
-import { DesignPatch, cssProblem, youtubeId } from '../../lib/remote-ops.js';
+import { DesignPatch, SceneIn, cssProblem, customMeta, liveDecor, scenesOf, youtubeId } from '../../lib/remote-ops.js';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -76,6 +76,22 @@ check('overloaded', /עמוס/.test(he(529, 'overloaded_error')) && /עמוס/.t
 check('timeout', /לא הספיק/.test(he(0, 'timeout')));
 check('offline', /אין כרגע חיבור/.test(he(0, 'network')));
 check('model', /המודל/.test(he(404, 'not_found_error', 'model: x')));
+
+// ---- the agent's own screens, decorations and remote buttons
+check('a screen needs a name and HTML', SceneIn.safeParse({ name: 'חנוכה', html: '<h1>חנוכה</h1>' }).success && !SceneIn.safeParse({ name: 'x', html: '  ' }).success);
+check('a screen schedule is checked', SceneIn.safeParse({ name: 'x', html: '<p>', schedule: { from: '2026-12-14', to: '2026-12-22', every: 60, secs: 30 } }).success
+  && !SceneIn.safeParse({ name: 'x', html: '<p>', schedule: { from: '2026-12-14', to: '2026-12-22', every: 1, secs: 30 } }).success);
+check('a too-long screen is refused', !SceneIn.safeParse({ name: 'x', html: 'a'.repeat(60_001) }).success);
+const dz = { scenes: [{ id: 'sc1', name: 'חנוכה', html: '<h1>חג</h1>', schedule: null, updated: 'x' }, { bad: 1 }],
+  decor: { id: 'dc1', name: 'סופגניות', html: '<i>🍩</i>', until: '2030-01-01T00:00:00.000Z' }, shortcuts: [{ label: 'חנוכה', prompt: 'תציג את מסך חנוכה' }] };
+const meta = customMeta(dz);
+check('the remote and the agent see screens without their HTML', meta.scenes.length === 1 && !('html' in meta.scenes[0]) && meta.scenes[0].size === 11 && !('html' in meta.decor));
+check('malformed screens are left out', scenesOf(dz).length === 1);
+check('decorations end on their date', !!liveDecor(dz.decor, Date.parse('2029-12-31')) && !liveDecor(dz.decor, Date.parse('2030-01-02')) && !liveDecor({ html: '' }));
+const bz = brief({ ...snap, state: { ...snap.state, design: { ...snap.state.design, ...meta } } }, 'מאיה');
+check('the brief lists the agent\'s screens, decorations and buttons, not their HTML',
+  bz.includes('"my_screens":[{"id":"sc1","name":"חנוכה"}]') && bz.includes('סופגניות') && bz.includes('my_remote_buttons') && !bz.includes('<h1>'));
+check('screen tools exist', ['save_screen', 'show_screen', 'delete_screen', 'get_custom_html', 'set_decorations', 'save_image', 'set_remote_shortcuts'].every(n => names.includes(n)));
 
 if (failures) { console.error(`${failures} failure(s)`); process.exit(1); }
 console.log('all agent tests passed');

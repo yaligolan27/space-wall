@@ -86,6 +86,8 @@
     { label: 'להזיז אירוע…', fill: 'תעביר/י את האירוע ' },
     { label: 'ידיעה חדשה מהאינטרנט…', fill: 'תמצא/י באינטרנט ידיעה חדשה על ' },
     { label: 'לייב של השיגור הבא', send: true },
+    { label: 'מסך חדש…', fill: 'תבנה/י מסך חדש של ' },
+    { label: 'קישוטים לצג…', fill: 'תוסיף/י לצג קישוטים של ' },
   ];
   const AGENT_FILES = 3, AGENT_TEXT = 20000;   // per message, as the server takes them (lib/remote-agent.ts)
 
@@ -517,6 +519,7 @@
       if (tk.kind === 'image') return 'תמונה' + (tk.caption ? ' · ' + tk.caption : '');
       if (tk.kind === 'stream') return 'שידור חי' + (tk.title ? ' · ' + tk.title : '');
       if (tk.kind === 'news') return 'חדשות החלל';
+      if (tk.kind === 'scene') return 'מסך: ' + (tk.name || '');
       return tpl(tk.type || (tk.person && tk.person.type)).head + (tk.person ? ' · ' + tk.person.name : '');
     }
 
@@ -888,7 +891,7 @@
         const j = await api('POST', { action: 'agent', text, files, images, history });
         const r = j.result || {};
         this.setState({ data: j.state, loadErr: '' });
-        reply = { text: r.reply || 'בוצע.', actions: r.done || [], undoId: r.undoId || null, err: !!r.error && !(r.done || []).length, proposals: r.proposals || [] };
+        reply = { text: r.reply || 'בוצע.', actions: r.done || [], undoId: r.undoId || null, err: !!r.error && !(r.done || []).length, proposals: r.proposals || [], previews: r.previews || [] };
       } catch (e) {
         if (e.auth) this.setState({ auth: false, data: null, gateErr: e.message });
         const fresh = e.auth ? null : await this.refresh();
@@ -906,6 +909,14 @@
       mark('busy');
       const label = p.kind === 'news' ? 'הידיעה נוספה לצג' : p.kind === 'image' ? 'התמונה מוצגת על כל המסך' : 'השידור מוצג על כל המסך';
       try { await this.run(p.action, p.args, label); mark('done'); } catch (e) { mark(''); }
+    }
+    /** A 1920×1080 page at a sixth of its size (a decoration over a dark stage, as it looks on the wall). */
+    previewFrame(p) {
+      if (!window.customDoc) return null;
+      const doc = window.customDoc(p.html, { store: (this.D && this.D.state && this.D.state.store) || '', transparent: p.kind === 'decor' });
+      return el('div', 'position:relative;width:320px;height:180px;max-width:100%;overflow:hidden;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:radial-gradient(ellipse at 50% 50%,#0c1d3d,#040914);direction:ltr', null,
+        el('iframe', { position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, border: 0, transform: 'scale(.16667)', transformOrigin: '0 0', pointerEvents: 'none', background: 'transparent' },
+          { srcDoc: doc, sandbox: 'allow-scripts', title: p.name, tabIndex: -1, loading: 'lazy' }));
     }
     dismiss(m, p) { this.setState((st) => ({ messages: st.messages.map((x) => (x.id === m.id ? Object.assign({}, x, { proposals: x.proposals.map((y) => (y.id === p.id ? Object.assign({}, y, { state: 'no' }) : y)) }) : x)) })); }
     async undoReply(m) {
@@ -1039,6 +1050,19 @@
       const lst = D && D.stream, streamItems = !lst ? [] : [
         lst.mode === 'full' ? { label: 'שידור השיגור לצד', sub: 'שידור חי על כל המסך · ' + lst.title, dot: '#ff5a4f', bg: 'rgba(255,90,79,.10)', border: 'rgba(255,120,110,.55)', go: () => this.streamCtl(true) } : null,
         { label: 'סיום שידור השיגור', sub: (lst.mode === 'full' ? 'על כל המסך' : 'בפינת חדשות החלל') + ' · ' + lst.title, dot: '#ff5a4f', bg: 'rgba(255,90,79,.10)', border: 'rgba(255,120,110,.55)', go: () => this.streamCtl(false) }].filter(Boolean);
+      // The agent's own screens, decorations and buttons (lib/remote-ops.ts design.scenes, design.decor, design.shortcuts).
+      const mine = [
+        ...(design.shortcuts || []).map((b, i) => ({ label: b.label, sub: 'כפתור של הסוכן · ' + b.prompt.slice(0, 50), dot: '#c9a7ff', bg: 'rgba(201,167,255,.08)', border: 'rgba(201,167,255,.4)',
+          go: () => { this.setState({ chatOpen: true }); this.sendChat(b.prompt); } })),
+        ...(design.scenes || []).map((sc) => {
+          const up = tk && tk.kind === 'scene' && tk.sceneId === sc.id;
+          return { label: up ? 'הורדת המסך' : sc.name, sub: up ? 'מוצג עכשיו · ' + sc.name : 'מסך של הסוכן' + (sc.schedule ? ' · מתוזמן ' + sc.schedule.from.slice(8) + '.' + Number(sc.schedule.from.slice(5, 7)) + '–' + sc.schedule.to.slice(8) + '.' + Number(sc.schedule.to.slice(5, 7)) : ' · לחיצה מציגה ל-5 דקות'),
+            dot: '#c9a7ff', bg: up ? 'rgba(201,167,255,.16)' : 'rgba(14,28,58,.55)', border: up ? 'rgba(201,167,255,.7)' : 'rgba(150,190,240,.16)',
+            go: () => (up ? this.endTk() : this.run('showScene', { id: sc.id, minutes: 5 }, 'על כל המסך: ' + sc.name).catch(() => {})) };
+        }),
+        ...(design.decor ? [{ label: 'הסרת הקישוטים', sub: 'בצג עכשיו: ' + design.decor.name + (design.decor.until ? ' · עד ' + new Date(Date.parse(design.decor.until) - 1).toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric', timeZone: 'Asia/Jerusalem' }) : ''), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)',
+          go: () => window.confirm('להסיר את "' + design.decor.name + '" מהצג? אפשר להחזיר בהיסטוריה.') && this.run('setDecor', { html: '' }, 'הקישוטים הוסרו').catch(() => {}) }] : []),
+      ];
       const actGroups = [
         { title: 'להציג עכשיו על כל המסך', items: [...streamItems, ...memItems,
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
@@ -1051,6 +1075,7 @@
           { label: 'אירועים', sub: 'נכנס ללוח האירועים בצג', dot: ICE, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openEvent() },
           { label: 'ניוזלטר השבוע', sub: nl && nl.range ? 'בצג: ' + nl.range : 'עדיין לא יובא גיליון', dot: LIME, bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('newsletter', { url: '' }) },
           { label: 'רשימת האנשים', sub: activeP.length ? activeP.length + ' ברשימה · הוספה, עריכה וייבוא' : 'הרשימה ריקה · הוספה או ייבוא מאקסל', dot: WARM, bg: 'rgba(14,28,58,.55)', border: activeP.length ? 'rgba(150,190,240,.16)' : 'rgba(233,184,114,.45)', go: () => this.goPeople() }] },
+        ...(mine.length ? [{ title: 'מה שהסוכן בנה', items: mine }] : []),
         { title: 'עוד', items: [
           { label: design.lang === 'en' ? 'חזרה לעברית' : 'הצג באנגלית', sub: s.langBusy ? 'מתרגם את הצג…' : design.lang === 'en' ? 'הצג מוצג עכשיו באנגלית' : 'כל הצג באנגלית, למשלחות מחו״ל', dot: '#7fe0c4', bg: design.lang === 'en' ? 'rgba(127,224,196,.09)' : 'rgba(14,28,58,.55)', border: design.lang === 'en' ? 'rgba(127,224,196,.45)' : 'rgba(150,190,240,.16)', go: () => this.setLang(design.lang === 'en' ? 'he' : 'en') },
           { label: 'תזמונים ואוטומציות', sub: 'מה עולה לבד על כל המסך, כל כמה זמן ולכמה זמן', dot: '#6fd6ea', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('moments') },
@@ -1159,9 +1184,12 @@
           props: (m.proposals || []).map((p) => Object.assign({}, p, { kindLabel: p.kind === 'news' ? 'ידיעה לניוזלטר בצג' : p.kind === 'image' ? 'תמונה על כל המסך' : 'שידור חי על כל המסך',
             el: p.image ? imgEl(p.image, { display: 'block', width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: 10 }) : null,
             approve: () => this.approve(m, p), dismiss: () => this.dismiss(m, p) })),
+          // a screen or decoration the agent made: a small live picture of it (the same sandboxed page as on the wall)
+          views: (m.previews || []).map((p) => Object.assign({}, p, { isScene: p.kind === 'scene', label: p.kind === 'scene' ? 'מסך: ' + p.name : 'קישוטים בצג: ' + p.name,
+            frame: this.previewFrame(p), show: () => this.run('showScene', { id: p.id, minutes: 5 }, 'על כל המסך: ' + p.name).catch(() => {}) })),
           files: (m.files || []).map((fl) => Object.assign({}, fl, { isImg: fl.kind === 'image', isDoc: fl.kind !== 'image', el: fl.src ? imgEl(fl.src, { display: 'block', maxWidth: 180, maxHeight: 120, borderRadius: 10, border: '1px solid rgba(150,190,240,.2)' }) : null })) })),
         agentReady: agentOn, agentSub: !D ? '' : agent.ready ? 'כתבו מה לשנות, והסוכן יבצע. אפשר לבטל כל שינוי.' : 'צריך לחבר פעם אחת מפתח API',
-        greeting: agentOn && !s.messages.length ? 'שלום' + (s.who ? ' ' + s.who : '') + '! כתבו כאן מה לשנות בצג, ואבצע את זה מיד: להוסיף יום הולדת או שמחה, להזיז אירוע, להעלות הודעה דחופה, לעדכן את רשימת האנשים, לשנות משהו בעיצוב, להביא ידיעה או תמונה מהאינטרנט (הן עולות לצג רק אחרי אישור שלכם) ולפתוח שידור חי של שיגור. כל שינוי אפשר לבטל. אפשר גם לצרף אקסל, CSV או תמונה.' : '',
+        greeting: agentOn && !s.messages.length ? 'שלום' + (s.who ? ' ' + s.who : '') + '! כתבו כאן מה לשנות בצג, ואבצע את זה מיד: להוסיף יום הולדת או שמחה, להזיז אירוע, להעלות הודעה דחופה, לעדכן את רשימת האנשים, לשנות משהו בעיצוב, להביא ידיעה או תמונה מהאינטרנט (הן עולות לצג רק אחרי אישור שלכם) ולפתוח שידור חי של שיגור. אני יכול גם לבנות מסכים חדשים (למשל לחג), להוסיף קישוטים מונפשים לצג ולהוסיף לשלט כפתורים משלי. כל שינוי אפשר לבטל. אפשר גם לצרף אקסל, CSV או תמונה.' : '',
         agentBusy: s.agentBusy, busyText: 'עובד על זה…' + (s.agentBusy && now - s.agentAt >= 5000 ? ' ' + Math.round((now - s.agentAt) / 1000) + ' שנ׳' : ''),
         showSuggest: agentOn && !s.messages.length && !s.agentBusy,
         suggestions: SUGGESTIONS.map((sg) => ({ label: sg.label, send: () => (sg.send ? this.sendChat(sg.label) : this.setState({ chatInput: sg.fill }, () => { const t = document.getElementById('agent-input'); if (t) { t.focus(); t.setSelectionRange(sg.fill.length, sg.fill.length); } })) })),
@@ -1561,6 +1589,10 @@
                 m.hasUndo ? el('div', 'display:flex;padding-top:6px', null, m.undone
                   ? el('span', 'font-size:13px;color:#8b9dbd', null, 'בוטל')
                   : el('button', 'min-height:34px;padding:0 14px;border-radius:10px;border:1px solid rgba(150,190,240,.25);background:transparent;color:#e6f1ff;font-size:13px;font-weight:600;cursor:pointer', { onClick: m.undo }, 'ביטול')) : null) : null,
+              m.views.map((p) => el('div', 'display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:rgba(4,9,20,.6);border:1px solid rgba(201,167,255,.4)', { key: p.kind + p.id },
+                el('span', 'font-size:12px;color:#c9a7ff;font-weight:600', null, p.label),
+                p.frame,
+                p.isScene ? el('button', 'align-self:flex-start;min-height:38px;padding:0 14px;border-radius:10px;border:none;background:#c9a7ff;color:#140a26;font-size:14px;font-weight:800;cursor:pointer', { onClick: p.show }, 'להציג בצג') : null)),
               m.props.map((p) => el('div', `display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;background:rgba(4,9,20,.6);border:1px solid ${p.state === 'done' ? 'rgba(143,224,184,.5)' : 'rgba(212,242,92,.4)'};opacity:${p.state === 'no' ? 0.5 : 1}`, { key: p.id },
                 el('span', 'font-size:12px;color:#d4f25c;font-weight:600', null, p.kindLabel + ' · מחכה לאישור'),
                 p.el,

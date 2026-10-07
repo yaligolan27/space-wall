@@ -21,7 +21,8 @@ async function fetchText(url: string): Promise<string> {
 // ---- design (the wall's URL options, now stored) ----------------------------------------------------
 export const PANELS = ['news', 'events', 'people', 'ticker', 'launches'] as const;
 export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en', vw: false,
-  css: '', headline: '', headlineEn: '', hide: [] as string[], news: [] as Row[] };
+  css: '', headline: '', headlineEn: '', hide: [] as string[], news: [] as Row[],
+  scenes: [] as Row[], decor: null as Row | null, shortcuts: [] as Row[] };
 
 /** The agent's style layer (design.css), which the wall puts in a <style> after its own: it can recolor, resize, move
  *  or hide, never load anything (no url(), @import or fonts from outside) and never leave its <style>. */
@@ -42,6 +43,45 @@ export const DesignPatch = z.object({
   headline: z.string().trim().max(80), headlineEn: z.string().trim().max(80),
   hide: z.array(z.enum(PANELS)).max(PANELS.length),
 }).partial().strict();
+
+// ---- the agent's own screens, decorations and remote shortcuts (design.scenes, design.decor, design.shortcuts) ----------
+// Screens and decorations are HTML the agent writes. The wall runs them in a sandboxed iframe (app/src/custom-doc.js): no
+// access to the wall's page, its storage or the remote, and a CSP that loads nothing from outside but fonts, the wall's
+// own files and pictures in its storage. So the server only checks sizes, and the wall's own code never changes.
+export const SCENE_MAX = 60_000, DECOR_MAX = 30_000, MAX_SCENES = 20, MAX_SHORTCUTS = 8;
+const SceneSchedule = z.object({
+  from: DATE, to: DATE, every: z.number().int().min(5).max(720), secs: z.number().int().min(10).max(1800),
+  start: TIME.default('08:00'), end: TIME.default('20:00'),
+}).strict();
+export const SceneIn = z.object({
+  id: z.string().regex(/^sc[\w-]{1,40}$/).optional(), name: z.string().trim().min(1).max(60),
+  html: z.string().trim().min(1, 'המסך ריק').max(SCENE_MAX, 'המסך ארוך מדי'), schedule: SceneSchedule.nullable().optional(),
+});
+export const ShortcutIn = z.object({ label: z.string().trim().min(1).max(30), prompt: z.string().trim().min(1).max(400) }).strict();
+function hmMin(t: string) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+function minHm(n: number) { return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0'); }
+/** The stored screens that look right (anything malformed is left out). */
+export function scenesOf(design: Row | null | undefined): Row[] {
+  return (Array.isArray(design?.scenes) ? design!.scenes : []).filter((x: Row) => x && typeof x.id === 'string' && typeof x.html === 'string');
+}
+/** The decoration layer while it runs (`until` not passed). */
+export function liveDecor(decor: unknown, now = Date.now()): Row | null {
+  const d = decor as Row | null;
+  return d && typeof d.html === 'string' && d.html && !(d.until && Date.parse(d.until) <= now) ? d : null;
+}
+/** What the remote and the agent's data see of them: names and schedules, no HTML. */
+export function customMeta(design: Row): Row {
+  const d = liveDecor(design.decor);
+  return {
+    scenes: scenesOf(design).map(x => ({ id: x.id, name: x.name, schedule: x.schedule || null, updated: x.updated, size: x.html.length })),
+    decor: d ? { id: d.id, name: d.name, until: d.until || null, size: d.html.length } : null,
+    shortcuts: Array.isArray(design.shortcuts) ? design.shortcuts : [],
+  };
+}
+/** The origin of the wall's picture storage, which the agent's screens may show pictures from. */
+export function storeOrigin(): string {
+  try { return new URL(db().storage.from('wall-photos').getPublicUrl('x').data.publicUrl).origin; } catch { return ''; }
+}
 
 const NOON_MS = 150e3;            // 10 s countdown + the 107 s promo, with a margin
 const EVENT_FALLBACK_MS = 30 * 60e3;
@@ -121,7 +161,7 @@ const TABLES = new Set(['life_events', 'directorate_events', 'newsletter_issues'
 const GENERATED: Record<string, string[]> = { people: ['display_name'] };
 const writable = (table: string, row: Row) => { const r = { ...row }; for (const k of GENERATED[table] || []) delete r[k]; return r; };
 
-async function wallState(): Promise<Row> {
+export async function wallState(): Promise<Row> {
   const r = must(await db().from('wall_state').select('*').eq('id', 1).maybeSingle(), 'wall_state') as Row | null;
   return r || { design: {}, brightness: 100, urgent: null, takeover: null, noon_skip: null, dismissed: [] };
 }
@@ -198,6 +238,16 @@ function effectiveTakeover(st: Row, big: Row[], now: Date): Row | null {
     if (hh >= MEMORIAL_HOURS[0] && hh <= MEMORIAL_HOURS[1] && mm < MEMORIAL_AUTO_MIN && !dis.has(id))
       return { id, kind: 'memorial', auto: true, until: ilToIso(today, String(hh).padStart(2, '0') + ':' + String(MEMORIAL_AUTO_MIN).padStart(2, '0')) };
   }
+  // The agent's own screens on their schedule (not on a memorial day): from `start` to `end`, every `every` minutes for `secs` seconds.
+  if (!mem) for (const sc of scenesOf(design)) {
+    const s = sc.schedule;
+    if (!s || today < s.from || today > s.to) continue;
+    const [hh, mm] = timeIL(now).split(':').map(Number), m = hh * 60 + mm, a = hmMin(s.start), b = hmMin(s.end);
+    if (m < a || m > b) continue;
+    const slot = a + Math.floor((m - a) / s.every) * s.every, at = Date.parse(ilToIso(today, minHm(slot))), end = at + s.secs * 1e3;
+    const id = 'scene:' + sc.id + ':' + today + 'T' + minHm(slot);
+    if (t < end && !dis.has(id)) return { id, kind: 'scene', auto: true, sceneId: sc.id, name: sc.name, html: sc.html, until: new Date(end).toISOString() };
+  }
   const noonAt = Date.parse(ilToIso(today, M.noon.at));
   if (!mem && design.noon && st.noon_skip !== today && !dis.has('noon:' + today) && t >= noonAt && t < noonAt + NOON_MS)
     return { id: 'noon:' + today, kind: 'noon', auto: true, until: new Date(noonAt + NOON_MS).toISOString() };
@@ -213,9 +263,11 @@ export async function live() {
   const [st, big] = await Promise.all([wallState(), bigEventsNow(now)]);
   const design = withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) });
   design.news = liveNews(design.news, now.getTime());
+  const decor = liveDecor(design.decor, now.getTime());
+  Object.assign(design, customMeta(design), { decor: decor && { id: decor.id, name: decor.name, html: decor.html } });
   const stream = await launchStream(design.moments.stream, st.dismissed, now.getTime());
   return { design, brightness: st.brightness ?? 100, urgent: st.urgent || null,
-    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), memorial: memorialNow(st, now), stream, at: now.toISOString(), build: BUILD };
+    noonToday: st.noon_skip !== isoDateIL(now), takeover: effectiveTakeover(st, big, now), memorial: memorialNow(st, now), stream, store: storeOrigin(), at: now.toISOString(), build: BUILD };
 }
 
 // ---- snapshot for the remote ------------------------------------------------------------------------
@@ -277,7 +329,7 @@ export async function snapshot() {
     ticker: (must(ticker, 'ticker') as Row[]).filter(t => (t.ends_on || t.starts_on) >= today)
       .map(t => ({ id: t.id, name: t.name, kind: t.kind || 'אירוע', start: t.starts_on, end: t.ends_on || null, place: t.place_he || '', url: t.url || '' })),
     newsletter: issue ? { range: issue.content?.issue?.range || '', url: issue.source_url, count: (issue.content?.news || []).length, at: issue.imported_at } : null,
-    state: { design: withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) }), brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
+    state: { design: (d => Object.assign(d, customMeta(d)))(withMoments({ ...DESIGN_DEFAULTS, ...(st.design || {}) })), store: storeOrigin(), brightness: st.brightness ?? 100, urgent: st.urgent || '', noonToday: st.noon_skip !== today },
     takeover: effectiveTakeover(st, big, now),
     stream: await launchStream(momentsOf(st.design).stream, st.dismissed, now.getTime()),
     memorial: (() => { const m = memorialPeriod(now); return m ? { id: m.id, label: m.label, on: !!memorialNow(st, now) } : null; })(),
@@ -793,8 +845,9 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
   },
   async resetDesign(_a, who) {
     // The news items added from the remote and the schedules live in design too (design.news, design.moments), but they aren't the design.
-    const { news, moments } = (await wallState()).design || {};
-    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: { ...(news?.length ? { news } : {}), ...(moments ? { moments } : {}) } }, who)]);
+    const { news, moments, scenes, decor, shortcuts } = (await wallState()).design || {};
+    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: { ...(news?.length ? { news } : {}), ...(moments ? { moments } : {}),
+      ...(scenes?.length ? { scenes } : {}), ...(decor ? { decor } : {}), ...(shortcuts?.length ? { shortcuts } : {}) } }, who)]);
   },
   /** A news item from the remote (the agent's suggestion, after the operator approved it): first in the newsletter
    *  panel, as a featured story, until it expires. Hebrew and English, so the English mode needs no translation. */
@@ -831,6 +884,48 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const now = Date.now();
     await record(who, 'שידור חי על כל המסך' + (f.title ? ': ' + f.title.slice(0, 60) : ''), [await patchState({ takeover: { id: 'rt:' + now, kind: 'stream',
       videoId, title: f.title || '', until: new Date(now + f.minutes * 60e3).toISOString() } }, who)]);
+  },
+  /** The agent's screens: saved (new, or the same id again to change it), shown, deleted. */
+  async saveScene(a, who) {
+    const f = SceneIn.parse(a);
+    if (f.schedule && f.schedule.to < f.schedule.from) throw new Error('תאריך הסיום לפני תאריך ההתחלה');
+    const cur = (await wallState()).design || {}, list = scenesOf(cur), old = f.id ? list.find(x => x.id === f.id) : null;
+    if (f.id && !old) throw new Error('המסך לא נמצא');
+    if (!old && list.length >= MAX_SCENES) throw new Error('יש כבר ' + MAX_SCENES + ' מסכים שמורים. מוחקים אחד ישן קודם');
+    const id = old ? old.id : 'sc' + randomUUID().slice(0, 8);
+    const scene = { id, name: f.name, html: f.html, schedule: f.schedule === undefined ? old?.schedule ?? null : f.schedule, updated: new Date().toISOString() };
+    const scenes = old ? list.map(x => (x.id === id ? scene : x)) : [...list, scene];
+    await record(who, (old ? 'המסך עודכן: ' : 'מסך חדש: ') + f.name, [await patchState({ design: { ...cur, scenes } }, who)]);
+    return { id };
+  },
+  async deleteScene(a, who) {
+    const { id } = z.object({ id: z.string() }).parse(a);
+    const cur = (await wallState()).design || {}, list = scenesOf(cur), hit = list.find(x => x.id === id);
+    if (!hit) throw new Error('המסך לא נמצא');
+    await record(who, 'נמחק המסך: ' + hit.name, [await patchState({ design: { ...cur, scenes: list.filter(x => x.id !== id) } }, who)]);
+  },
+  async showScene(a, who) {
+    const f = z.object({ id: z.string(), minutes: z.number().min(0.25).max(240).default(5) }).parse(a);
+    const hit = scenesOf((await wallState()).design).find(x => x.id === f.id);
+    if (!hit) throw new Error('המסך לא נמצא');
+    const now = Date.now();
+    await record(who, 'על כל המסך: ' + hit.name, [await patchState({ takeover: { id: 'rt:' + now, kind: 'scene', sceneId: hit.id, name: hit.name, html: hit.html,
+      until: new Date(now + f.minutes * 60e3).toISOString() } }, who)]);
+  },
+  /** The decoration layer: HTML over the home wall (under the full-screen moments), until `until` (a date, its end) or
+   *  until it is removed. html '' removes it. */
+  async setDecor(a, who) {
+    const f = z.object({ html: z.string().trim().max(DECOR_MAX, 'הקישוטים ארוכים מדי'), name: z.string().trim().max(60).default('קישוטים'), until: DATE.nullable().optional() }).parse(a);
+    const cur = (await wallState()).design || {};
+    if (f.until) assertRealDate(f.until);
+    const decor = f.html ? { id: 'dc' + randomUUID().slice(0, 8), name: f.name, html: f.html, until: f.until ? ilToIso(addDays(f.until, 1), '00:00') : null, updated: new Date().toISOString() } : null;
+    await record(who, decor ? 'קישוטים בצג: ' + f.name : 'הקישוטים הוסרו מהצג', [await patchState({ design: { ...cur, decor } }, who)]);
+  },
+  /** Buttons the agent adds to the remote: each sends its request to the agent. The full list each time. */
+  async setShortcuts(a, who) {
+    const { items } = z.object({ items: z.array(ShortcutIn).max(MAX_SHORTCUTS) }).parse(a);
+    const cur = (await wallState()).design || {};
+    await record(who, items.length ? 'כפתורים בשלט: ' + items.map(i => i.label).join(', ').slice(0, 60) : 'הכפתורים שהסוכן הוסיף הוסרו מהשלט', [await patchState({ design: { ...cur, shortcuts: items } }, who)]);
   },
   async eventImportant(a, who) {
     const { id, important } = z.object({ id: UUID, important: z.boolean() }).parse(a);
