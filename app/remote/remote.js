@@ -19,6 +19,8 @@
     });
     return (styleCache[str] = o);
   }
+  /** The agent's message box grows with what is typed (up to its max-height, then it scrolls), and shrinks back when sent. */
+  function fitBox(t) { if (!t) return; t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; }
   const el = (tag, style, props, ...kids) => h(tag, Object.assign({ style: typeof style === 'string' ? S(style) : style }, props), ...kids);
 
   const ICE = '#9fdcff', LIME = '#d4f25c', WARM = '#e9b872', RED = '#ff7a6b', OFF = 'rgba(150,190,240,.2)';
@@ -384,7 +386,8 @@
       if (!this.ro) this.ro = new ResizeObserver((en) => { const w = Math.round(en[0].contentRect.width); if (w !== this.state.pw) this.setState({ pw: w }); });
       this.ro.disconnect(); this.ro.observe(elx);
     }
-    componentDidUpdate() {
+    componentDidUpdate(_p, prev) {
+      if (prev && prev.chatInput !== this.state.chatInput) fitBox(document.getElementById('agent-input'));
       this.observe();
       const src = this.buildSrc();
       if (src && src !== this._src) { this._src = src; clearTimeout(this.srcT); if (src !== this.state.wallSrc) this.srcT = setTimeout(() => this.setState({ wallSrc: src }), this.state.wallSrc ? 700 : 0); }
@@ -1108,7 +1111,7 @@
       const nlAt = (at) => { const d = new Date(at); return iso(d) === ti ? 'היום ב-' + hhmm(d) : iso(d) === iso(addDays(now, -1)) ? 'אתמול' : 'ב-' + d.getDate() + '.' + (d.getMonth() + 1); };
 
       return {
-        rootCols: wide ? 'minmax(0,1fr) 400px' : 'minmax(0,1fr)',
+        rootCols: wide ? 'minmax(0,1fr) ' + (s.vw >= 1500 ? 520 : 460) + 'px' : 'minmax(0,1fr)',
         mainPad: wide ? '20px 24px 40px' : small ? '14px 12px 96px' : '18px 18px 96px',
         mainCols: s.studio ? (two ? 'minmax(0,1fr) minmax(300px,360px)' : 'minmax(0,1fr)') : (two ? 'minmax(0,1.1fr) minmax(0,1fr)' : 'minmax(0,1fr)'),
         statusLine: hhmm(now) + (s.loadErr ? ' · אין חיבור לצג, מנסה שוב' : D ? ' · מחובר לצג · שינויים עולים תוך דקה' : ' · מתחבר…'),
@@ -1201,7 +1204,7 @@
         keyEnter: (e) => { if (e.key === 'Enter') { e.preventDefault(); if (!s.keyBusy) this.saveKey(s.keyDraft); } },
         hasAttach: s.attach.length > 0,
         attachList: s.attach.map((a) => Object.assign({}, a, { isImg: a.kind === 'image', el: a.src ? imgEl(a.src, { width: 28, height: 28, borderRadius: 6, objectFit: 'cover' }) : null, remove: () => this.setState((st) => ({ attach: st.attach.filter((x) => x.id !== a.id) })) })),
-        chatInput: s.chatInput, setChatInput: (e) => this.setState({ chatInput: e.target.value }),
+        chatInput: s.chatInput, setChatInput: (e) => { fitBox(e.target); this.setState({ chatInput: e.target.value }); },
         chatKey: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); this.sendChat(); } },
         sendChat: () => this.sendChat(), sendBg: LIME, sendOpacity: s.agentBusy ? 0.5 : 1,
         dragging: s.dragging,
@@ -1616,7 +1619,7 @@
             el('button', 'width:24px;height:24px;border-radius:6px;border:none;background:transparent;color:#8b9dbd;font-size:12px;cursor:pointer', { onClick: at.remove, 'aria-label': 'הסרה' }, '✕')))) : null,
         v.agentReady ? el('div', 'display:flex;align-items:flex-end;gap:8px;padding:12px 18px 18px', null,
           el('button', 'flex:none;width:44px;height:44px;border-radius:12px;border:1px solid rgba(150,190,240,.22);background:transparent;color:#9fdcff;font-size:22px;line-height:1;cursor:pointer', { onClick: v.pickFiles, 'aria-label': 'צירוף קובץ', title: 'צירוף אקסל, CSV או תמונה' }, '+'),
-          el('textarea', 'flex:1;min-width:0;min-height:44px;max-height:140px;overflow:hidden;resize:none;box-sizing:border-box;padding:11px 12px;border-radius:12px;border:1px solid rgba(150,190,240,.22);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;line-height:1.45', { id: 'agent-input', value: v.chatInput, onChange: v.setChatInput, onKeyDown: v.chatKey, rows: 1, placeholder: 'מה לשנות בצג?' }),
+          el('textarea', 'flex:1;min-width:0;min-height:48px;max-height:45vh;overflow-y:auto;resize:none;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid rgba(150,190,240,.22);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:16px;line-height:1.5', { id: 'agent-input', ref: fitBox, value: v.chatInput, onChange: v.setChatInput, onKeyDown: v.chatKey, rows: 1, placeholder: 'מה לשנות בצג?' }),
           el('button', `flex:none;min-width:64px;height:44px;padding:0 14px;border-radius:12px;border:none;background:${v.sendBg};color:#0b1400;font-size:15px;font-weight:800;cursor:pointer;opacity:${v.sendOpacity}`, { onClick: v.sendChat, 'aria-busy': v.agentBusy }, 'שליחה')) : null,
         v.dragging ? el('div', 'position:absolute;inset:8px;border-radius:16px;border:2px dashed #d4f25c;background:rgba(4,9,20,.88);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#d4f25c;pointer-events:none', null, 'שחררו כדי לצרף') : null);
 
