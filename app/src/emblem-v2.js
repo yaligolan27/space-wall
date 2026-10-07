@@ -22,15 +22,16 @@
       // Lose the context now: a phone holding two of them (the wall builds the emblem again once its data arrives) runs out of memory.
       if (this._renderer) { this._renderer.dispose(); this._renderer.forceContextLoss(); this._renderer.domElement.remove(); this._renderer = null; }
     }
-    /** Drawing resolution. Shown small (the 1920×1080 wall on a phone, or the remote's preview of it), the emblem gets
-     *  about the screen pixels it really covers: a full-size picture there is 10+ times larger and exhausted a phone's
-     *  memory. A lobby screen (seen at half size or more) draws it as before. */
+    /** Drawing resolution: the screen pixels the emblem really covers. Shown small (the 1920×1080 wall on a phone, or the
+     *  remote's preview of it), a full-size picture is 10+ times larger and exhausted a phone's memory. Shown large (a 4K
+     *  screen stretches the 1920-wide wall to twice its size), a picture at the wall's own size looked blurred and pixelated.
+     *  At most maxpr (2), and less where the screen can't keep up (_prCap, set by the loop). */
     _sharpness() {
       const dpr = window.devicePixelRatio || 1;
       let k = this.clientWidth ? this.getBoundingClientRect().width / this.clientWidth : 1;   // the wall's own scaling
       try { const f = window.frameElement; if (f && innerWidth) k *= f.getBoundingClientRect().width / innerWidth; } catch (e) { /* not ours */ }
       if (window.__pageScale) k *= window.__pageScale();   // a phone zooms the whole page out (index.html)
-      return Math.min(this._maxpr, k > 0 && k < 0.5 ? Math.min(2, Math.max(0.35, dpr * k)) : Math.min(dpr, 2));
+      return Math.min(this._maxpr, this._prCap || 9, Math.max(0.35, k > 0 ? dpr * k : dpr));
     }
     attributeChangedCallback() {
       this._speed = Number(this.getAttribute('speed')) || 90; this._sway = this.getAttribute('sway') !== 'off'; this._paused = this.hasAttribute('paused');
@@ -42,6 +43,13 @@
       this.attributeChangedCallback();
       const gen = this._gen = (this._gen || 0) + 1;
       const mode = this.getAttribute('globe') === 'real' ? 'real' : 'holo';
+      // The screen's own frame time, measured once per page while the emblem loads (nothing is drawn yet): the loop
+      // compares against it, so a 30 Hz screen is not taken for a slow one.
+      if (!window.__frameMs) window.__frameMs = new Promise((done) => {
+        const d = []; let p = 0;
+        const f = (n) => { if (p) d.push(n - p); p = n; if (d.length < 30) requestAnimationFrame(f); else done(d.sort((a, b) => a - b)[15]); };
+        requestAnimationFrame(f); setTimeout(() => done(d.length > 5 ? d.sort((a, b) => a - b)[d.length >> 1] : 1000 / 60), 3000);
+      });
       const THREE = await import((window.__resources && window.__resources.threeModule) || '/vendor/three.module.js');
       if (gen !== this._gen) return;
       const TAU = Math.PI * 2, deg = THREE.MathUtils.degToRad, V3 = THREE.Vector3;
@@ -406,6 +414,17 @@
       this._alive = true;
       const tmpA = new V3(), tmpB = new V3(), tipW = new V3();
       let last = performance.now(), t = 0, drawn = false, wasPaused = false;
+      // Smooth before sharp: where the picture can't keep the screen's frame rate (a 4K picture is four times the pixels
+      // of a 1080p one, and the lobby PC once stuttered), it steps down a fifth at a time, down to the wall's own size.
+      let frameMs = 1000 / 60; window.__frameMs.then((v) => { frameMs = Math.max(4, Math.min(50, v)); });
+      const slow = [];
+      const governor = (ms) => {
+        if (document.hidden || ms > 1000) return;
+        slow.push(ms); if (slow.length < 60) return;
+        const med = slow.sort((a, b) => a - b)[30]; slow.length = 0;
+        const pr = renderer.getPixelRatio();
+        if (med > frameMs * 1.45 && pr > 1.05) { this._prCap = Math.max(1, pr * 0.8); resize(); }
+      };
       // A clock that jumped (a page-clock emblem waking after a pause, setTime): no arc or lock is left half-way, and none
       // starts for a few seconds (the hand-off happens then).
       const jumped = () => {
@@ -451,6 +470,7 @@
         // now, not when the emblem is shown (an emblem created under a full-screen moment would otherwise stall then).
         if (this._paused && drawn) { last = now; wasPaused = true; setTimeout(() => loop(performance.now()), 250); return; }
         drawn = true;
+        governor(now - last);
         const dt = Math.min(0.1, (now - last) / 1000); last = now;
         // clock="page": the page's clock from a shared epoch (the welcome screen sets it), else this emblem's own.
         const ep = window.__emblemEpoch;
