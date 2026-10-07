@@ -604,8 +604,11 @@
         h('div', { style: { position: 'relative', width: 200 * MM_K, height: 112, flex: 'none' } },
           h('div', { style: { position: 'absolute', left: 0, top: 9 } }, h(O.Candle, { k: MM_K, len: 400, fx: CFG.ambientFx }))),
         h('div', { style: { position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 } },
-          h('span', { style: { fontSize: 40, fontWeight: 800, lineHeight: 1, color: '#f6efe3', letterSpacing: EN() ? 0 : '.02em', textShadow: '0 0 24px rgba(255,190,110,.25)' } }, tr('יזכור', 'We Remember')),
-          h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr('מנהלת החלל מתייחדת עם זכר הנרצחים והנופלים · 7.10.2023', 'Remembering those murdered and fallen on October 7, 2023')))));
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, lineHeight: 1 } },
+            h('span', { style: { fontSize: 40, fontWeight: 800, color: '#f6efe3', letterSpacing: EN() ? 0 : '.02em', textShadow: '0 0 24px rgba(255,190,110,.25)' } }, tr('יזכור', 'We Remember')),
+            h('span', { style: { width: 1.5, height: 34, background: 'rgba(233,184,114,.5)' } }),
+            h('span', { dir: 'ltr', style: { fontFamily: "'Lexend',sans-serif", fontSize: 42, fontWeight: 300, color: '#e9b872', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr('7.10', 'Oct 7'))),
+          h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr('מנהלת החלל מרכינה ראש לזכר הנרצחים והנופלים', 'In memory of those murdered and fallen on October 7, 2023')))));
     }
 
     // ---- content blocks ---------------------------------------------------------------------------
