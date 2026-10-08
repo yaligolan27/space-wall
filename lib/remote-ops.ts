@@ -22,6 +22,8 @@ async function fetchText(url: string): Promise<string> {
 // ---- design (the wall's URL options, now stored) ----------------------------------------------------
 export const PANELS = ['news', 'events', 'people', 'ticker', 'launches'] as const;
 export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en', vw: false,
+  // the emblem in the middle (app/src/wall.js CFG.emblem): v7 the 3D globe with launches and satellites, v2 the previous one
+  emblem: 'v7' as 'v7' | 'v2', traffic: true, rate: 'normal' as 'off' | 'low' | 'normal' | 'high', sats: 24, stack: 8, quality: 'high' as 'high' | 'ultra',
   css: '', headline: '', headlineEn: '', hide: [] as string[], news: [] as Row[],
   scenes: [] as Row[], decor: null as Row | null, shortcuts: [] as Row[] };
 
@@ -40,6 +42,12 @@ export const DesignPatch = z.object({
   globeStyle: z.enum(['holo', 'real']),
   lang: z.enum(['he', 'en']).describe('שפת הצג: en = כל הצג באנגלית (למשלחות), he = עברית'),
   vw: z.boolean().describe('מצב קיר מסכים: טקסט גדול, עבה ובהיר יותר לקיר של 9 טלוויזיות בלובי'),
+  emblem: z.enum(['v7', 'v2']).describe('הלוגו במרכז הצג: v7 = הגלובוס התלת מימדי עם שיגורים ולוויינים, v2 = הלוגו הקודם'),
+  traffic: z.boolean().describe('שיגורים ולוויינים סביב הגלובוס (לוגו v7)'),
+  rate: z.enum(['off', 'low', 'normal', 'high']).describe('קצב השיגורים בלוגו v7: off בלי שיגורים חדשים, low נמוך, normal רגיל, high גבוה'),
+  sats: z.number().int().min(4).max(48).describe('כמה לוויינים לכל היותר נשארים במסלול בלוגו v7'),
+  stack: z.number().int().min(2).max(8).describe('כמה לוויינים כל שיגור מכניס למסלול בלוגו v7'),
+  quality: z.enum(['high', 'ultra']).describe('איכות הציור של לוגו v7: high (מומלץ למחשב הלובי), ultra חדה יותר וכבדה יותר'),
   css: z.string().max(6000).superRefine((v, c) => { const e = cssProblem(v); if (e) c.addIssue({ code: 'custom', message: e }); }),
   headline: z.string().trim().max(80), headlineEn: z.string().trim().max(80),
   hide: z.array(z.enum(PANELS)).max(PANELS.length),

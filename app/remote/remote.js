@@ -55,7 +55,8 @@
   const initials = (n) => String(n || '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('');
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 
-  const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he', vw: false };
+  const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he', vw: false,
+    emblem: 'v7', traffic: true, rate: 'normal', sats: 24, stack: 8, quality: 'high' };
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
   // The schedules screen ("תזמונים"): what comes up on the whole wall by itself (design.moments, lib/remote-ops.ts MOMENTS0).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
@@ -65,6 +66,17 @@
   const secLbl = (n) => (n < 60 ? n + ' שנ׳' : n % 60 ? Math.floor(n / 60) + ':' + pad(n % 60) + ' דק׳' : n === 60 ? 'דקה' : n / 60 + ' דק׳');
   const SPEC = [
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
+    { title: 'לוגו', controls: [
+      { key: 'emblem', label: 'הלוגו במרכז הצג', kind: 'seg', options: [['v7', 'גלובוס עם שיגורים'], ['v2', 'הלוגו הקודם']] },
+      // the new globe's launches and satellites (app/src/emblem-v7/), shown only while it is the one on the wall
+      { key: 'traffic', label: 'שיגורים ולוויינים', kind: 'toggle', v7: true },
+      { key: 'rate', label: 'קצב שיגורים', kind: 'seg', options: [['off', 'בלי'], ['low', 'נמוך'], ['normal', 'רגיל'], ['high', 'גבוה']], v7: true },
+      { key: 'sats', label: 'מספר לוויינים מרבי במסלול', kind: 'slider', min: 4, max: 48, unit: '', v7: true },
+      { key: 'stack', label: 'לוויינים בכל שיגור', kind: 'slider', min: 2, max: 8, unit: '', v7: true },
+      { key: 'quality', label: 'איכות הציור', kind: 'seg', options: [['high', 'רגילה'], ['ultra', 'גבוהה (כבד יותר)']], v7: true },
+      { key: 'globe', label: 'זמן לסיבוב גלובוס', kind: 'slider', min: 20, max: 240, unit: 's' },
+      { key: 'globeStyle', label: 'סגנון הגלובוס', kind: 'seg', options: [['holo', 'הולוגרפי'], ['real', 'ריאליסטי']] },
+      { key: 'sway', label: 'תנועת מצלמה', kind: 'toggle' }] },
     { title: 'שפה', controls: [{ key: 'lang', label: 'שפת הצג (השלט נשאר בעברית)', kind: 'seg', options: [['he', 'עברית'], ['en', 'English']] }] },
     { title: 'קיר המסכים', controls: [{ key: 'vw', label: 'מצב קיר מסכים: טקסט גדול ועבה יותר לקיר של 9 הטלוויזיות', kind: 'toggle' }] },
     { title: 'רגעים', controls: [{ key: 'noon', label: 'סרטון תדמית אוטומטי ב-12:00', kind: 'toggle' }] },
@@ -73,10 +85,6 @@
       { key: 'feature', label: 'זמן לכתבה מרכזית', kind: 'slider', min: 6, max: 30, unit: 's' },
       { key: 'list', label: 'זמן לכל ידיעה ברשימה', kind: 'slider', min: 2, max: 10, unit: 's' },
       { key: 'fx', label: 'אפקטי רקע', kind: 'toggle' }] },
-    { title: 'לוגו', controls: [
-      { key: 'globe', label: 'זמן לסיבוב גלובוס', kind: 'slider', min: 20, max: 240, unit: 's' },
-      { key: 'globeStyle', label: 'סגנון הגלובוס', kind: 'seg', options: [['holo', 'הולוגרפי'], ['real', 'ריאליסטי']] },
-      { key: 'sway', label: 'תנועת מצלמה', kind: 'toggle' }] },
   ];
   const LABEL = Object.fromEntries(SPEC.flatMap((s) => s.controls).map((c) => [c.key, c.label]));
   const TYPE_CHIPS = ['יום הולדת', 'חתונה', 'לידה', 'העלאה בדרגה', 'סיום תואר', 'שחרור', 'קליטה', 'אבל'];
@@ -468,7 +476,8 @@
     buildSrc() {
       const D = this.D; if (!D) return '';
       const d = this.design();
-      const q = new URLSearchParams({ noon: d.noon ? '1' : '0', qr: d.qr ? '1' : '0', feature: String(d.feature), list: String(d.list), fx: d.fx ? '1' : '0', globe: String(d.globe), globeStyle: d.globeStyle, sway: d.sway ? '1' : '0', lang: d.lang === 'en' ? 'en' : 'he', vw: d.vw ? '1' : '0', preview: '1' });
+      const q = new URLSearchParams({ noon: d.noon ? '1' : '0', qr: d.qr ? '1' : '0', feature: String(d.feature), list: String(d.list), fx: d.fx ? '1' : '0', globe: String(d.globe), globeStyle: d.globeStyle, sway: d.sway ? '1' : '0', lang: d.lang === 'en' ? 'en' : 'he', vw: d.vw ? '1' : '0',
+        emblem: d.emblem === 'v2' ? 'v2' : 'v7', traffic: d.traffic === false ? '0' : '1', rate: d.rate || 'normal', sats: String(d.sats || 24), stack: String(d.stack || 8), quality: d.quality === 'ultra' ? 'ultra' : 'high', preview: '1' });
       if (this.state.studio && this.state.demo !== 'off') q.set('demo', this.state.demo);
       if (D.config && D.config.displayKey) q.set('key', D.config.displayKey);
       return '/?' + q.toString();
@@ -1084,7 +1093,7 @@
           { label: 'תזמונים ואוטומציות', sub: 'מה עולה לבד על כל המסך, כל כמה זמן ולכמה זמן', dot: '#6fd6ea', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('moments') },
           ...memMore,
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
-          { label: 'עיצוב הצג', sub: 'גלובוס ' + (design.globeStyle === 'real' ? 'ריאליסטי' : 'הולוגרפי') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
+          { label: 'עיצוב הצג', sub: (design.emblem === 'v2' ? 'הלוגו הקודם' : 'הלוגו, השיגורים והלוויינים') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
       ];
 
       const lfP = this.P(f.personId), lfT = tpl(f.type), q = (f.name || '').replace(/\s+/g, ' ').trim();
@@ -1165,7 +1174,7 @@
         showActions: !s.studio, actGroups, studio: s.studio,
         closeStudio: () => this.setState({ studio: false, demo: 'off' }),
         resetDesign: () => this.run('resetDesign', {}, 'העיצוב אופס לברירת המחדל').catch(() => {}),
-        designSections: SPEC.map((sec) => ({ title: sec.title, controls: sec.controls.map((c) => {
+        designSections: SPEC.map((sec) => ({ title: sec.title, controls: sec.controls.filter((c) => !c.v7 || design.emblem !== 'v2').map((c) => {
           const v = c.key === 'demo' ? s.demo : design[c.key];
           return Object.assign({ key: c.key, label: c.label, kind: c.kind }, sw(!!v), { value: v, min: c.min, max: c.max, display: v + (c.unit || ''),
             toggle: () => this.setDesign(c.key, !v, !v ? 'פעיל' : 'כבוי'),
@@ -1544,7 +1553,7 @@
             c.kind === 'slider' ? el('input', 'width:100%;height:28px', { type: 'range', min: c.min, max: c.max, value: c.value, onChange: c.set, 'aria-label': c.label }) : null,
             c.kind === 'select' ? el('select', 'min-height:44px;padding:0 10px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px', { value: c.value, onChange: c.set },
               c.options.map((o) => el('option', null, { key: o.v, value: o.v }, o.label))) : null,
-            c.kind === 'seg' ? segWrap(2, c.options.map((o) => el('button', `min-height:40px;border-radius:9px;border:none;background:${o.bg};color:${o.fg};font-size:15px;font-weight:600;cursor:pointer`, { key: o.v, onClick: o.pick }, o.label))) : null))))) : null;
+            c.kind === 'seg' ? segWrap(Math.min(4, c.options.length), c.options.map((o) => el('button', `min-height:40px;border-radius:9px;border:none;background:${o.bg};color:${o.fg};font-size:15px;font-weight:600;cursor:pointer`, { key: o.v, onClick: o.pick }, o.label))) : null))))) : null;
 
       // ---- agent panel
       const closeX = 'flex:none;width:40px;height:40px;border-radius:10px;border:none;background:rgba(150,190,240,.08);color:#8b9dbd;font-size:16px;cursor:pointer';

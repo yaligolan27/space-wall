@@ -3,7 +3,7 @@
 // Content comes from /api/feed (weekly newsletter + database). Until it answers the wall shows a calm "connecting"
 // state, never invented content: the bundled sample (data/feed.json) appears only with ?sample=1, or lends a ?demo= its
 // moment when there is no real one. Full-screen moments (launch mode, personal celebration, 12:00 show, important
-// event) live in overlays.js, the 3D emblem in emblem-v2.js. The remote control (app/remote) drives design, brightness,
+// event) live in overlays.js, the 3D emblem in emblem-v7/ (the previous one, emblem-v2.js, a switch away in the remote). The remote control (app/remote) drives design, brightness,
 // the urgent banner and full-screen moments through /api/live, polled every few seconds; URL options override the
 // stored design. /api/live also gives the server's clock, which times everything here, and the deployment, so the
 // wall reloads itself after a deploy (and nightly at 04:00) and runs for weeks unattended.
@@ -38,6 +38,15 @@
     globeSpeed: Math.min(240, Math.max(20, num('globe', 90))),
     globeStyle: q.get('globeStyle') === 'real' ? 'real' : 'holo',
     cameraSway: bool('sway', true),
+    // The emblem in the middle: v7, the 3D globe with launches and satellites (app/src/emblem-v7/), or v2, the previous
+    // one. v7's launches and satellites: traffic on/off, how often a launch goes up (rate), at most how many satellites
+    // stay in orbit (sats) and how many a launch puts there (stack); quality: high (1.5× the screen's pixels) or ultra (2×).
+    emblem: q.get('emblem') === 'v2' ? 'v2' : 'v7',
+    traffic: bool('traffic', true),
+    launchRate: ['off', 'low', 'normal', 'high'].includes(q.get('rate')) ? q.get('rate') : 'normal',
+    maxSats: Math.min(48, Math.max(4, Math.round(num('sats', 24)))),
+    stackSize: Math.min(8, Math.max(2, Math.round(num('stack', 8)))),
+    quality: q.get('quality') === 'ultra' ? 'ultra' : 'high',
     staleAfterMin: num('stale', 180),
     live: q.get('live') || '/api/live',
     livePoll: Math.max(3, num('livePoll', 5)),
@@ -49,7 +58,8 @@
     noCss: q.has('css') && /^(0|false|no|off)$/i.test(q.get('css')),
   };
   // Stored design (from the remote) → CFG, except where the URL sets the option explicitly.
-  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang', vw: 'videoWall' };
+  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang', vw: 'videoWall',
+    emblem: 'emblem', traffic: 'traffic', rate: 'launchRate', sats: 'maxSats', stack: 'stackSize', quality: 'quality' };
   function applyDesign(d) {
     let changed = false;
     for (const k in DESIGN_KEYS) {
@@ -407,7 +417,7 @@
       const hid = (k) => CFG.hide.includes(k), pR = !hid('events') || !hid('people'), pN = !hid('news');
       const target = window.wallGeo.landing(window.wallGeo.slot({ data: !!this.D, pl: EN() ? pR : pN, pr: EN() ? pN : pR, ticker: !hid('ticker'), launches: !hid('launches') }));
       const A = this._wlAttrs || {}, same = A.speed === String(CFG.globeSpeed) && A.sway === (CFG.cameraSway ? 'on' : 'off') && A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE');
-      const mode = CFG.preview || !this._wlHeroOk ? 'none' : CFG.globeStyle === 'real' && same ? 'dissolve' : 'scan';
+      const mode = CFG.preview || !this._wlHeroOk ? 'none' : CFG.emblem === 'v2' && CFG.globeStyle === 'real' && same ? 'dissolve' : 'scan';
       this.clearLeave();
       const id = ov.id, at = (ms, fn) => this._wlT.push(setTimeout(() => { const o = this.state.ov; if (isWelcome(o) && o.id === id) fn(); }, Math.max(0, t0 + ms - performance.now())));
       this.setState({ ov: Object.assign({}, ov, { leaving: t0, until: serverNow() + (t0 - now) + WL.DONE + 8000 }), wl: { id, t0, mode, target } });
@@ -689,13 +699,17 @@
       // (only once the welcome has faded in over the wall: until then the wall shows as it was)
       const cov = wlUp && (this.state.covered || !!ov.leaving);
       const paused = rest || (cov && !(wl && wl.embWake)), hidden = cov && !(wl && wl.embShown), page = cov, evOff = cov && !(wl && wl.settled);
-      const k = [paused, hidden, page, evOff, entering, CFG.globeStyle, CFG.lang].join('|');
+      const v7 = CFG.emblem !== 'v2';
+      const k = [paused, hidden, page, evOff, entering, CFG.globeStyle, CFG.lang, CFG.emblem, CFG.globeSpeed, CFG.cameraSway, CFG.traffic, CFG.launchRate, CFG.maxSats, CFG.stackSize, CFG.quality].join('|');
       if (this._emb && this._embK === k) return this._emb;
       this._embK = k;
       return (this._emb = h('div', { style: { position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
         h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, entering === 'wl' ? { animation: 'wlGlowIn 1700ms ease-in-out 6100ms both' } : entering === 'back' ? { animation: 'wlGlowIn 1000ms ease-in-out 1240ms both' } : {}) },
           h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } })),
-        h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, ref: this.embRef, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off',
+        v7 ? h('space-emblem-v7', { key: 'v7' + CFG.globeStyle + CFG.lang + CFG.quality, ref: this.embRef, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off',
+          fx: 'full', quality: CFG.quality, traffic: CFG.traffic ? 'on' : 'off', 'launch-rate': CFG.launchRate, 'max-sats': CFG.maxSats, 'stack-size': CFG.stackSize,
+          paused: paused ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, opacity: hidden ? 0 : 1 } })
+        : h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, ref: this.embRef, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off',
           paused: paused ? '' : null, clock: page ? 'page' : null, events: evOff ? 'off' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, opacity: hidden ? 0 : 1 } })));
     }
 
