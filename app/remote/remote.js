@@ -70,7 +70,7 @@
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
     { title: 'לוגו', controls: [
       // Three ways: the new globe with its launches and satellites (design emblem v7, traffic on), the same new globe on
-      // its own, no launch sites, launches or satellites (v7, traffic off), or the previous emblem (v2). See emblemMode.
+      // its own, no launch sites, launches or extra satellites; the logo's four stay (v7, traffic off), or the previous emblem (v2). See emblemMode.
       { key: 'emblemMode', label: 'הלוגו במרכז הצג', kind: 'seg', options: [['v7', 'גלובוס עם שיגורים'], ['earth', 'כדור הארץ בלבד'], ['v2', 'הלוגו הקודם']] },
       // the new globe's launches and satellites (app/src/emblem-v7/), shown only while they are on the wall
       { key: 'rate', label: 'קצב שיגורים', kind: 'seg', options: [['off', 'בלי'], ['low', 'נמוך'], ['normal', 'רגיל'], ['high', 'גבוה']], v7: true, traffic: true },
