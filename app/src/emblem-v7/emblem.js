@@ -610,10 +610,9 @@ void main(){ float an = aOrb.w + uT * aMisc.x; vec3 p = vec3(cos(an), 0.0, sin(a
         ticks.rotation.z = t * 0.03; arcs.rotation.z = -t * 0.06; radar.material.uniforms.uAng.value = t * 0.7;
         if (textRing) textRing.rotation.z = -t * 0.012;
         if (sun) { const k = 0.88 + 0.12 * Math.sin(t * 0.45); sun.core.material.color.copy(sun.c0).multiplyScalar(k); sun.haze.material.opacity = 0.45 + 0.12 * Math.sin(t * 0.45 + 0.6); }
-        // orbits (traffic="off": the Earth on its own, the rings without their satellites, no LEO swarm)
+        // orbits (traffic="off": the Earth on its own, no LEO swarm; the logo's rings keep their four satellites)
         const earthOnly = this.getAttribute('traffic') === 'off'; if (swarm) swarm.visible = !earthOnly;
         for (const o of orbits) {
-          for (const s of o.sats) s.g.visible = s.trail.visible = !earthOnly;
           o.pivot.scale.setScalar(0.88 + 0.12 * ringIn);
           for (const s of o.sats) {
             const dir = o.r.dir, a = o.r.phase + s.k * Math.PI + dir * W0 * t, ca = Math.cos(a), sa = Math.sin(a);
