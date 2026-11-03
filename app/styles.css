@@ -72,3 +72,31 @@ a{color:#9fdcff;text-decoration:none}a:hover{color:#e6f1ff}
 /* occasions (overlays.js OccasionMoment): a holiday's glyphs float up; a day of space sends a craft across */
 @keyframes occFloat{0%{transform:translateY(0) rotate(0);opacity:0}10%{opacity:.55}85%{opacity:.4}100%{transform:translateY(-1300px) rotate(var(--r));opacity:0}}
 @keyframes occCross{from{transform:translate(0,0) rotate(-12deg)}to{transform:translate(2200px,-760px) rotate(-12deg)}}
+/* the ribbon-cutting opening (ceremony.js): seams of light, the nine doors, the countdown, the cut, space, the closing card */
+@keyframes cerIn{from{opacity:0}to{opacity:1}}
+@keyframes cerOut{to{opacity:0}}
+@keyframes cerDrawX{from{opacity:0;transform:scaleX(0)}30%{opacity:1}to{opacity:1;transform:none}}
+@keyframes cerDrawY{from{opacity:0;transform:scaleY(0)}30%{opacity:1}to{opacity:1;transform:none}}
+@keyframes cerDim{to{opacity:.38}}
+@keyframes cerPanelOn{0%{opacity:0}7%{opacity:.85}13%{opacity:.12}21%{opacity:1}29%{opacity:.45}42%,100%{opacity:1}}
+@keyframes cerOpenL{from{transform:none}to{transform:translateX(-326px)}}
+@keyframes cerOpenR{from{transform:none}to{transform:translateX(326px)}}
+@keyframes cerNudgeL{from{transform:none}40%{transform:translateX(-9px)}to{transform:translateX(-3px)}}
+@keyframes cerNudgeR{from{transform:none}40%{transform:translateX(9px)}to{transform:translateX(3px)}}
+@keyframes cerRise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes cerDigit{0%{opacity:0;transform:scale(1.45)}10%{opacity:1;transform:scale(1)}78%{opacity:1;transform:scale(.97)}100%{opacity:0;transform:scale(.88)}}
+@keyframes cerPop{0%{opacity:0;transform:scale(.5)}50%{opacity:1;transform:scale(1.08)}100%{opacity:1;transform:none}}
+@keyframes cerMedOut{to{opacity:0;transform:scale(2.2)}}
+@keyframes cerFlash{0%{opacity:0}8%{opacity:1}100%{opacity:0}}
+@keyframes cerShock{0%{opacity:0;transform:scale(.2)}6%{opacity:1}100%{opacity:0;transform:scale(7)}}
+@keyframes cerSunUp{from{opacity:0;transform:translateY(70px)}to{opacity:1;transform:translateY(-6px)}}
+@keyframes cerEarthRise{from{opacity:0;transform:translateY(80px)}to{opacity:1;transform:none}}
+@keyframes cerEarthDrop{to{transform:translateY(620px) scale(1.15)}}
+@keyframes cerGlareWarp{to{transform:scale(2.6)}}
+@keyframes cerStreak{from{opacity:0;transform:scaleX(0)}to{opacity:1;transform:none}}
+@keyframes cerTitleIn{from{opacity:0;transform:scale(1.12);filter:blur(10px)}to{opacity:1;transform:none;filter:none}}
+@keyframes cerFlashIn{from{opacity:0}to{opacity:1}}
+@keyframes cerTileIn{from{opacity:0;transform:scale(1.05)}to{opacity:1;transform:none}}
+@keyframes cerFlip{from{opacity:1;transform:perspective(1600px) rotateY(0)}to{opacity:0;transform:perspective(1600px) rotateY(-90deg)}}
+@keyframes cerGlint{0%{opacity:0}40%{opacity:1}100%{opacity:0}}
+@keyframes cerFloat{from{transform:translateY(-6px)}to{transform:translateY(6px)}}
