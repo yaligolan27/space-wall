@@ -33,7 +33,7 @@
   const pad = (n) => String(n).padStart(2, '0');
   const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const mmss = (sec) => pad(Math.floor(sec / 60)) + ':' + pad(Math.floor(sec % 60));
-  // The ribbon-cutting opening's words (app/src/ceremony.js DEF, in Hebrew): key, label here, default, and whether the
+  // The ribbon-cutting opening's words (app/src/ceremony3d.js DEF, in Hebrew): key, label here, default, and whether the
   // line can be left empty (then the wall doesn't show it).
   const CER_TX = [['eyebrow', 'שורה עליונה', 'טקס חנוכת המשרדים החדשים', 1], ['title', 'כותרת', 'מנהלת החלל', 0], ['line', 'שורה מתחת לכותרת', 'הבית החדש במידטאון', 1],
     ['honor', 'אורח הכבוד (מתחת לסרט)', 'במעמד ראש מפא״ת', 1], ['tag', 'כותרת אחרי שהדלתות נפתחות', 'עידן חדש', 0], ['tagLine', 'שורה מתחתיה', 'לחלל הישראלי', 1],
@@ -1823,7 +1823,7 @@
               el('span', 'font-size:12px;color:#8b9dbd', null, 'הכתבות, האירועים וקודי ה-QR נשאבים מהדף. גיליון חדש מיובא גם לבד כל בוקר.')),
             el('button', 'min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.importNl }, v.nlBtn)) : null,
           v.shCer ? h(React.Fragment, null,
-            el('span', 'font-size:14px;color:#8b9dbd;line-height:1.55;text-wrap:pretty', null, 'פתיחה ארוכה לטקס: הצג נדלק כתשע דלתות, סרט אדום נפרש, ספירה לאחור מ-10, הסרט נגזר והדלתות נפתחות אל החלל. אחר כך סרטון התדמית עם סאונד, ובסופו כניסה באנימציה לצג הבית. הכל עולה רק מכאן.'),
+            el('span', 'font-size:14px;color:#8b9dbd;line-height:1.55;text-wrap:pretty', null, 'פתיחה ארוכה לטקס, סרט בתלת־ממד: אולם נדלק עד לשערים ענקיים, סרט אדום, ספירה לאחור מ-10, הסרט נגזר והשערים נפתחים אל כדור הארץ. אחר כך סרטון התדמית עם סאונד, ובסופו כדור הארץ נוחת בלוגו של צג הבית. הכל עולה רק מכאן.'),
             el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
               v.cerPh === 'go' ? el('button', 'flex:1;min-width:160px;min-height:52px;border-radius:12px;border:1px solid rgba(255,107,107,.6);background:transparent;color:#ffb3ab;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.endTk }, 'סיום הטקס וכניסה לצג')
                 : h(React.Fragment, null,

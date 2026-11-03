@@ -167,7 +167,7 @@ const withMoments = <T extends Row>(design: T): T & { moments: Moments } => ({ .
  *  video's length, so the server knows how long the ceremony runs (the wall ends it by itself when the video ends);
  *  texts: its words in Hebrew (a key left out: the default; an optional line left empty: not shown). */
 export const CER_TEXTS = ['eyebrow', 'title', 'line', 'honor', 'tag', 'tagLine', 'welcome', 'welcomeLine', 'soon'] as const;
-const CER_INTRO_S = 40.8, CER_CLOSE_S = 9.8, CER_PROMO_S = 107, CER_UNKNOWN_S = 15 * 60;
+const CER_INTRO_S = 40.8, CER_CLOSE_S = 11.1, CER_PROMO_S = 107, CER_UNKNOWN_S = 15 * 60;
 const CER_STANDBY_MS = 8 * 3600e3;   // the standby screen waits for "start"; a forgotten one still ends
 const CER_LEAD_MS = 3000;            // "start" from the standby screen: every wall begins on the same second, this far ahead
 const CER_LEAD_COLD_MS = 10000;      // …and without it (walls ask every 8 s; one that sees it late joins it where it is)
