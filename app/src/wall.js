@@ -909,17 +909,19 @@
       const hi = (i) => (focusIdx === i ? 'rgba(212,242,92,.45)' : 'rgba(150,190,240,.16)');
       const cur = D.people[pIdx];
 
-      // Events that have ended drop out between feed updates too; "עכשיו" while one runs, "הבא" only for the next to come.
+      // An event that ended stays, dimmed and marked "הסתיים", to the end of its day and goes at midnight (`gone`, from the
+      // feed; an older feed has only `end`), between feed updates too; "עכשיו" while one runs, "הבא" only for the next.
       let nextTagged = false;
-      const directorate = D.directorate.filter((d) => !d.end || Date.parse(d.end) > now).map((d, i) => {
-        if (d.occ) return this.occasionRow(d, i, d.start && Date.parse(d.start) <= now);
-        const tag = d.start && Date.parse(d.start) <= now ? tr('עכשיו', 'NOW') : nextTagged ? '' : ((nextTagged = true), tr('הבא', 'NEXT'));
-        return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: d.img ? '62px 58px minmax(0,1fr) auto' : '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
+      const directorate = D.directorate.filter((d) => { const g = d.gone || d.end; return !g || Date.parse(g) > now; }).map((d, i) => {
+        const over = !!(d.end && Date.parse(d.end) <= now);
+        if (d.occ) return this.occasionRow(d, i, !over && d.start && Date.parse(d.start) <= now);
+        const tag = over ? '' : d.start && Date.parse(d.start) <= now ? tr('עכשיו', 'NOW') : nextTagged ? '' : ((nextTagged = true), tr('הבא', 'NEXT'));
+        return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: d.img ? '62px 58px minmax(0,1fr) auto' : '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, opacity: over ? 0.6 : 1, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
           h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } },
             h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
           d.img ? h('img', { src: d.img, alt: '', onError: (ev) => { ev.currentTarget.style.visibility = 'hidden'; }, style: { width: 58, height: 58, borderRadius: 14, objectFit: 'cover', background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } }) : null,
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } }, h('span', { style: { fontSize: 17, fontWeight: 500, lineHeight: 1.25, textWrap: 'pretty' } }, d.name), h('span', { style: { fontSize: 13, color: MUTED } }, d.place)),
-          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), h('span', { style: { fontSize: 12, fontWeight: 500, color: '#d4f25c' } }, tag)));
+          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), over ? h('span', { style: { fontSize: 12, fontWeight: 500, color: MUTED } }, tr('הסתיים', 'ENDED')) : h('span', { style: { fontSize: 12, fontWeight: 500, color: '#d4f25c' } }, tag)));
       });
 
       const peopleGrid = D.people.map((p, i) => { const on = p === cur; return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 14, background: on ? 'rgba(111,214,234,.1)' : 'rgba(8,16,34,.35)', border: `1px solid ${on ? p.color : 'rgba(150,190,240,.1)'}`, transition: 'all .6s ease', minWidth: 0 } },

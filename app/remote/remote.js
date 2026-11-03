@@ -628,14 +628,15 @@
     }
     /** The days a personal event is on the wall, as the server saves them (lib/remote-ops.ts saveLife): its day; from when
      *  it shows, at most LIFE_LEAD days ahead (a date of birth moved to the anniversary keeps a start picked for that day);
-     *  until ten days after the day; on the full screen from the day to two days after it. */
+     *  until the end of the day (it goes at midnight), and on the full screen that day. */
     lifeDates(f) {
       const fix = this.bdayFix(f), date = fix || f.date; if (!date) return null;
       const lead = iso(addDays(parse(date), -LIFE_LEAD));
       let from = f.showFrom || date;
       if (fix && (from > fix || from < lead)) from = fix;
       if (from < lead) from = lead;
-      return { date, from, until: iso(addDays(parse(from > date ? from : date), 10)), greetUntil: iso(addDays(parse(date), 2)), fix };
+      const until = from > date ? from : date, g2 = iso(addDays(parse(date), 2));
+      return { date, from, until, greetUntil: g2 < until ? g2 : until, fix };
     }
     async saveEvent() {
       const sh = this.state.sheet, f = sh.f, last = f.lastDay && f.lastDay > f.date ? f.lastDay : null;
@@ -969,7 +970,7 @@
       const dayWord = (d) => (d === ti ? 'היום' : d === iso(addDays(now, 1)) ? 'מחר' : d === iso(addDays(now, -1)) ? 'אתמול' : d === iso(addDays(now, -2)) ? 'שלשום' : dm(d));
       // The people panel, tile by tile: when it greets on the full screen, until when it stays, or that it waits for room.
       const wallPersonRows = wp.map((x) => {
-        const t = x.tile, greetUntil = iso(addDays(parse(t.on), 2));
+        const t = x.tile, g2 = iso(addDays(parse(t.on), 2)), greetUntil = t.until && t.until < g2 ? t.until : g2;
         const status = x.waiting ? 'מחכה למקום בצג (יש בו מקום ל-' + PEOPLE_TILES + ')'
           : t.quiet ? 'מוצג בשקט, עד ' + dm(t.until)
           : t.full ? (greetPaused ? 'הברכה על כל המסך מושהית היום' : !mo.celebrate.on ? 'ברכה על כל המסך רק מהשלט' : 'ברכה על כל המסך, ' + (greetUntil === ti ? 'היום בפעם האחרונה' : 'עד ' + dm(greetUntil)))
