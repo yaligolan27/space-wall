@@ -612,10 +612,10 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     assertRealDate(f.date); if (f.showFrom) assertRealDate(f.showFrom);
     const { p, personId, name } = await lifeWho(f.personId, f.name, f.free), kind = classifyLife(f.type);
     if (f.photo === 'upload' && !f.photoSrc) throw new Error('בחרו תמונה להעלאה');
-    // On the wall from showFrom (at most LIFE_LEAD_MAX days ahead) for ten days past the day, or past showFrom when it
-    // starts after the day (a moment added late still shows).
+    // On the wall from showFrom (at most LIFE_LEAD_MAX days ahead) to the end of its day, or of showFrom's day when it
+    // starts after the day (a moment added late still shows); it goes by itself at midnight (lib/feed.ts lifeWindow).
     const lead = addDays(f.date, -LIFE_LEAD_MAX), from = !f.showFrom ? f.date : f.showFrom < lead ? lead : f.showFrom;
-    const row: Row = { person_id: personId, name, type: kind, label: f.type, event_date: f.date, show_from: from, show_until: addDays(from > f.date ? from : f.date, 10),
+    const row: Row = { person_id: personId, name, type: kind, label: f.type, event_date: f.date, show_from: from, show_until: from > f.date ? from : f.date,
       text_he: f.note || null, photo_mode: f.photo, photo_url: f.photo === 'upload' ? f.photoSrc : null };
     const undo: (UndoOp | null)[] = [];
     let saved: Row;
