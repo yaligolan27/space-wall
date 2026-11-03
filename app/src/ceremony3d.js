@@ -646,9 +646,13 @@ void main(){ vec3 d = normalize(vD); vec3 bn = normalize(vec3(0.3, 0.85, 0.42));
  float f = fbm(d * 3.2); float dark = smoothstep(0.45, 0.75, fbm(d * 7.0 + 3.1)) * exp(-b * b * 120.0);
  vec3 c = mix(vec3(0.16, 0.2, 0.42), vec3(0.55, 0.42, 0.36), smoothstep(0.4, 0.8, f)) * band * (0.25 + f * 0.9) * (1.0 - dark * 0.8);
  c += vec3(0.05, 0.03, 0.09) * smoothstep(0.55, 0.9, fbm(d * 2.0 + 7.0));
- gl_FragColor = vec4(c * 0.42 * uA, 1.0); }` });
+ gl_FragColor = vec4(c * 0.42 * uA, 0.0); }` });
       const s = new THREE.Mesh(new THREE.SphereGeometry(950, 48, 32), m); sky.add(s); return m;
     })();
+    // Light that adds (the glows, the stars, the atmosphere) leaves the picture's alpha alone, and the sky writes none: when
+    // the closing turns transparent over the waking wall, only the Earth covers it.
+    space.traverse((o) => { const m = o.material; if (m && m.blending === THREE.AdditiveBlending) Object.assign(m, { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor }); });
     // the Earth turned so that Israel faces the dive: its point under the camera's line at 25° down, north away from us
     const ISR = { lat: 31.6, lon: 34.9 };
     const aimEarth = (dir, northHint) => {
