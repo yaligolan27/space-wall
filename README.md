@@ -87,7 +87,7 @@ before deploying this version: the feed, the remote and the connector read `on_w
 
 Also turn off Settings → Deployment Protection → Vercel Authentication so the lobby screen can load the page.
 
-**Connector** for the operator: `https://space-wall.vercel.app/mcp/<MCP_TOKEN>`, added in Claude under
+**Connector** for the operator: `https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/mcp/<MCP_TOKEN>`, added in Claude under
 Settings → Connectors → Add custom connector. To revoke access, change the token: the environment variable
 and a redeploy, or the `mcp_token` row.
 

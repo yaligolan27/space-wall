@@ -274,7 +274,7 @@ function effectiveTakeover(st: Row, big: Row[], now: Date): Row | null {
 }
 
 /** The deployment the server runs; the wall and the remote reload themselves when it changes. '' when unknown (no reloads). */
-const BUILD = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || '';
+const BUILD = process.env.APP_BUILD || process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || '';
 
 /** For the wall (api/live.ts): polled every few seconds. */
 export async function live() {

@@ -49,7 +49,7 @@
     quality: q.get('quality') === 'ultra' ? 'ultra' : 'high',
     staleAfterMin: num('stale', 180),
     live: q.get('live') || '/api/live',
-    livePoll: Math.max(3, num('livePoll', 5)),
+    livePoll: Math.max(3, num('livePoll', 8)),   // 8 s: the free server plan counts every request
     preview: bool('preview', false),               // embedded in the remote: muted, no keyboard
     lang: q.get('lang') === 'en' ? 'en' : 'he',    // en: the whole wall in English (the remote's switch, for delegations)
     // From the remote's agent (design): a style layer, a headline in the header, hidden panels, news items. ?css=0 skips the layer.
@@ -462,7 +462,10 @@
       const sep = url.includes('?') ? '&' : '?';
       const res = await fetch(url + sep + 't=' + Date.now() + (CFG.key ? '&key=' + encodeURIComponent(CFG.key) : '') + (EN() ? '&lang=en' : ''), { cache: 'no-store', signal: timeout(ms) });
       if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
-      return res.text();
+      // The server names the site's own files from the root ("/assets/promo.mp4"); on a site served under a path
+      // (GitHub Pages: /space-wall/) scripts/build-pages.mjs gives ASSETS that prefix.
+      const text = await res.text(), ASSETS = '/assets/';
+      return ASSETS === '/' + 'assets/' ? text : text.replace(/"\/assets\//g, '"' + ASSETS);
     }
     /** The feed, every `refresh` seconds. Until the first answer: retry within seconds and show nothing invented. */
     async load() {

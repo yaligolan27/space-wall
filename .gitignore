@@ -3,7 +3,9 @@ node_modules/
 .env.*
 !.env.example
 .vercel/
-dist/
+dist/*
+!dist/edge/
+_site/
 *.log
 
 # local runner scratch

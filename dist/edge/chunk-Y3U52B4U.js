@@ -1,0 +1,2 @@
+import { createRequire as __cr } from 'node:module'; import __process from 'node:process'; import { Buffer as __Buffer } from 'node:buffer'; const require = __cr(import.meta.url); globalThis.process ??= __process; globalThis.Buffer ??= __Buffer;
+import{c as a,d as b,e as c,f as d,g as e}from"./chunk-SWZIJJYZ.js";import"./chunk-ZSCTQH5K.js";import"./chunk-JD3BYILT.js";export{b as FIXED,d as feedInEnglish,a as hasHebrew,e as liveInEnglish,c as translateAll};
