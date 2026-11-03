@@ -57,6 +57,8 @@
 
   const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he', vw: false,
     emblem: 'v7', traffic: true, rate: 'normal', sats: 24, stack: 8, quality: 'high' };
+  /** Which emblem the wall shows: 'v2' the previous one, 'earth' the new globe on its own, 'v7' the new globe with traffic. */
+  const emblemMode = (d) => (d.emblem === 'v2' ? 'v2' : d.traffic === false ? 'earth' : 'v7');
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
   // The schedules screen ("תזמונים"): what comes up on the whole wall by itself (design.moments, lib/remote-ops.ts MOMENTS0).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
@@ -67,12 +69,13 @@
   const SPEC = [
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
     { title: 'לוגו', controls: [
-      { key: 'emblem', label: 'הלוגו במרכז הצג', kind: 'seg', options: [['v7', 'גלובוס עם שיגורים'], ['v2', 'הלוגו הקודם']] },
-      // the new globe's launches and satellites (app/src/emblem-v7/), shown only while it is the one on the wall
-      { key: 'traffic', label: 'שיגורים ולוויינים', kind: 'toggle', v7: true },
-      { key: 'rate', label: 'קצב שיגורים', kind: 'seg', options: [['off', 'בלי'], ['low', 'נמוך'], ['normal', 'רגיל'], ['high', 'גבוה']], v7: true },
-      { key: 'sats', label: 'מספר לוויינים מרבי במסלול', kind: 'slider', min: 4, max: 48, unit: '', v7: true },
-      { key: 'stack', label: 'לוויינים בכל שיגור', kind: 'slider', min: 2, max: 8, unit: '', v7: true },
+      // Three ways: the new globe with its launches and satellites (design emblem v7, traffic on), the same new globe on
+      // its own, no launch sites, launches or satellites (v7, traffic off), or the previous emblem (v2). See emblemMode.
+      { key: 'emblemMode', label: 'הלוגו במרכז הצג', kind: 'seg', options: [['v7', 'גלובוס עם שיגורים'], ['earth', 'כדור הארץ בלבד'], ['v2', 'הלוגו הקודם']] },
+      // the new globe's launches and satellites (app/src/emblem-v7/), shown only while they are on the wall
+      { key: 'rate', label: 'קצב שיגורים', kind: 'seg', options: [['off', 'בלי'], ['low', 'נמוך'], ['normal', 'רגיל'], ['high', 'גבוה']], v7: true, traffic: true },
+      { key: 'sats', label: 'מספר לוויינים מרבי במסלול', kind: 'slider', min: 4, max: 48, unit: '', v7: true, traffic: true },
+      { key: 'stack', label: 'לוויינים בכל שיגור', kind: 'slider', min: 2, max: 8, unit: '', v7: true, traffic: true },
       { key: 'quality', label: 'איכות הציור', kind: 'seg', options: [['high', 'רגילה'], ['ultra', 'גבוהה (כבד יותר)']], v7: true },
       { key: 'globe', label: 'זמן לסיבוב גלובוס', kind: 'slider', min: 20, max: 240, unit: 's' },
       { key: 'globeStyle', label: 'סגנון הגלובוס', kind: 'seg', options: [['holo', 'הולוגרפי'], ['real', 'ריאליסטי']] },
@@ -840,6 +843,12 @@
       } catch (e) { /* toasted */ }
       finally { this.setState({ nlBusy: false }); }
     }
+    /** The emblem in the middle: one press sets both design keys (emblem, traffic), undone as one. */
+    setEmblem(mode, label) {
+      const patch = mode === 'v2' ? { emblem: 'v2' } : { emblem: 'v7', traffic: mode !== 'earth' };
+      this.setState((s) => ({ design: Object.assign({}, s.design || {}, patch) }));
+      this.run('design', { patch, label: 'הלוגו במרכז הצג: ' + label }, 'הלוגו במרכז הצג: ' + label).catch(() => {}).finally(() => this.setState({ design: null }));
+    }
     setDesign(k, v, label) {
       if (k === 'lang') return this.setLang(v);
       this.setState((s) => ({ design: Object.assign({}, s.design || {}, { [k]: v }) }));
@@ -1094,7 +1103,7 @@
           { label: 'תזמונים ואוטומציות', sub: 'מה עולה לבד על כל המסך, כל כמה זמן ולכמה זמן', dot: '#6fd6ea', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('moments') },
           ...memMore,
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
-          { label: 'עיצוב הצג', sub: (design.emblem === 'v2' ? 'הלוגו הקודם' : 'הלוגו, השיגורים והלוויינים') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
+          { label: 'עיצוב הצג', sub: ({ v2: 'הלוגו הקודם', earth: 'כדור הארץ בלבד', v7: 'הלוגו, השיגורים והלוויינים' }[emblemMode(design)]) + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
       ];
 
       const lfP = this.P(f.personId), lfT = tpl(f.type), q = (f.name || '').replace(/\s+/g, ' ').trim();
@@ -1175,14 +1184,14 @@
         showActions: !s.studio, actGroups, studio: s.studio,
         closeStudio: () => this.setState({ studio: false, demo: 'off' }),
         resetDesign: () => this.run('resetDesign', {}, 'העיצוב אופס לברירת המחדל').catch(() => {}),
-        designSections: SPEC.map((sec) => ({ title: sec.title, controls: sec.controls.filter((c) => !c.v7 || design.emblem !== 'v2').map((c) => {
-          const v = c.key === 'demo' ? s.demo : design[c.key];
+        designSections: SPEC.map((sec) => ({ title: sec.title, controls: sec.controls.filter((c) => (!c.v7 || design.emblem !== 'v2') && (!c.traffic || design.traffic !== false)).map((c) => {
+          const v = c.key === 'demo' ? s.demo : c.key === 'emblemMode' ? emblemMode(design) : design[c.key];
           return Object.assign({ key: c.key, label: c.label, kind: c.kind }, sw(!!v), { value: v, min: c.min, max: c.max, display: v + (c.unit || ''),
             toggle: () => this.setDesign(c.key, !v, !v ? 'פעיל' : 'כבוי'),
             set: (e) => { const nv = e.target.value;
               if (c.kind === 'slider') this.slideDesign(c.key, +nv, c.unit);
               else if (c.key === 'demo') this.setState({ demo: nv }); },
-            options: (c.options || []).map(([ov, ol]) => Object.assign({ v: ov, label: ol }, seg(v === ov), { pick: () => v !== ov && this.setDesign(c.key, ov, ol) })) });
+            options: (c.options || []).map(([ov, ol]) => Object.assign({ v: ov, label: ol }, seg(v === ov), { pick: () => v !== ov && (c.key === 'emblemMode' ? this.setEmblem(ov, ol) : this.setDesign(c.key, ov, ol)) })) });
         }) })),
 
         narrow, showBottomBar: narrow && !s.chatOpen,
