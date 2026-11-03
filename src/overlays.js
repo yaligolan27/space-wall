@@ -1,0 +1,845 @@
+// Full-screen "moments" for the wall: launch mode, personal celebration, 12:00 promo show. window.makeWallOverlays(React) → components.
+// Avatar: a real photo URL when the person has one, otherwise an initials badge. Never a stock face:
+// these are real colleagues, and a random portrait next to a real name would be wrong.
+window.wallAvatar = (sz, photo, name) => {
+  if (typeof photo === 'string' && photo) return photo;
+  const cache = window.__avatarCache || (window.__avatarCache = {});
+  const key = sz + '|' + name; if (cache[key]) return cache[key];
+  const c = document.createElement('canvas'); c.width = c.height = sz; const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, sz, sz); gr.addColorStop(0, '#1d3a6e'); gr.addColorStop(1, '#0c1a38'); g.fillStyle = gr; g.fillRect(0, 0, sz, sz);
+  // A rank before the name is not an initial ("רס״ן דנה כהן" → דכ). It is written with ״, " or ” (or none), so compare bare.
+  // In English (the wall's English mode) the rank is an abbreviation, possibly two words ("Lt. Col.", "2nd Lt.").
+  const RANKS = new Set(['טוראי', 'טור', 'רבט', 'סמל', 'סמר', 'רסל', 'רסר', 'רסמ', 'רסם', 'רסב', 'רנג', 'סגמ', 'סגם', 'סגן', 'סרן', 'רסן', 'סאל', 'אלמ', 'אלם', 'תאל', 'אלוף', 'ראל',
+    'pvt', 'cpl', 'sgt', 'ssgt', 'sfc', 'msgt', 'sgtmaj', 'cwo', '2nd', 'lt', 'capt', 'maj', 'col', 'brig', 'gen']);
+  const words = String(name || '').replace(/[^\u0590-\u05FFA-Za-z0-9״" ]/g, '').trim().split(/\s+/);
+  while (words.length > 1 && RANKS.has(words[0].replace(/[״"׳]/g, '').toLowerCase())) words.shift();
+  const ini = words.slice(0, 2).map((w) => w[0]).join('');
+  g.fillStyle = '#e6f1ff'; g.font = '700 ' + Math.round(sz * 0.38) + 'px Heebo, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.direction = 'rtl'; g.fillText(ini, sz / 2, sz / 2 + sz * 0.03);
+  return (cache[key] = c.toDataURL());
+};
+// The home wall's emblem slot and the welcome screen's hero emblem, in stage px (1920×1080). Both wall.js and the welcome use
+// it: the hero lands exactly where the wall's own emblem draws, as a downscale (the emblem's framing depends only on the
+// box's aspect, so equal px-per-unit and globe centre mean an identical picture).
+window.wallGeo = (() => {
+  // The slot follows the wall's layout (wall.js render): stage rows 88 / 1fr / ticker 50 (0 when hidden) / launches 118
+  // (16 when hidden); with data, the emblem's column lies between the side panels (470 + a 26 gap each, 36 padding), and
+  // without data it spans the stage. The emblem is at most 860 wide, centred. pl/pr: a panel on the physical left/right.
+  const slot = ({ data, pl, pr, ticker, launches }) => {
+    const p = data ? { x: 36 + (pl ? 496 : 0), y: 102, w: 1848 - (pl ? 496 : 0) - (pr ? 496 : 0), h: 1080 - 88 - (ticker ? 50 : 0) - (launches ? 118 : 16) - 30 }
+      : { x: 0, y: 88, w: 1920, h: 1080 - 88 - (launches ? 118 : 16) };
+    const w = Math.min(p.w, 860);
+    return { x: p.x + (p.w - w) / 2, y: p.y, w, h: p.h };
+  };
+  const ALL = { pl: true, pr: true, ticker: true, launches: true };
+  const SLOT_DATA = slot(Object.assign({ data: true }, ALL)), SLOT_NODATA = slot(Object.assign({ data: false }, ALL));
+  const ppu = (b) => b.h / (2 * Math.max(1.62, 1.62 * b.h / b.w));            // px per emblem unit (emblem-v2 fit())
+  const gc = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 - 0.2 * ppu(b) });   // the globe's centre
+  const HERO = { w: 1027.2, h: 952.8, ppu: 952.8 / 3.24, g: { x: 1376, y: 500 } };   // the slot ×1.2; its globe centre on the stage
+  HERO.gIn = { x: HERO.w / 2, y: HERO.h / 2 - 0.2 * HERO.ppu };                   // …and inside its box
+  const landing = (slot) => { const c = gc(slot); return { s: ppu(slot) / HERO.ppu, tx: c.x - HERO.g.x, ty: c.y - HERO.g.y, gc: c }; };
+  return { slot, SLOT_DATA, SLOT_NODATA, ppu, gc, HERO, landing };
+})();
+window.makeWallOverlays = (React) => {
+  const h = React.createElement, { useState, useEffect, useRef } = React;
+  const LEX = "'Lexend',sans-serif", MONO = "'IBM Plex Mono',monospace";
+  const p2 = (n) => String(n).padStart(2, '0');
+  const clock = () => (window.wallNow ? window.wallNow() : Date.now());   // the wall's server-corrected clock
+  const useNow = (ms = 100) => { const [n, set] = useState(clock()); useEffect(() => { const id = setInterval(() => set(clock()), ms); return () => clearInterval(id); }, [ms]); return n; };
+  const fmtHM = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hour12: false });
+  // English (window.wallLang 'en', the remote's switch): the moments' own words, left to right.
+  const EN = () => window.wallLang === 'en';
+  const tr = (he, en) => (EN() ? en : he);
+  const shell = (children, extra) => h('div', { style: Object.assign({ position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', animation: 'ovIn .9s ease both', direction: EN() ? 'ltr' : 'rtl', fontFamily: 'Heebo, sans-serif', color: '#e6f1ff' }, extra) }, children);
+
+  // ---------- particles: fireworks + confetti ----------
+  const Party = () => {
+    const ref = useRef(null);
+    useEffect(() => {
+      const c = ref.current, g = c.getContext('2d'), W = 1920, H = 1080;
+      // the screen pixels it covers (a 4K screen: twice the wall's size), drawn in stage px
+      const k = Math.min(2, Math.max(0.5, (c.getBoundingClientRect().width / W || 1) * (window.__pageScale ? window.__pageScale() : 1) * (window.devicePixelRatio || 1)));
+      c.width = Math.round(W * k); c.height = Math.round(H * k); g.setTransform(k, 0, 0, k, 0, 0);
+      const COLORS = ['#d4f25c', '#6fd6ea', '#e9b872', '#b9a6f5', '#ffffff', '#f2a37a'];
+      const conf = Array.from({ length: 180 }, () => ({ x: Math.random() * W, y: -Math.random() * H, vx: (Math.random() - .5) * 1.5, vy: 1.5 + Math.random() * 2.5, r: Math.random() * 6.28, vr: (Math.random() - .5) * .2, w: 8 + Math.random() * 8, h: 4 + Math.random() * 6, c: COLORS[(Math.random() * COLORS.length) | 0] }));
+      const rockets = [], sparks = []; let next = 0, raf, t0 = performance.now();
+      const loop = (now) => {
+        const t = (now - t0) / 1000;
+        g.clearRect(0, 0, W, H);
+        if (t > next && t < 10) { rockets.push({ x: 300 + Math.random() * (W - 600), y: H, vy: -(13 + Math.random() * 4), ty: 180 + Math.random() * 320, c: COLORS[(Math.random() * COLORS.length) | 0] }); next = t + .35 + Math.random() * .5; }
+        g.globalCompositeOperation = 'lighter';
+        for (let i = rockets.length - 1; i >= 0; i--) { const r = rockets[i]; r.y += r.vy; r.vy *= .985; g.fillStyle = r.c; g.beginPath(); g.arc(r.x, r.y, 3, 0, 6.28); g.fill();
+          if (r.y <= r.ty || r.vy > -2) { for (let k = 0; k < 90; k++) { const a = Math.random() * 6.28, s = 2 + Math.random() * 6; sparks.push({ x: r.x, y: r.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, c: r.c }); } rockets.splice(i, 1); } }
+        for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.x += s.vx; s.y += s.vy; s.vx *= .97; s.vy = s.vy * .97 + .06; s.life -= .012; if (s.life <= 0) { sparks.splice(i, 1); continue; } g.globalAlpha = s.life; g.fillStyle = s.c; g.beginPath(); g.arc(s.x, s.y, 2.2, 0, 6.28); g.fill(); }
+        g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+        for (const p of conf) { p.x += p.vx + Math.sin(t * 2 + p.r) * .6; p.y += p.vy; p.r += p.vr; if (p.y > H + 20 && t < 9) { p.y = -20; p.x = Math.random() * W; }
+          g.save(); g.translate(p.x, p.y); g.rotate(p.r); g.scale(1, Math.cos(t * 4 + p.r)); g.fillStyle = p.c; g.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); g.restore(); }
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop); return () => cancelAnimationFrame(raf);
+    }, []);
+    return h('canvas', { ref, style: { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' } });
+  };
+
+  // ---------- Celebration ----------
+  const TITLES = { 'יום הולדת': 'יום הולדת שמח!', 'שחרור': 'בהצלחה בהמשך הדרך!', 'ברוכים הבאים': 'ברוכים הבאים למנהלת!', 'מזל טוב': 'מזל טוב!',
+    // the same chips in English (lib/translate.ts FIXED)
+    Birthday: 'Happy Birthday!', Farewell: 'All the best ahead!', Welcome: 'Welcome aboard!', Congratulations: 'Congratulations!' };
+  const Celebration = ({ person }) => {
+    const p = person;
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 900px 640px at 50% 50%, rgba(20,40,80,.88), rgba(4,9,20,.96))', backdropFilter: 'blur(10px)' } }),
+      h(Party, { key: 'party' }),
+      h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26 } },
+        h('div', { style: { position: 'relative', width: 300, height: 300, animation: 'popIn 1s cubic-bezier(.2,1.4,.4,1) .2s both' } },
+          h('div', { style: { position: 'absolute', inset: -14, borderRadius: '50%', background: `conic-gradient(${p.color}, #6fd6ea, #d4f25c, ${p.color})`, animation: 'spin 5s linear infinite', filter: 'blur(1px)' } }),
+          h('div', { style: { position: 'absolute', inset: -40, borderRadius: '50%', border: `2px solid ${p.color}`, animation: 'ping 2.4s ease-out infinite' } }),
+          h('img', { src: window.wallAvatar(400, p.photo, p.name), alt: p.name, style: { position: 'absolute', inset: 0, width: 300, height: 300, borderRadius: '50%', objectFit: 'cover', border: '6px solid #0a1428' } })),
+        h('div', { style: { fontSize: 30, fontWeight: 700, color: '#0a1224', background: p.color, padding: '8px 28px', borderRadius: 999, animation: 'rise .8s ease .6s both' } }, p.type),
+        h('div', { style: { fontSize: 120, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', textShadow: `0 0 60px ${p.color}66`, animation: 'rise .9s ease .8s both' } }, TITLES[p.type] || tr('מזל טוב!', 'Congratulations!')),
+        h('div', { style: { fontSize: 72, fontWeight: 700, lineHeight: 1.1, animation: 'rise .9s ease 1s both' } }, p.name),
+        h('div', { style: { fontSize: 30, color: '#b3c2dc', fontWeight: 300, animation: 'rise .9s ease 1.2s both' } }, [p.line, tr('כל המנהלת מברכת', 'Warm wishes from all of us at the Space Program Office')].filter(Boolean).join(' · ')))
+    ]);
+  };
+
+  // ---------- Launch mode ----------
+  const LaunchMode = ({ launch }) => {
+    const now = useNow(100), at = Date.parse(launch.at), d = at - now, live = d <= 0;
+    const a = Math.abs(d), m = Math.floor(a / 60e3), s = Math.floor(a / 1e3) % 60, ds = Math.floor(a / 100) % 10;
+    const frac = Math.max(0, Math.min(1, d / 600e3));
+    const steps = [['GO/NO-GO', d < 540e3], [tr('מילוי דלק', 'Fueling'), d < 420e3], [tr('מערכות פנימיות', 'Internal power'), d < 120e3], [tr('הצתה', 'Ignition'), d < 3e3], [tr('המראה', 'Liftoff'), live]];
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: live ? 'radial-gradient(ellipse at 50% 100%, rgba(255,170,90,.35), rgba(8,14,30,.99) 60%)' : 'radial-gradient(ellipse at 50% 60%, rgba(16,40,78,.97), rgba(4,9,20,.99) 70%)', transition: 'background 1.5s ease' } }),
+      h('div', { key: 'grid', style: { position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(111,214,234,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(111,214,234,.06) 1px, transparent 1px)', backgroundSize: '60px 60px', WebkitMaskImage: 'radial-gradient(ellipse at center, #000 30%, transparent 75%)' } }),
+      live ? h('div', { key: 'flash', style: { position: 'absolute', inset: 0, background: '#fff', animation: 'flash 1.2s ease-out both', pointerEvents: 'none' } }) : null,
+      h('div', { key: 'top', style: { position: 'absolute', top: 60, left: 0, right: 0, display: 'flex', justifyContent: 'center' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 14, padding: '12px 30px', borderRadius: 999, border: `1px solid ${live ? '#e9b872' : '#d4f25c'}`, background: 'rgba(10,20,40,.7)', fontSize: 26, fontWeight: 700, color: live ? '#e9b872' : '#d4f25c' } },
+          h('span', { style: { width: 14, height: 14, borderRadius: '50%', background: 'currentColor', boxShadow: '0 0 16px currentColor', animation: 'breathe 1s ease-in-out infinite' } }), live ? tr('שוגר! · LIFTOFF', 'LIFTOFF!') : tr('מצב שיגור · LAUNCH MODE', 'LAUNCH MODE'))),
+      h('div', { key: 'mid', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18 } },
+        h('div', { style: { fontSize: 34, color: '#8b9dbd', fontWeight: 300, whiteSpace: 'nowrap' } }, launch.vehicle + ' · ' + launch.site),
+        h('div', { style: { fontSize: 78, fontWeight: 700, lineHeight: 1.05, textAlign: 'center' } }, launch.mission),
+        h('div', { dir: 'ltr', style: { fontFamily: LEX, fontVariantNumeric: 'tabular-nums', fontSize: 260, fontWeight: 300, lineHeight: 1, letterSpacing: '-0.02em', color: live ? '#e9b872' : '#ffffff', textShadow: live ? '0 0 80px rgba(233,184,114,.6)' : '0 0 60px rgba(111,214,234,.35)' } },
+          (live ? 'T+' : 'T−') + p2(m) + ':' + p2(s), h('span', { style: { fontSize: 110, color: live ? '#e9b872' : '#6fd6ea' } }, '.' + ds)),
+        h('div', { style: { width: 1100, height: 6, borderRadius: 6, background: 'rgba(150,190,240,.15)', overflow: 'hidden' } }, h('div', { style: { height: '100%', width: (100 - frac * 100) + '%', background: 'linear-gradient(270deg,#d4f25c,#6fd6ea)', boxShadow: '0 0 20px #6fd6ea', transition: 'width .1s linear' } })),
+        h('div', { style: { display: 'flex', gap: 14, marginTop: 10 } }, steps.map(([lab, done], i) => h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 22px', borderRadius: 999, fontSize: 22, fontWeight: 500, whiteSpace: 'nowrap', border: `1px solid ${done ? 'rgba(143,224,184,.7)' : 'rgba(150,190,240,.2)'}`, color: done ? '#8fe0b8' : '#6f82a6', background: done ? 'rgba(143,224,184,.08)' : 'transparent', transition: 'all .6s ease' } }, h('span', null, done ? '✓' : '○'), lab)))),
+      live ? h('div', { key: 'trail', style: { position: 'absolute', left: '50%', bottom: 0, width: 8, marginLeft: -4, height: 1080, background: 'linear-gradient(0deg, rgba(255,200,120,0), rgba(255,220,160,.9) 60%, #fff)', filter: 'blur(2px)', transformOrigin: 'bottom', animation: 'liftoff 4s cubic-bezier(.5,0,.8,.4) both' } }) : null
+    ]);
+  };
+
+  // ---------- 12:00 show: 10…0 countdown around the logo, then the promo video ----------
+  // The video loads, unseen, from the start of the countdown, so it plays from the first frame without waiting on the
+  // network. Without a src (the remote's preview, which shows its own card) the show ends on the dark background.
+  const NoonShow = ({ src, logo, muted, onDone }) => {
+    const [phase, setPhase] = useState('count'), [n, setN] = useState(10), vid = useRef(null);
+    useEffect(() => { if (phase !== 'count') return; const id = setInterval(() => setN((x) => { if (x <= 0) { clearInterval(id); setTimeout(() => setPhase('video'), 900); return 0; } return x - 1; }), 1000); return () => clearInterval(id); }, [phase]);
+    useEffect(() => { if (phase !== 'video' || !vid.current) return; const v = vid.current; v.muted = !!muted; v.volume = 1; v.play().catch(() => { v.muted = true; v.play().catch(() => onDone && onDone()); }); }, [phase]);
+    const playing = phase === 'video';
+    const ticks = Array.from({ length: 10 }, (_, i) => i);
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'radial-gradient(circle at 50% 50%, rgba(14,34,70,.94), rgba(2,5,12,.99) 65%)' } }),
+      phase === 'count' ? h('div', { key: 'cnt', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 40, paddingBottom: 60 } },
+        h('div', { style: { position: 'relative', width: 560, height: 560, marginBottom: 150 } },
+          h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', background: `conic-gradient(from 0deg, #6fd6ea ${(10 - n) * 36}deg, rgba(150,190,240,.12) 0)`, WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px))', mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px))', transition: 'background .8s ease', filter: 'drop-shadow(0 0 16px rgba(111,214,234,.6))' } }),
+          ticks.map((i) => h('span', { key: i, style: { position: 'absolute', left: '50%', top: '50%', width: 4, height: 30, marginLeft: -2, marginTop: -15, borderRadius: 2, background: i < 10 - n ? '#d4f25c' : 'rgba(150,190,240,.3)', boxShadow: i < 10 - n ? '0 0 12px #d4f25c' : 'none', transform: `rotate(${i * 36}deg) translateY(-312px)`, transition: 'all .4s ease' } })),
+          h('div', { style: { position: 'absolute', inset: 30, borderRadius: '50%', border: '1px dashed rgba(111,214,234,.35)', animation: 'spin 30s linear infinite' } }),
+          h('div', { style: { position: 'absolute', inset: 110, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #fff, #dfeaf7 60%, #a9c3e2)', boxShadow: `0 0 ${60 + (10 - n) * 12}px rgba(111,214,234,.55)`, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: n === 0 ? 'scale(1.25)' : 'scale(1)', transition: 'transform .9s cubic-bezier(.3,1.4,.5,1), box-shadow .8s ease' } }, h('img', { src: logo, alt: '', style: { width: '82%', height: '82%', objectFit: 'contain' } })),
+          h('div', { key: n, dir: 'ltr', style: { position: 'absolute', left: 0, right: 0, bottom: -150, textAlign: 'center', fontFamily: LEX, fontSize: 110, fontWeight: 300, color: n === 0 ? '#d4f25c' : '#fff', animation: 'countPop .9s ease both', fontVariantNumeric: 'tabular-nums' } }, n === 0 ? 'LIFTOFF' : p2(n))),
+        h('div', { style: { fontSize: 40, fontWeight: 700, letterSpacing: '.02em' } }, tr('מנהלת החלל · סרטון תדמית', 'Space Program Office · Promo video')),
+        h('div', { style: { fontFamily: MONO, fontSize: 20, color: '#8b9dbd', letterSpacing: '.2em' } }, '12:00 · DAILY BROADCAST')) : null,
+      src ? h('video', { key: 'v', ref: vid, src, preload: 'auto', playsInline: true, onEnded: () => onDone && onDone(), style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', background: '#000', visibility: playing ? 'visible' : 'hidden', animation: playing ? 'ovIn 1s ease both' : 'none' } }) : null,
+      n === 0 && !playing ? h('div', { key: 'fl', style: { position: 'absolute', inset: 0, background: '#fff', animation: 'flash 1.2s ease-out both', pointerEvents: 'none' } }) : null
+    ]);
+  };
+
+  // ---------- important directorate event, started from the remote or automatically while it runs ----------
+  // `until` is when this screen itself ends (the remote can show an event for less, or after, its own end).
+  // With a picture (event.img), the words take one side and the picture, whole and uncropped, the other.
+  const EventTakeover = ({ event, until }) => shell([
+    h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'linear-gradient(160deg,#0b1d42 0%,#040914 70%)' } }),
+    h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: 80, padding: 134, boxSizing: 'border-box' } },
+      h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 27 } },
+        h('span', { style: { fontSize: 38, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } }, tr('עכשיו במנהלת', 'Happening now')),
+        h('span', { style: { fontSize: event.img ? 84 : 108, fontWeight: 800, lineHeight: 1.1, textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, event.title),
+        // `when`: its hours, or its days for an event of several days ('' all day); older moments carry only start/end
+        h('span', { style: { fontSize: 44, color: '#cfe0f7', animation: 'rise .9s ease .6s both' } }, [event.when != null ? event.when : event.start + '–' + event.end, event.place].filter(Boolean).join(' · '))),
+      event.img ? h('img', { src: event.img, alt: '', onError: (ev) => { ev.currentTarget.style.display = 'none'; }, style: { flex: 'none', display: 'block', maxWidth: 760, maxHeight: 760, borderRadius: 28, border: '1px solid rgba(150,190,240,.22)', boxShadow: '0 30px 80px rgba(0,0,0,.55)', animation: 'popIn 1s cubic-bezier(.2,1.4,.4,1) .3s both' } }) : null),
+    h('span', { key: 'end', style: { position: 'absolute', bottom: 77, [EN() ? 'left' : 'right']: 134, fontSize: 29, color: '#8b9dbd' } }, tr('יורד לבד ב-', 'Until ') + (until ? fmtHM.format(new Date(until)) : event.end))
+  ]);
+
+  // ---------- welcome screen for a delegation's visit, until "enter" in the remote ----------
+  // Deep space with the directorate's realistic 3D emblem on the right: it waits at night, the sun rises on its limb and the
+  // logo assembles (emblem-v2 intro="go"), then the title lands on the left. Idle, everything breathes on one 9 s cycle
+  // (sun → limb → glow → words) while the sky slowly wheels. On "enter" (`leaving`, a performance.now() stamp from the wall)
+  // the words drift off and one continuous camera move carries the Earth into the home wall's emblem slot while the wall
+  // assembles around it (wall.js); two rings clamp it, and the hero hands over to the wall's own emblem, drawn on the same
+  // page clock, so nothing visibly changes. 12 s in all. Light on purpose (the lobby computer is weak): one 2D canvas, one
+  // WebGL loop, and otherwise only transform/opacity animations (WAAPI for the way out, so they run on the compositor).
+  const GEO = window.wallGeo, G = GEO.HERO.g, GB = GEO.HERO.gIn, HB = GEO.HERO;
+  const mulberry = (a) => () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const bez = (x1, y1, x2, y2) => (x) => {   // a CSS cubic-bezier as a function (for the canvas's part of the camera move)
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    let u = x; for (let i = 0; i < 8; i++) { const cx = 3 * u * (1 - u) * (1 - u) * x1 + 3 * u * u * (1 - u) * x2 + u * u * u - x, d = 3 * (1 - u) * (1 - u) * x1 + 6 * u * (1 - u) * (x2 - x1) + 3 * u * u * (1 - x2); if (Math.abs(cx) < 1e-5 || !d) break; u = Math.min(1, Math.max(0, u - cx / d)); }
+    return 3 * u * (1 - u) * (1 - u) * y1 + 3 * u * u * (1 - u) * y2 + u * u * u;
+  };
+  const camEase = bez(0.42, 0, 0.18, 1);
+  // A faint static dither over the gradients: no banding on an 8-bit lobby panel.
+  const dither = () => window.__wlDither || (window.__wlDither = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'), d = g.createImageData(128, 128); for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() < 0.5 ? 0 : 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 4; } g.putImageData(d, 0, 0); return c.toDataURL(); })());
+
+  // The sky: ~1500 seeded stars in three depths on a disc around the Earth, wheeling slowly about it (each depth at its
+  // own rate, the rate itself breathing), twinkling, with a rare satellite pass and shooting star. On the way out it brakes,
+  // then gives the camera move its parallax (near stars streak). fx off: drawn once.
+  const Sky = ({ fx, leaving, target, preview }) => {
+    const ref = useRef(null), io = useRef({});
+    io.current.fx = fx; io.current.leaving = leaving; io.current.target = target;
+    useEffect(() => {
+      const c = ref.current, g = c.getContext('2d');
+      const st = (c.getBoundingClientRect().width / 1920 || 1) * (window.__pageScale ? window.__pageScale() : 1);
+      const k = preview ? 0.5 : Math.min(2, st * (window.devicePixelRatio || 1));   // a 4K screen: twice the wall's size
+      c.width = Math.round(1920 * k); c.height = Math.round(1080 * k);
+      const rnd = mulberry(0x5EED), BANDS = [[1024, 0.5, 0.9, 0.22, 0.5, 0.04], [376, 0.8, 1.3, 0.45, 0.8, 0.07], [82, 1.3, 2.0, 0.75, 1, 0.11]];
+      const N = BANDS.reduce((a, b) => a + b[0], 0);
+      const band = new Uint8Array(N), rc = new Float32Array(N), rs = new Float32Array(N), rad = new Float32Array(N), a0 = new Float32Array(N), col = new Uint8Array(N);
+      const tw = new Float32Array(N), om = new Float32Array(N), ph = new Float32Array(N), px = new Float32Array(N), py = new Float32Array(N), qx = new Float32Array(N), qy = new Float32Array(N), bk = new Uint8Array(N), order = new Uint16Array(N), cnt = new Uint16Array(19);
+      let n = 0;
+      BANDS.forEach(([count, r0, r1, al0, al1], b) => { for (let i = 0; i < count; i++, n++) {
+        const r = 1500 * Math.sqrt(rnd()), f = rnd() * Math.PI * 2;
+        band[n] = b; rc[n] = r * Math.cos(f); rs[n] = r * Math.sin(f); rad[n] = r0 + (r1 - r0) * rnd(); a0[n] = al0 + (al1 - al0) * rnd();
+        const cr = rnd(); col[n] = cr < 0.8 ? 0 : cr < 0.92 ? 1 : 2;
+        const tr0 = rnd(); tw[n] = b === 2 && tr0 < 0.05 ? 0.4 : tr0 < 0.3 ? 0.25 : 0; om[n] = tw[n] === 0.4 ? 1.2 + 0.8 * rnd() : 0.25 + 0.65 * rnd(); ph[n] = rnd() * 6.283;
+      } });
+      const COLS = ['#ffffff', '#cfe6ff', '#ffe9c8'];
+      const sprite = document.createElement('canvas'); sprite.width = sprite.height = 16;
+      (() => { const sg = sprite.getContext('2d'), gr = sg.createRadialGradient(8, 8, 0, 8, 8, 8); gr.addColorStop(0, 'rgba(230,242,255,.5)'); gr.addColorStop(0.35, 'rgba(230,242,255,.14)'); gr.addColorStop(1, 'rgba(230,242,255,0)'); sg.fillStyle = gr; sg.fillRect(0, 0, 16, 16); })();
+      const sm = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+      const mask = (x, y) => 1 - 0.7 * sm(60, 100, x) * (1 - sm(960, 1000, x)) * sm(296, 336, y) * (1 - sm(766, 806, y));
+      const theta = [0, 0, 0], RATE = BANDS.map((b) => b[5] * Math.PI / 180);
+      const OFF = [[-40, -5], [-120, -15], [-300, -36]], SC = [1, 0.985, 0.95];
+      let raf = 0, last = performance.now(), t = 0, odd = false, drewLeave = false;
+      let nextMeteor = 6 + rnd() * 10, meteor = null, nextSat = 25 + rnd() * 40, sat = null;
+      const frame = (now) => {
+        const io0 = io.current, L = io0.leaving, T = L ? now - L : -1;   // ms since the way out began (negative: not yet)
+        const dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt;
+        // Rotation, braking to a held breath over 0.8 s once the way out begins.
+        const brake = T < 0 ? 1 : Math.pow(1 - Math.min(1, T / 800), 3), breath = 0.8 + 0.2 * Math.sin(t * 6.283 / 23);
+        if (io0.fx) for (let b = 0; b < 3; b++) theta[b] += RATE[b] * breath * brake * dt;
+        const p = T < 1000 ? 0 : camEase((T - 1000) / 7200), S = (io0.target && io0.target.gc) || { x: 960, y: 450 };
+        g.setTransform(k, 0, 0, k, 0, 0); g.clearRect(0, 0, 1920, 1080);
+        const c0 = Math.cos(theta[0]), c1 = Math.cos(theta[1]), c2 = Math.cos(theta[2]), s0_ = Math.sin(theta[0]), s1_ = Math.sin(theta[1]), s2_ = Math.sin(theta[2]);
+        cnt.fill(0);
+        const streak = p > 0 && p < 1;
+        g.lineCap = 'round';
+        for (let i = 0; i < N; i++) {
+          const b = band[i];
+          const cb_ = b === 0 ? c0 : b === 1 ? c1 : c2, sb_ = b === 0 ? s0_ : b === 1 ? s1_ : s2_;
+          let x = G.x + rc[i] * cb_ + rs[i] * sb_, y = G.y + rs[i] * cb_ - rc[i] * sb_;
+          if (p > 0) { const s = 1 + (SC[b] - 1) * p; x = S.x + (x - S.x) * s + OFF[b][0] * p; y = S.y + (y - S.y) * s + OFF[b][1] * p; }
+          qx[i] = px[i]; qy[i] = py[i]; px[i] = x; py[i] = y;
+          if (x < -8 || x > 1928 || y < -8 || y > 1088) { bk[i] = 255; continue; }
+          let a = a0[i] * mask(x, y);
+          if (tw[i]) a *= 1 + tw[i] * Math.sin(om[i] * t + ph[i]) - (tw[i] === 0.25 ? 0.25 : 0);
+          // On the way out, a moving near or middle star is a short streak (stroked below), not a dot.
+          if (streak && b > 0 && drewLeave && (x - qx[i]) * (x - qx[i]) + (y - qy[i]) * (y - qy[i]) > 1.44) { bk[i] = 254; continue; }
+          const q = Math.min(5, Math.max(0, (a * 6) | 0)); bk[i] = col[i] * 6 + q; cnt[bk[i]]++;
+        }
+        // Batched by colour × alpha (18 fills), no per-star state changes.
+        let acc = 0; for (let j = 0; j < 18; j++) { const c0 = cnt[j]; cnt[j] = acc; acc += c0; }
+        for (let i = 0; i < N; i++) if (bk[i] < 18) order[cnt[bk[i]]++] = i;
+        let s0 = 0;
+        for (let j = 0; j < 18; j++) {
+          const e = cnt[j]; if (e === s0) continue;
+          g.globalAlpha = ((j % 6) + 0.5) / 6; g.fillStyle = COLS[(j / 6) | 0]; g.beginPath();
+          for (let m = s0; m < e; m++) { const i = order[m], r = rad[i]; g.rect(px[i] - r / 2, py[i] - r / 2, r, r); }
+          g.fill(); s0 = e;
+        }
+        for (let i = 0; i < N; i++) if (band[i] === 2 && bk[i] < 18) { g.globalAlpha = 0.6 * a0[i] * mask(px[i], py[i]); g.drawImage(sprite, px[i] - 8, py[i] - 8); }
+        if (streak && drewLeave) for (let b = 1; b < 3; b++) for (let cI = 0; cI < 3; cI++) {
+          g.globalAlpha = b === 2 ? 0.9 : 0.6; g.strokeStyle = COLS[cI]; g.lineWidth = b === 2 ? 1.6 : 1; g.beginPath(); let any = false;
+          for (let i = 0; i < N; i++) if (bk[i] === 254 && band[i] === b && col[i] === cI) {
+            const dx = qx[i] - px[i], dy = qy[i] - py[i], k6 = Math.min(6, 24 / (Math.hypot(dx, dy) || 1));   // six frames' motion, at most 24 px
+            g.moveTo(px[i], py[i]); g.lineTo(px[i] + k6 * dx, py[i] + k6 * dy); any = true;
+          }
+          if (any) g.stroke();
+        }
+        if (p > 0) drewLeave = true;
+        // Rare life (fx, idle only): a satellite crossing slowly, a shooting star.
+        if (io0.fx && T < 0) {
+          if (!sat && t > nextSat) sat = { x: -10, y: 70 + rnd() * 230, v: 60 + rnd() * 15, a: (4 + rnd() * 8) * Math.PI / 180, glint: rnd() < 0.25 ? 6 + rnd() * 14 : -1, t0: t };
+          if (sat) { const u = t - sat.t0; sat.x = -10 + u * sat.v * Math.cos(sat.a); const y = sat.y + u * sat.v * Math.sin(sat.a); const gl = sat.glint > 0 && Math.abs(u - sat.glint) < 0.45;
+            g.globalAlpha = gl ? 1 : 0.8; g.fillStyle = '#eaf4ff'; const r = gl ? 2.4 : 1.3; g.beginPath(); g.arc(sat.x, y, r, 0, 6.283); g.fill();
+            if (sat.x > 1930) { sat = null; nextSat = t + 70 + rnd() * 40; } }
+          if (!meteor && t > nextMeteor) { const a = (195 + rnd() * 10) * Math.PI / 180; meteor = { x: 300 + rnd() * 700, y: 30 + rnd() * 130, dx: Math.cos(a), dy: -Math.sin(a), t0: t }; }
+          if (meteor) { const u = t - meteor.t0, hx = meteor.x + meteor.dx * 900 * u, hy = meteor.y + meteor.dy * 900 * u, len = Math.min(180, 900 * u), fade = 1 - u / 0.55;
+            if (fade <= 0) { meteor = null; nextMeteor = t + 14 + rnd() * 12; }
+            else { const gr = g.createLinearGradient(hx, hy, hx - meteor.dx * len, hy - meteor.dy * len); gr.addColorStop(0, 'rgba(240,248,255,.95)'); gr.addColorStop(1, 'rgba(240,248,255,0)');
+              g.globalAlpha = fade; g.strokeStyle = gr; g.lineWidth = 1.6; g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx - meteor.dx * len, hy - meteor.dy * len); g.stroke(); } }
+        }
+        g.globalAlpha = 1;
+      };
+      const loop = (now) => {
+        const io0 = io.current, L = io0.leaving, T = L ? now - L : -1;
+        if (T > 6400) { raf = 0; return; }   // faded out by then
+        if (!io0.fx) { frame(now); raf = 0; return; }   // fx off: one still picture (the way out moves the canvas itself)
+        odd = !odd;
+        if (T >= 0 || odd) frame(now);       // 30 fps idle, 60 on the way out
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+      io.current.kick = () => { if (!raf) raf = requestAnimationFrame(loop); };
+      return () => cancelAnimationFrame(raf);
+    }, []);
+    useEffect(() => { if (io.current.kick && fx) io.current.kick(); }, [leaving, fx]);
+    return h('canvas', { ref, style: { position: 'absolute', inset: 0, width: '100%', height: '100%' } });
+  };
+
+  const fmtWlClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const fmtWlUTC = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false });
+  const fmtWlDate = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const WL_TITLE = ['THE SPACE', 'PROGRAM OFFICE'];
+  const abs = (x, y, w, hh, extra) => Object.assign({ position: 'absolute', left: x, top: y, width: w, height: hh }, extra);
+  const circle = (cx, cy, d, extra) => abs(cx - d / 2, cy - d / 2, d, d, Object.assign({ borderRadius: '50%' }, extra));
+
+  // how the words (and a flat disc in the emblem's place) leave: drift left and fade
+  const WL_OUT = [{ opacity: 1, transform: 'none' }, { offset: 0.65, opacity: 0, transform: 'translateX(-104px)' }, { opacity: 0, transform: 'translateX(-160px)' }];
+  const WL_OUT_EASE = 'cubic-bezier(.45,0,.3,1)';
+
+  /** props: guest, fx, preview, leaving (performance.now() of the way out, maybe still ahead; 0 = not leaving), woke and
+   *  embShown (the wall's steps), mode ('dissolve' | 'scan' | 'none'), target (wallGeo.landing), attrs ({speed, sway, word},
+   *  frozen at mount), onReveal(R, ok, hero element), onHeroGone(). */
+  const Welcome = (props) => {
+    const { guest, fx, preview, leaving, woke, embShown, mode, target } = props;
+    const skyFx = fx && !preview;                          // the remote's preview draws one still sky
+    const A = useRef(props.attrs).current;
+    const [phase, setPhase] = useState('load');            // 'load' → 'intro' at R (one commit carries every intro and idle animation)
+    const [heroOn, setHeroOn] = useState(!preview);
+    const [heroOk, setHeroOk] = useState(!preview);
+    const r = useRef({}).current;                          // element refs, by name
+    const set = (name) => r['_' + name] || (r['_' + name] = (el) => { r[name] = el; });
+    const letters = useRef([]).current, twins = useRef([]).current, xs = useRef([]).current;
+    const cb = useRef(props); cb.current = props;
+    const leaveRef = useRef(0); leaveRef.current = leaving;
+    const timers = useRef([]).current;
+    const later = (ms, fn) => timers.push(setTimeout(fn, Math.max(0, ms)));
+    useEffect(() => () => timers.forEach(clearTimeout), []);
+
+    // ---- reveal: when the hero has loaded and compiled (no white globe, no late wordmark), at least 1.4 s after the dip
+    useEffect(() => {
+      const t0 = performance.now(), el = r.hero;
+      let done = false;
+      const reveal = (ok) => {
+        if (done) return; done = true;
+        r.g0 = cb.current.guest;                             // the name the intro brings in (a later one comes in at once)
+        window.__emblemEpoch = performance.now() - 600;      // t(R) = 0.6: every emblem phase is a fixed offset from R
+        letters.forEach((s, i) => { xs[i] = s ? 128 + s.offsetLeft + s.offsetWidth / 2 : 600; });
+        if (ok && r.hero) r.hero.setAttribute('intro', 'go'); else { setHeroOn(false); setHeroOk(false); }
+        setPhase('intro');
+        cb.current.onReveal && cb.current.onReveal(performance.now(), ok, r.hero);
+        later(3000, () => { if (r.hero && !leaveRef.current) r.hero.setAttribute('events', 'on'); });
+      };
+      if (!el) { later(1400, () => reveal(false)); return; }
+      const onReady = () => later(1400 - (performance.now() - t0), () => reveal(true));
+      const onErr = () => { if (!done) reveal(false); else { setHeroOn(false); setHeroOk(false); cb.current.onReveal && cb.current.onReveal(null, false); } };
+      el.addEventListener('emblem-ready', onReady); el.addEventListener('emblem-error', onErr);
+      if (el.ready) onReady();
+      later(6000, () => reveal(typeof el.getTime === 'function'));
+      return () => { el.removeEventListener('emblem-ready', onReady); el.removeEventListener('emblem-error', onErr); };
+    }, []);
+
+    // a guest's name changed after the reveal comes in at once, whatever it is (even the first one again)
+    useEffect(() => { if (r.g0 !== undefined && guest !== r.g0) r.g0 = null; }, [guest]);
+
+    // ---- the way out: every step from one start time, as compositor animations (WAAPI) on the outer wrappers
+    useEffect(() => {
+      if (!leaving) return;
+      const t0 = leaving, anims = [];
+      const at = (T) => T - (performance.now() - t0);
+      // (fill 'both' holds a layer at its first keyframe until its step: 'forwards' for one whose first keyframe is not how it rests)
+      const run = (el, kf, T, dur, easing, origin, fill) => { if (!el) return; if (origin) el.style.transformOrigin = origin; anims.push(el.animate(kf, { delay: at(T), duration: dur, easing: easing || 'linear', fill: fill || 'both' })); };
+      ['rigX', 'rigY', 'rigS', 'eyebrowO', 'line1O', 'line2O'].forEach((n) => r[n] && (r[n].style.willChange = 'transform'));
+      later(at(0), () => { if (r.hero) r.hero.setAttribute('events', 'off'); });
+      // the breath held, then the light gathers and the sun sets behind the limb
+      run(r.sunO, [{ transform: 'none', opacity: 1, easing: 'cubic-bezier(.5,0,.75,0)' }, { offset: 0.42, transform: 'scale(1.5)', opacity: 1, easing: 'cubic-bezier(.45,0,.55,1)' }, { transform: 'translate(22px,22px) scale(.6)', opacity: 0 }], 0, 2400);
+      run(r.streakO, [{ transform: 'scaleX(1)', opacity: 1 }, { offset: 0.5, transform: 'scaleX(1.5)', opacity: 1 }, { transform: 'scaleX(2.6)', opacity: 0 }], 0, 2000);
+      run(r.auraO, [{ transform: 'none', opacity: 1 }, { offset: 0.122, transform: 'scale(1.06)', opacity: 1 }, { offset: 0.3, transform: 'none', opacity: 1 }, { offset: 0.793, transform: 'none', opacity: 1 }, { transform: 'none', opacity: 0 }], 0, 8200, 'ease-in-out');
+      run(r.flare, [{ opacity: 0 }, { offset: 0.4, opacity: 0.7 }, { opacity: 0 }], 200, 2000);
+      if (fx) twins.forEach((tw, i) => run(tw, [{ opacity: 0 }, { offset: 0.3, opacity: 0.9 }, { opacity: 0 }], 200 + (1080 - (xs[i] || 600)) / 1.5, 450));
+      // the clock says so, then everything around the words leaves
+      run(r.clockA, [{ opacity: 1 }, { opacity: 0 }], 0, 250);
+      run(r.clockB, [{ opacity: 0 }, { opacity: 1 }], 250, 350);
+      run(r.caption, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-40px)' }], 500, 700, 'ease-in');
+      [['eyebrowO', 600], ['line1O', 750], ['glowO', 825], ['line2O', 900], ['guestO', 1100], ['heO', 1200]].forEach(([n, T]) => run(r[n], WL_OUT, T, 2400, WL_OUT_EASE));
+      run(r.ruleO, [{ transform: 'none', opacity: 1 }, { transform: 'scaleX(0)', opacity: 0 }], 1000, 900, 'cubic-bezier(.55,0,.85,.35)', 'left center');
+      if (r.rigFloat) { const cur = getComputedStyle(r.rigFloat).transform; r.rigFloat.style.animation = 'none'; r.rigFloat.style.transform = cur === 'none' ? '' : cur; run(r.rigFloat, [{ transform: cur === 'none' ? 'none' : cur }, { transform: 'none' }], 1000, 1200, 'ease-in-out'); }
+      if (!skyFx) run(r.skyO, [{ transform: 'none' }, { transform: 'translateX(-120px)' }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');   // a still sky moves as one
+      // English: the name that just left the screen lands in the logo (if the emblem has the English name: see wordFits)
+      later(at(1600), () => { if (r.hero && EN() && A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')) r.hero.setAttribute('wordmark', 'up'); });
+      run(r.clockO, [{ opacity: 1 }, { opacity: 0 }], 2400, 600);
+      run(r.veilO, [{ transform: 'none', opacity: 1 }, { transform: 'translateX(-80px)', opacity: 0 }], 2400, 2200, 'cubic-bezier(.45,0,.55,1)');
+      run(r.skyFade, [{ opacity: 1 }, { opacity: 0 }], 3400, 3000, 'ease-in-out');
+      run(r.limbO, [{ opacity: 1 }, { opacity: 0 }], 6500, 1700, 'ease-in-out');
+      // docking: two rings clamp the Earth in its seat, a soft arrival bloom (never a white-out), a ripple
+      const clamp = [{ transform: 'scale(1.3)', opacity: 0 }, { offset: 0.55, transform: 'scale(1.02)', opacity: 0.85 }, { offset: 0.72, transform: 'none', opacity: 0.85 }, { transform: 'none', opacity: 0 }];
+      run(r.clampA, clamp, 7400, 900, 'cubic-bezier(.2,.8,.3,1)');
+      run(r.clampB, clamp, 7500, 900, 'cubic-bezier(.2,.8,.3,1)');
+      run(r.bloom, [{ opacity: 0, transform: 'scale(.5)' }, { offset: 0.35, opacity: 0.42, transform: 'scale(.82)' }, { opacity: 0, transform: 'none' }], 8300, 1200, 'cubic-bezier(.2,.8,.3,1)');
+      run(r.ripple, [{ opacity: 0.4, transform: 'scale(.69)' }, { opacity: 0, transform: 'none' }], 8400, 1200, 'cubic-bezier(.2,.8,.3,1)', undefined, 'forwards');
+      return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
+    }, [leaving]);
+    // the camera move: three axes, three curves, so the path bends; it lands exactly on the wall's emblem (the wall
+    // measures its slot once it is laid out under the welcome, before the move starts: a new target starts it over)
+    const tgKey = target ? [target.tx, target.ty, target.s].join() : '';
+    useEffect(() => {
+      if (!leaving) return;
+      const tg = target || GEO.landing(GEO.SLOT_DATA), anims = [];
+      const run = (el, kf, T, dur, easing) => { if (el) anims.push(el.animate(kf, { delay: T - (performance.now() - leaving), duration: dur, easing, fill: 'both' })); };
+      run(r.rigX, [{ transform: 'none' }, { transform: `translateX(${tg.tx}px)` }], 1000, 7200, 'cubic-bezier(.42,0,.18,1)');
+      run(r.rigS, [{ transform: 'none' }, { transform: `scale(${tg.s})` }], 1400, 6600, 'cubic-bezier(.5,0,.2,1)');
+      run(r.rigY, [{ transform: 'none' }, { transform: `translateY(${tg.ty}px)` }], 1600, 6400, 'cubic-bezier(.55,0,.2,1)');
+      return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
+    }, [leaving, tgKey]);
+    // the flat disc (no hero) leaves with the words; one that came up after the way out began (the hero failed) too
+    useEffect(() => {
+      if (!leaving || heroOk || !r.discO || r.discO._out) return;
+      r.discO._out = r.discO.animate(WL_OUT, { delay: 1000 - (performance.now() - leaving), duration: 2400, easing: WL_OUT_EASE, fill: 'both' });
+    }, [leaving, heroOk]);
+    // the welcome's deep space dissolves only once the wall is awake underneath
+    useEffect(() => {
+      if (!leaving || !woke || !r.base) return;
+      const T = Math.max(3000, performance.now() - leaving);
+      const a = r.base.animate([{ opacity: 1 }, { opacity: 0 }], { delay: T - (performance.now() - leaving), duration: 3600, easing: 'cubic-bezier(.45,0,.55,1)', fill: 'both' });
+      return () => a.cancel();
+    }, [leaving, woke]);
+    // the hand-off, once the wall's own emblem is showing (identical) underneath: only the top layer goes
+    useEffect(() => {
+      if (!leaving || !embShown) return;
+      const T = performance.now() - leaving, anims = [];
+      const go = (el, kf, start, dur, easing, fill) => { if (el) anims.push(el.animate(kf, { delay: start - T, duration: dur, easing, fill: fill || 'both' })); };
+      let end;
+      if (mode === 'scan') {
+        const s = Math.max(9200, T + 100), d = 'cubic-bezier(.65,0,.35,1)';
+        go(r.clipOuter, [{ transform: 'none' }, { transform: `translateY(${HB.h}px)` }], s, 1400, d);
+        go(r.clipInner, [{ transform: 'none' }, { transform: `translateY(${-HB.h}px)` }], s, 1400, d);
+        go(r.scanLine, [{ transform: 'none', opacity: 1 }, { offset: 0.9, opacity: 1 }, { transform: `translateY(${HB.h}px)`, opacity: 0 }], s, 1400, d, 'forwards');
+        end = s + 1400;
+      } else if (mode === 'dissolve') { const s = Math.max(8800, T + 100); go(r.heroFade, [{ opacity: 1 }, { opacity: 0 }], s, 1200, 'cubic-bezier(.45,0,.55,1)'); end = s + 1200; }
+      if (end) {
+        later(end + 200 - T, () => { if (r.hero) r.hero.setAttribute('paused', ''); });
+        later(end + 400 - T, () => { setHeroOn(false); cb.current.onHeroGone && cb.current.onHeroGone(); });
+      }
+      return () => anims.forEach((a) => { try { a.cancel(); } catch (e) {} });
+    }, [leaving, embShown]);
+    // the HUD clock, written straight into the page once a second (no re-render of the scene)
+    useEffect(() => {
+      const tick = () => { if (r.clockText) { const d = new Date(clock()); r.clockText.textContent = fmtWlClock.format(d) + ' ISRAEL · ' + fmtWlUTC.format(d) + ' UTC'; } };
+      tick(); const id = setInterval(tick, 1000); return () => clearInterval(id);
+    }, []);
+
+    const on = phase === 'intro';
+    // intro animation (applied at R, delays from R) on an -I wrapper; until then hidden
+    const intro = (name, ms, delay, easing, extra) => (on ? Object.assign({ animation: `${name} ${ms}ms ${easing || 'cubic-bezier(.16,1,.3,1)'} ${delay}ms both` }, extra) : Object.assign({ opacity: 0 }, extra));
+    // idle loop on the innermost element: fx only (or always, for the opacity-only breaths)
+    const idle = (anim, always) => (on && (fx || always) ? { animation: anim } : {});
+    const L = !!leaving, EN0 = EN();
+    let li = 0;
+    const word = (text, line) => Array.from(text).map((ch) => {
+      const i = li++, d = 2600 + i * 30;
+      return h('span', { key: i, ref: (el) => { letters[i] = el; }, style: Object.assign({ position: 'relative', display: 'inline-block', whiteSpace: 'pre' }, intro('wlLetterIn', 1200, d, 'cubic-bezier(.2,.7,.2,1)')) },
+        ch,
+        fx && ch !== ' ' ? h('span', { ref: (el) => { twins[i] = el; }, 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: '#fff', textShadow: '0 0 18px rgba(200,235,255,.9), 0 0 4px #fff', opacity: 0, pointerEvents: 'none' },
+          on ? { animation: `wlGlint 18s linear ${(7.3 + (1080 - (xs[i] || 600)) / 900 - 18).toFixed(3)}s infinite, wlGlintOnce .5s ease-out ${d + 700}ms backwards` } : {}) }, ch) : null);
+    });
+    const tg = target || GEO.landing(GEO.SLOT_DATA), gc = tg.gc;
+    const guestSize = !guest ? 40 : guest.length > 44 ? 30 : guest.length > 30 ? 34 : 40;
+    // The emblem's name: up in Hebrew; in English down, until the title flies into it. The name is fixed when the scene
+    // starts, so after a language switch it stays down (and the wall's own emblem brings the right one at the hand-off).
+    const wordFits = A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE');
+    const heroEl = heroOn ? h('space-emblem-v2', { ref: set('hero'), globe: 'real', speed: A.speed, sway: A.sway, word: A.word, clock: 'page', events: 'off', intro: 'hold', wordmark: !EN0 && wordFits ? 'up' : 'down', maxpr: '2', style: { display: 'block', width: '100%', height: '100%' } }) : null;
+    const showDisc = !heroOk;
+
+    return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: 'ltr', pointerEvents: 'none', fontFamily: 'Heebo, sans-serif', color: '#e6f1ff', animation: 'ovIn .7s cubic-bezier(.4,0,.2,1) both' } },
+      // L0 base: deep space, painted once
+      h('div', { key: 'base', ref: set('base'), style: { position: 'absolute', inset: 0, background: `url(${dither()}) 0 0/128px 128px repeat, radial-gradient(ellipse 1500px 1050px at 1376px 500px, rgba(26,62,138,.40) 0%, rgba(14,34,84,.20) 38%, transparent 72%), radial-gradient(circle 620px at 1150px 250px, rgba(255,226,186,.07), transparent 70%), radial-gradient(ellipse 1100px 700px at 300px 880px, rgba(40,70,150,.12), transparent 70%), radial-gradient(ellipse 125% 105% at 62% 48%, transparent 58%, rgba(0,0,0,.55) 100%), #02050f` } }),
+      // L1 nebula veil
+      h('div', { key: 'veil', ref: set('veilO'), style: abs(-220, -180, 1500, 1000) },
+        h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, on ? { animation: 'wlIn 2400ms ease both' } : { opacity: 0 }) },
+          h('div', { style: Object.assign({ position: 'absolute', inset: 0, background: 'radial-gradient(closest-side at 42% 46%, rgba(70,110,220,.16), rgba(70,110,220,.05) 55%, transparent), radial-gradient(closest-side at 74% 70%, rgba(150,120,240,.07), transparent)' }, fx && !preview ? { animation: 'wlVeil 70s ease-in-out infinite alternate', willChange: 'transform' } : {}) }))),
+      // L2 sky
+      h('div', { key: 'sky', ref: set('skyFade'), style: { position: 'absolute', inset: 0 } },
+        h('div', { ref: set('skyO'), style: { position: 'absolute', inset: 0, animation: 'wlIn 2000ms ease 500ms both' } }, h(Sky, { fx: skyFx, leaving, target: tg, preview }))),
+      // L3 the hero rig: moved only by transforms on rigX / rigY / rigS (origin at the globe centre)
+      h('div', { key: 'rig', style: abs(G.x - GB.x, G.y - GB.y, HB.w, HB.h) },
+        h('div', { ref: set('rigX'), style: { position: 'absolute', inset: 0 } },
+          h('div', { ref: set('rigY'), style: { position: 'absolute', inset: 0 } },
+            h('div', { ref: set('rigS'), style: { position: 'absolute', inset: 0, transformOrigin: `${GB.x}px ${GB.y}px` } },
+              h('div', { style: Object.assign({ position: 'absolute', inset: 0, transformOrigin: `${GB.x}px ${GB.y}px` }, intro('wlRigIn', 2800, 0)) },
+                h('div', { ref: set('rigFloat'), style: Object.assign({ position: 'absolute', inset: 0 }, idle('wlFloat 14s ease-in-out infinite alternate')) },
+                  // aura: the wall glow's own gradient at ×1.2, so it lands on it
+                  h('div', { ref: set('auraO'), style: circle(GB.x, GB.y + 30.2, 1176) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 2000, 0, 'ease')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.20) 0%, rgba(70,120,210,.08) 32%, transparent 66%)' }, idle('breathe 9s ease-in-out -7.1s infinite', true)) }))),
+                  // the atmosphere's limb (the emblem's own additive glow cannot show over its transparent canvas)
+                  h('div', { ref: set('limbO'), style: circle(GB.x, GB.y, 760) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1600, 0, 'ease')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, transparent 75%, rgba(120,185,255,.40) 78.5%, rgba(70,140,255,.14) 85%, transparent)' }, idle('wlLimb 9s ease-in-out -7.4s infinite', true)) }))),
+                  // first light at the 10:30 limb, where the emblem's key light comes from
+                  h('div', { ref: set('sunO'), style: Object.assign(circle(308.3, 212.3, 220), { transformOrigin: '50% 50%' }) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1200, 500, 'ease')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,244,222,.85) 0%, rgba(255,214,160,.30) 35%, transparent)' }, idle('wlBreathO 9s ease-in-out -7.7s infinite', true)) })),
+                    h('div', { style: Object.assign(circle(110, 110, 28), intro('wlScaleIn', 600, 500, 'cubic-bezier(.2,.9,.3,1)')) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, #fff 0 30%, #fff6e4 45%, rgba(255,220,160,.5) 70%, transparent)' }, idle('wlBreathSun 9s ease-in-out -7.7s infinite', true)) }))),
+                  // the realistic emblem (never moved in the page: only its wrappers change)
+                  h('div', { ref: set('heroFade'), style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1200, 0, 'cubic-bezier(.25,.1,.25,1)')) },
+                    h('div', { ref: set('clipOuter'), style: { position: 'absolute', inset: 0, overflow: 'hidden' } },
+                      h('div', { ref: set('clipInner'), style: { position: 'absolute', inset: 0 } }, heroEl)),
+                    h('div', { ref: set('scanLine'), style: { position: 'absolute', left: 0, top: -48, width: HB.w, height: 50, opacity: 0 } },
+                      h('div', { style: { position: 'absolute', left: 0, right: 0, top: 0, height: 48, background: 'linear-gradient(to top, rgba(159,220,255,.22), transparent)' } }),
+                      h('div', { style: { position: 'absolute', left: 0, right: 0, top: 48, height: 2, background: '#bfe8ff' } }))),
+                  // the anamorphic streak through the sun, in front of the emblem
+                  h('div', { ref: set('streakO'), style: Object.assign(abs(308.3 - 380, 212.3 - 8, 760, 16), { transformOrigin: '50% 50%' }) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0, transformOrigin: '50% 50%' }, intro('wlDrawX', 1300, 700)) },
+                      h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, fx ? idle('wlStreak 9s ease-in-out -7.7s infinite') : { opacity: 0.85 }) },
+                        h('div', { style: { position: 'absolute', left: 120, top: 0, width: 520, height: 16, background: 'radial-gradient(ellipse closest-side, rgba(160,210,255,.18), transparent)' } }),
+                        h('div', { style: { position: 'absolute', left: 0, top: 7, width: 760, height: 2, background: 'linear-gradient(90deg, transparent, rgba(140,200,255,.30) 32%, rgba(235,246,255,.9) 50%, rgba(140,200,255,.30) 68%, transparent)' } })))),
+                  L ? h('div', { ref: set('flare'), style: Object.assign(circle(308.3, 212.3, 520), { opacity: 0, background: 'radial-gradient(circle closest-side, rgba(255,250,240,.9) 0, rgba(200,230,255,.35) 30%, transparent 70%)' }) }) : null,
+                  // no hero (it failed, or the remote's preview): the flat logo disc in its place
+                  showDisc ? h('div', { ref: set('discO'), style: circle(GB.x, GB.y, 300) },
+                    h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%, #fff, #dfeaf7 60%, #a9c3e2)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 60px rgba(111,214,234,.45)' }, intro('wlIn', 1200, 0, 'ease')) },
+                      h('img', { src: '/space-wall/assets/logo-mark.png', alt: '', style: { width: '80%', height: '80%', objectFit: 'contain' } }))) : null)))))),
+      // L4 the title, left
+      h('div', { key: 'title', dir: 'ltr', style: { position: 'absolute', left: 128, top: 356, width: 820, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' } },
+        h('div', { ref: set('eyebrowO'), style: { display: 'flex', alignItems: 'center', gap: 20, height: 34 } },
+          h('span', { style: Object.assign({ width: 64, height: 1.5, background: 'linear-gradient(90deg, rgba(159,220,255,0), #9fdcff)', transformOrigin: 'left center' }, intro('wlDrawX', 900, 2200)) }),
+          h('span', { style: { fontFamily: MONO, fontSize: 26, fontWeight: 500, letterSpacing: '.46em', color: '#9fdcff', whiteSpace: 'pre' } },
+            Array.from('WELCOME TO').map((ch, i) => h('span', { key: i, style: Object.assign({ display: 'inline-block', whiteSpace: 'pre' }, intro('wlEyebrowIn', 800, 2400 + i * 30)) }, ch)))),
+        h('div', { style: { position: 'relative', marginTop: 18, fontFamily: LEX, fontSize: 84, fontWeight: 500, lineHeight: '92px', letterSpacing: '.005em', color: '#f3f8ff', textShadow: '0 2px 24px rgba(0,0,0,.55)', whiteSpace: 'nowrap' } },
+          h('div', { ref: set('glowO'), 'aria-hidden': true, style: { position: 'absolute', inset: 0 } },
+            h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, intro('wlIn', 1200, 2400, 'ease')) },
+              h('div', { style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 26px rgba(111,190,255,.8), 0 0 70px rgba(60,130,255,.45)' }, fx ? idle('wlTitleGlow 9s ease-in-out -6.5s infinite') : { opacity: 0.25 }) },
+                h('div', null, WL_TITLE[0]), h('div', null, WL_TITLE[1])))),
+          h('div', { ref: set('line1O'), style: { position: 'relative' } }, word(WL_TITLE[0], 0)),
+          h('div', { ref: set('line2O'), style: { position: 'relative' } }, word(WL_TITLE[1], 1))),
+        h('div', { ref: set('ruleO'), style: { marginTop: 28, width: 440, height: 2 } },
+          h('div', { style: Object.assign({ width: '100%', height: '100%', background: 'linear-gradient(90deg, rgba(212,242,92,.9), rgba(212,242,92,.35) 55%, transparent)', transformOrigin: 'left center' }, intro('wlDrawX', 1400, 3800)) })),
+        guest ? h('div', { key: 'g:' + guest, ref: set('guestO'), style: { marginTop: 22, maxWidth: 820 } },
+          h('div', { style: on && guest !== r.g0 ? intro('wlRiseIn', 700, 0) : intro('wlRiseIn', 1200, 4100) },
+            h('div', { dir: 'auto', style: Object.assign({ fontFamily: "'Lexend', Heebo, sans-serif", fontSize: guestSize, fontWeight: 400, lineHeight: 1.25, letterSpacing: '.03em', color: '#d4f25c', textShadow: '0 0 24px rgba(212,242,92,.30)', unicodeBidi: 'plaintext', textAlign: 'left' }, fx ? idle('wlGuest 9s ease-in-out -6.5s infinite') : {}) }, guest))) : null,
+        EN0 ? null : h('div', { ref: set('heO'), style: { marginTop: guest ? 12 : 22 } },
+          h('div', { dir: 'rtl', style: Object.assign({ fontFamily: 'Heebo', fontSize: 30, fontWeight: 300, lineHeight: '40px', color: '#b3c8e6', letterSpacing: '.04em', textAlign: 'left' }, intro('wlRiseIn', 1200, 4400)) }, 'ברוכים הבאים למנהלת החלל'))),
+      // L5 HUD: a clock top right, a caption bottom left
+      h('div', { key: 'clock', ref: set('clockO'), style: { position: 'absolute', right: 128, top: 56 } },
+        h('div', { style: Object.assign({ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, fontFamily: MONO, fontSize: 15, letterSpacing: '.24em', whiteSpace: 'nowrap' }, intro('wlIn', 1600, 4800, 'ease')) },
+          h('span', { style: { width: 8, height: 8, borderRadius: '50%', background: '#d4f25c', boxShadow: '0 0 10px #d4f25c', animation: L ? 'caret .5s steps(1) infinite' : 'breathe 3s ease-in-out infinite' } }),
+          h('span', { ref: set('clockA'), style: { color: 'rgba(143,184,220,.62)' } }, h('span', { ref: set('clockText') })),
+          h('span', { ref: set('clockB'), style: { position: 'absolute', left: 22, color: '#d4f25c', opacity: 0 } }, 'ENTERING'))),
+      h('div', { key: 'cap', ref: set('caption'), style: { position: 'absolute', left: 128, bottom: 64 } },
+        h('div', { style: Object.assign({ fontFamily: MONO, fontSize: 15, letterSpacing: '.32em', color: 'rgba(143,184,220,.6)', whiteSpace: 'nowrap' }, intro('wlIn', 1600, 4800, 'ease')) },
+          'STATE OF ISRAEL · ' + fmtWlDate.format(new Date(clock())).replace(',', '').toUpperCase())),
+      // L6 the docking, in stage coordinates around the wall's globe centre (only on the way out)
+      L ? h(React.Fragment, { key: 'dock' },
+        h('div', { ref: set('clampA'), style: circle(gc.x, gc.y, 700, { opacity: 0, border: '1.5px solid rgba(200,235,255,.85)', boxShadow: '0 0 0 6px rgba(200,235,255,.12)' }) }),
+        h('div', { ref: set('clampB'), style: circle(gc.x, gc.y, 560, { opacity: 0, border: '1.5px solid rgba(200,235,255,.85)', boxShadow: '0 0 0 6px rgba(200,235,255,.12)' }) }),
+        h('div', { ref: set('ripple'), style: circle(gc.x, gc.y, 1015, { opacity: 0, border: '1px solid rgba(200,235,255,.5)' }) }),
+        h('div', { ref: set('bloom'), style: circle(gc.x, gc.y, 1400, { opacity: 0, background: 'radial-gradient(circle closest-side, rgba(235,248,255,.55) 0, rgba(159,220,255,.25) 22%, rgba(60,130,255,.08) 48%, transparent 72%)' }) })) : null);
+  };
+
+  // ---------- Yizkor (a memorial day: the server's top-of-the-hour moment, or the remote's) ----------
+  // A memorial candle, lit: wax lit from within, a wick, and a flame that sways, flickers and now and then catches a
+  // draught, its light breathing with it. Drawn at `k` px per unit in a box 200 wide and `len` tall, the wick's tip at
+  // (100, 190), so the small candle on the home wall is the same drawing at its own size, not a scaled-down layer.
+  // ignite: ms until the flame catches (0: lit from the start). fade: the wax sinks into the dark. part: 'body' (wax and
+  // wick) or 'flame' (the flame and its light) alone, so the Yizkor screen can send its flame on by itself. fx off: still.
+  let candleN = 0;
+  const FLAME = 'M30 4C33 34 50 62 54 98C57 128 46 158 30 158C14 158 3 128 6 98C10 62 27 34 30 4Z';
+  const CORE = 'M30 72C33 93 41 108 41 127C41 145 36 154 30 154C24 154 19 145 19 127C19 108 27 93 30 72Z';
+  const stops = (list) => list.map(([o, c], i) => h('stop', { key: i, offset: o, stopColor: c }));
+  const Candle = ({ k, len, fx, ignite, fade, part }) => {
+    const id = useRef('mmc' + ++candleN).current, u = (x) => x * k, body = part !== 'flame', flame = part !== 'body';
+    const live = (a) => (fx ? { animation: a } : {});
+    const origin = { position: 'absolute', inset: 0, transformOrigin: '50% 92%' };
+    return h('div', { 'data-mm': 'candle', style: { position: 'relative', width: u(200), height: u(len), flex: 'none' } },
+      // its light on what is around it
+      flame && h('div', { style: Object.assign({ position: 'absolute', left: u(-200), top: u(-150), width: u(600), height: u(600), pointerEvents: 'none' }, ignite ? { animation: `wlIn 2600ms ease ${ignite}ms both` } : {}) },
+        h('div', { style: Object.assign({ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,196,120,.34), rgba(255,150,60,.11) 42%, transparent)' }, live('mmGlow 2.3s ease-in-out infinite')) })),
+      // the wax, lit from within under the flame
+      body && h('div', { style: { position: 'absolute', left: u(40), top: u(200), width: u(120), height: u(len - 200), borderRadius: `${u(4)}px ${u(4)}px ${u(10)}px ${u(10)}px`, overflow: 'hidden', background: 'linear-gradient(90deg, #5e3a1a 0%, #b9844a 13%, #e8c28e 32%, #f7e2bc 47%, #eed0a0 62%, #c08b4c 84%, #5a3818 100%)' } },
+        h('div', { style: Object.assign({ position: 'absolute', left: 0, right: 0, top: 0, height: u(190) }, ignite ? { animation: `wlIn 2600ms ease ${ignite}ms both` } : {}) },
+          h('div', { style: Object.assign({ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(255,214,140,.8), rgba(255,176,90,.28) 45%, rgba(255,160,80,0))' }, live('mmGlow 2.3s ease-in-out -.6s infinite')) })),
+        fade ? h('div', { style: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '62%', background: 'linear-gradient(180deg, rgba(3,4,8,0), rgba(3,4,8,.85) 70%, #030408)' } }) : null),
+      // the rim and its melt pool
+      body && h('div', { style: { position: 'absolute', left: u(40), top: u(188), width: u(120), height: u(26), borderRadius: '50%', background: 'radial-gradient(ellipse at 50% 42%, #fff6e2 0%, #f8dcaa 38%, #dcaa68 78%, #9c6a36 100%)' } }),
+      // the wick
+      body && h('div', { style: { position: 'absolute', left: u(100) - Math.max(1, u(2)), top: u(172), width: Math.max(2, u(4)), height: u(28), borderRadius: u(2), background: 'linear-gradient(180deg, #ffb060 0%, #4a2c16 30%, #1c120a 100%)' } }),
+      // the flame: a draught now and then, a slow sway, a quick flicker (three periods that never line up)
+      flame && h('div', { style: Object.assign({ position: 'absolute', left: u(70), top: u(30), width: u(60), height: u(165), transformOrigin: '50% 92%' }, ignite ? { animation: `mmIgnite 1700ms cubic-bezier(.2,.8,.3,1) ${ignite}ms both` } : {}) },
+        h('div', { style: Object.assign({}, origin, live('mmGust 13s ease-in-out -4s infinite')) },
+          h('div', { style: Object.assign({}, origin, live('mmSway 4.7s ease-in-out infinite')) },
+            h('div', { style: Object.assign({}, origin, live('mmFlick 1.3s ease-in-out infinite')) },
+              h('svg', { width: '100%', height: '100%', viewBox: '0 0 60 165', style: { position: 'absolute', inset: 0, overflow: 'visible' } },
+                h('defs', null,
+                  h('radialGradient', { id: id + 'h', cx: '50%', cy: '55%', r: '50%' }, stops([[0, 'rgba(255,214,150,.55)'], [0.45, 'rgba(255,170,80,.18)'], [1, 'rgba(255,150,60,0)']])),
+                  h('radialGradient', { id: id + 'o', cx: '50%', cy: '80%', r: '72%', fx: '50%', fy: '86%' }, stops([[0, '#ffffff'], [0.2, '#fff6d8'], [0.42, '#ffd47e'], [0.66, '#ffa53a'], [0.86, 'rgba(255,120,36,.7)'], [1, 'rgba(255,96,24,.12)']])),
+                  h('radialGradient', { id: id + 'c', cx: '50%', cy: '75%', r: '60%' }, stops([[0, 'rgba(255,255,255,1)'], [0.55, 'rgba(255,250,232,.85)'], [1, 'rgba(255,240,200,0)']])),
+                  h('radialGradient', { id: id + 'b', cx: '50%', cy: '60%', r: '55%' }, stops([[0, 'rgba(120,160,255,.75)'], [0.6, 'rgba(90,130,255,.3)'], [1, 'rgba(80,120,255,0)']]))),
+                h('ellipse', { cx: 30, cy: 96, rx: 58, ry: 96, fill: `url(#${id}h)` }),
+                h('path', { d: FLAME, fill: `url(#${id}o)` }),
+                h('path', { d: CORE, fill: `url(#${id}c)` }),
+                h('ellipse', { cx: 30, cy: 150, rx: 10, ry: 12, fill: `url(#${id}b)` })))))));
+  };
+  // a faint star tile for the Yizkor sky (made once)
+  const starTile = () => window.__mmStars || (window.__mmStars = (() => { const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d'); for (let i = 0; i < 180; i++) { const x = (i * 97.7) % 512, y = (i * 61.3 + (i * i) % 37) % 512, r = 0.4 + ((i * 13) % 7) / 10, a = 0.08 + ((i * 7) % 5) * 0.04; g.fillStyle = `rgba(230,236,250,${a})`; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill(); } return c.toDataURL(); })());
+
+  // The Yizkor screen, in the wall's deep space: the candle catches and stays alive, the directorate's emblem above the
+  // words. On its way out (`leaving`, a performance.now() stamp; the home wall wakes under it at once) the words go, the
+  // candle dims, and its flame alone travels to the small candle on the home wall (target(): its wick in stage px and its
+  // k) and joins it, while the dark lifts.
+  // Light on purpose (the lobby computer, phones): CSS animations on transform/opacity, WAAPI for the way out.
+  const MM_K = 1.15;
+  // The Yizkor's words for each memorial day (lib/occasions.ts keys; the server's /api/live `memorial.key`): the tag beside
+  // the title (a date in Lexend, or the day's name), the text after "יזכור", the line on the home wall's card and the foot.
+  const MM_TEXT = {
+    oct7: { tag: ['7/10', 'Oct 7'], lex: true,
+      text: ['עם ישראל את בניו ובנותיו, חיילי צה״ל, לוחמי כוחות הביטחון והאזרחים, שנרצחו ונפלו במתקפת הטרור ב־7 באוקטובר 2023 ובמלחמה שבאה בעקבותיה.',
+        'Israel remembers its sons and daughters, IDF soldiers, members of the security forces and civilians, murdered and fallen in the terror attack of October 7, 2023 and in the war that followed.'],
+      line: ['מנהלת החלל מרכינה ראש לזכר הנרצחים והנופלים', 'In memory of those murdered and fallen on October 7, 2023'],
+      foot: ['כ״ב בתשרי תשפ״ד · 7.10.2023', 'OCTOBER 7, 2023'] },
+    shoah: { tag: ['יום השואה', 'Holocaust Remembrance Day'],
+      text: ['עם ישראל את ששת מיליוני היהודים שנרצחו בשואה, את הקהילות שנחרבו ואת גבורת הלוחמים, המורדים וחסידי אומות העולם.',
+        'Israel remembers the six million Jews murdered in the Holocaust, the communities destroyed, and the heroism of the fighters, the rebels and the Righteous Among the Nations.'],
+      line: ['מנהלת החלל מרכינה ראש לזכר קורבנות השואה', 'In memory of the victims of the Holocaust'],
+      foot: ['יום הזיכרון לשואה ולגבורה', 'HOLOCAUST AND HEROISM REMEMBRANCE DAY'] },
+    zikaron: { tag: ['יום הזיכרון', 'Memorial Day'],
+      text: ['עם ישראל את בניו ובנותיו, חללי מערכות ישראל ונפגעי פעולות האיבה, אשר מסרו את נפשם על קיומה ועצמאותה של מדינת ישראל.',
+        'Israel remembers its sons and daughters, the fallen of Israel\'s wars and the victims of terror, who gave their lives for the existence and independence of the State of Israel.'],
+      line: ['מנהלת החלל מרכינה ראש לזכר החללים ונפגעי פעולות האיבה', 'In memory of the fallen and the victims of terror'],
+      foot: ['יום הזיכרון לחללי מערכות ישראל ולנפגעי פעולות האיבה', 'MEMORIAL DAY FOR THE FALLEN AND VICTIMS OF TERROR'] },
+  };
+  const Memorial = ({ fx, preview, leaving, target, onDone, which }) => {
+    const en = EN(), CX = en ? 1520 : 400, CY = 430, W = MM_TEXT[which] || MM_TEXT.oct7, T = (pair) => tr(pair[0], pair[1]);
+    const r = useRef({}).current, set = (n) => r['_' + n] || (r['_' + n] = (el) => { r[n] = el; });
+    const cb = useRef(onDone); cb.current = onDone;
+    useEffect(() => {
+      if (!leaving) return;
+      const anims = [], at = (T) => T - (performance.now() - leaving);
+      const run = (el, kf, T, dur, easing) => { if (el) anims.push(el.animate(kf, { delay: at(T), duration: dur, easing: easing || 'linear', fill: 'both' })); };
+      run(r.words, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${en ? -70 : 70}px)` }], 0, 1000, 'cubic-bezier(.45,0,.3,1)');
+      run(r.body, [{ opacity: 1 }, { opacity: 0 }], 600, 1100, 'ease-in-out');
+      run(r.bg, [{ opacity: 1 }, { opacity: 0 }], 1400, 1900, 'cubic-bezier(.45,0,.55,1)');
+      const t = target && target();
+      if (t) {
+        run(r.rig, [{ transform: 'none' }, { transform: `translate(${t.x - CX}px,${t.y - CY}px) scale(${t.k / MM_K})` }], 900, 2400, 'cubic-bezier(.55,0,.15,1)');
+        run(r.rigFade, [{ opacity: 1 }, { opacity: 0 }], 3250, 450, 'ease-in-out');
+      } else run(r.rigFade, [{ opacity: 1 }, { opacity: 0 }], 900, 1400, 'ease-in-out');
+      const done = setTimeout(() => cb.current && cb.current(), at(3900));
+      return () => { clearTimeout(done); anims.forEach((a) => { try { a.cancel(); } catch (e) {} }); };
+    }, [leaving]);
+    const rise = (ms, delay, extra) => Object.assign({ animation: `mmRise ${ms}ms cubic-bezier(.16,1,.3,1) ${delay}ms both` }, extra);
+    const motes = fx && !preview ? Array.from({ length: 14 }, (_, i) => h('span', { key: i, style: { position: 'absolute', left: CX - 170 + ((i * 53) % 340), top: CY + 40 + ((i * 37) % 160), width: i % 4 ? 2 : 3, height: i % 4 ? 2 : 3, borderRadius: '50%', background: '#ffd9a0', boxShadow: '0 0 6px rgba(255,200,120,.8)', '--dx': ((i % 5) - 2) * 18 + 'px', animation: `mmMote ${9 + (i % 6) * 1.3}s ease-in-out ${-(i * 1.7)}s infinite` } })) : null;
+    const side = en ? { left: 200 } : { right: 200 };
+    return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: en ? 'ltr' : 'rtl', fontFamily: 'Heebo, sans-serif', color: '#f3ede2', pointerEvents: 'none', animation: 'ovIn 1.2s ease both' } },
+      // the dark, the sky and the candle's warmth on it
+      h('div', { key: 'bg', ref: set('bg'), style: { position: 'absolute', inset: 0 } },
+        h('div', { style: { position: 'absolute', inset: 0, background: `url(${dither()}) 0 0/128px 128px repeat, radial-gradient(circle 900px at ${CX}px ${CY + 120}px, rgba(120,70,24,.30), rgba(60,34,14,.12) 45%, transparent 75%), radial-gradient(ellipse 1300px 900px at ${en ? 360 : 1560}px 420px, rgba(26,52,110,.22), transparent 70%), radial-gradient(ellipse 125% 105% at 50% 48%, transparent 55%, rgba(0,0,0,.6) 100%), #030408` } }),
+        h('div', { style: { position: 'absolute', left: 0, top: -512, width: 2432, height: 1592, opacity: 0.5, animation: fx && !preview ? 'tileX 300s linear infinite' : 'none' } },
+          h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${starTile()})`, backgroundSize: '512px 512px' } })),
+        h('div', { style: { position: 'absolute', left: CX - 700, top: CY - 560, width: 1400, height: 1400, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,180,100,.13), rgba(255,150,70,.04) 50%, transparent)', animation: 'wlIn 3000ms ease 1400ms both' } },
+          h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, fx ? { animation: 'mmGlow 2.3s ease-in-out infinite' } : {}) })),
+        motes),
+      // the candle: its body stays, its flame (moved only through rig / rigFade) leaves for the home wall
+      h('div', { key: 'body', ref: set('body'), style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K, animation: 'wlIn 1400ms ease 300ms both' } },
+        h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, fade: true, part: 'body' })),
+      h('div', { key: 'rig', ref: set('rig'), style: { position: 'absolute', inset: 0, transformOrigin: `${CX}px ${CY}px` } },
+        h('div', { ref: set('rigFade'), style: { position: 'absolute', inset: 0 } },
+          h('div', { style: { position: 'absolute', left: CX - 100 * MM_K, top: CY - 190 * MM_K } },
+            h(Candle, { k: MM_K, len: 860, fx, ignite: 1500, part: 'flame' })))),
+      // the words, in their own column well clear of the candle: the directorate on top, the title and the text in the
+      // middle, the date of the attack at the foot
+      h('div', { key: 'words', ref: set('words'), style: Object.assign({ position: 'absolute', top: 92, bottom: 92, width: 900, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-start' }, side) },
+        h('div', { style: rise(1200, 2200, { display: 'flex', alignItems: 'center', gap: 22 }) },
+          // the directorate's 3D emblem (a still of the wall's own emblem-v2, so no second WebGL scene)
+          h('img', { src: '/space-wall/assets/emblem-3d.png', alt: '', style: { width: 116, height: 116, flex: 'none', margin: '-14px -8px -14px -12px', filter: 'drop-shadow(0 0 18px rgba(90,160,255,.28))' } }),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('span', { style: { fontSize: 28, fontWeight: 700, color: '#e8dcc6', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
+            h('span', { style: { fontFamily: MONO, fontSize: 16, color: 'rgba(233,184,114,.75)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL')))),
+        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start' } },
+          // the title with the date beside it after a gold divider (English: the date under the title), one gold rule under both
+          (() => {
+            const title = h('div', { style: { position: 'relative', lineHeight: 1 } },
+              h('div', { 'aria-hidden': true, style: Object.assign({ position: 'absolute', inset: 0, color: 'transparent', textShadow: '0 0 40px rgba(255,190,110,.55), 0 0 110px rgba(255,150,60,.35)', fontSize: en ? 136 : 210, fontWeight: 800, whiteSpace: 'nowrap' }, { animation: `mmTitleIn 2400ms ease 3100ms both${fx ? ', mmTitleGlow 6s ease-in-out 5500ms infinite' : ''}` }) }, tr('יזכור', 'We Remember')),
+              h('div', { style: { position: 'relative', fontSize: en ? 136 : 210, fontWeight: 800, letterSpacing: en ? '-.01em' : '.02em', whiteSpace: 'nowrap', color: '#f6efe3', textShadow: '0 4px 30px rgba(0,0,0,.6)', animation: 'mmTitleIn 2400ms cubic-bezier(.16,1,.3,1) 2900ms both' } }, tr('יזכור', 'We Remember')));
+            const date = (size, extra) => h('div', { dir: W.lex ? 'ltr' : null, style: rise(1600, 4200, Object.assign({ fontFamily: W.lex ? LEX : 'Heebo, sans-serif', fontSize: W.lex ? size : Math.round(size * (en ? 0.62 : 0.76)), fontWeight: W.lex ? 600 : 800, lineHeight: 1, letterSpacing: '.02em', color: '#e9b872', textShadow: '0 0 40px rgba(233,160,80,.3)', unicodeBidi: 'plaintext', whiteSpace: 'nowrap' }, extra)) }, T(W.tag));
+            const rule = h('div', { style: { marginTop: 30, width: '100%', height: 2, background: `linear-gradient(${en ? 90 : 270}deg, rgba(233,184,114,.95), rgba(233,184,114,.5) 70%, rgba(233,184,114,.15))`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1400ms cubic-bezier(.16,1,.3,1) 4000ms both' } });
+            const row = en ? h('div', null, title, date(84, { marginTop: 14 }))
+              : h('div', { style: { display: 'flex', alignItems: 'center', gap: 40 } }, title,
+                h('div', { style: { width: 2, height: 170, flex: 'none', background: 'linear-gradient(180deg, transparent, rgba(233,184,114,.9) 30%, rgba(233,184,114,.9) 70%, transparent)', animation: 'mmTitleIn 1600ms ease 3800ms both' } }),
+                date(150, { marginTop: 20 }));
+            return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'stretch' } }, row, rule);
+          })(),
+          h('div', { style: rise(1200, 4400, { marginTop: 34, fontSize: 34, fontWeight: 300, lineHeight: 1.5, color: '#ece4d6', maxWidth: 860, textWrap: 'pretty' }) },
+            T(W.text)),
+          h('div', { style: rise(1200, 5000, { marginTop: 28, fontSize: 30, fontWeight: 500, color: '#e9b872', maxWidth: 860 }) }, tr('מנהלת החלל מרכינה ראש · יהי זכרם ברוך', 'The Space Program Office bows its head · May their memory be a blessing'))),
+        h('div', { style: rise(1200, 5500, { fontFamily: MONO, fontSize: 18, letterSpacing: '.2em', color: 'rgba(200,184,156,.6)' }) }, T(W.foot))));
+  };
+
+  // ---------- an occasion (lib/occasions.ts): a holiday, a national day or a day of space, on the whole wall ----------
+  // In the half-hourly celebrations while the wall greets it (wall.js). Each occasion brings its glyph and two colours; the
+  // kind sets the scene: a holiday's glyphs float up like lanterns, a national day flies blue stripes and a slowly turning
+  // Star of David, a day of space sends a craft across the stars. The glyph sits in a breathing medallion on one side and the
+  // greeting takes the reading side. Light on purpose: CSS animations on transform and opacity only, ~20 elements.
+  const STAR = (c, w) => h('svg', { viewBox: '-50 -50 100 100', width: '100%', height: '100%', style: { display: 'block', overflow: 'visible' } },
+    h('path', { d: 'M0,-46 L39.8,23 L-39.8,23 Z M0,46 L-39.8,-23 L39.8,-23 Z', fill: 'none', stroke: c, strokeWidth: w, strokeLinejoin: 'round' }));
+  // Each occasion's glyph (lib/occasions.ts keys), drawn as line art in its colour: the same on every screen (an emoji
+  // differs from one computer to the next, and some draw a menorah in a purple box). Parts: [path, how] where how is
+  // 's' a line, 'f' a line over a faint fill, 'F' solid.
+  const menorah = (() => {
+    const p = [['M30 92 H70', 's'], ['M50 92 V40', 's']];
+    for (const r of [12, 24, 36]) p.push([`M${50 - r} 30 V40 A${r} ${r * 0.8} 0 0 0 ${50 + r} 40 V30`, 's']);
+    for (const x of [14, 26, 38, 62, 74, 86]) p.push([`M${x} 22 c3 3 3 7 0 7 c-3 0 -3 -4 0 -7 z`, 'F']);
+    p.push(['M50 12 c3.5 3.5 3.5 8 0 8 c-3.5 0 -3.5 -4.5 0 -8 z', 'F'], ['M50 20 V30', 's']);
+    return p;
+  })();
+  const candle = [['M40 44 H60 V90 H40 Z', 'f'], ['M50 44 V38', 's'], ['M50 14 c7 8 9 15 3 20 c-4 3 -10 1 -10 -5 c0 -5 4 -9 7 -15 z', 'F']];
+  const GLYPHS = {
+    hanukkah: menorah,
+    'rosh-hashana': [['M50 30 C35 18 12 28 16 52 C19 75 36 90 50 84 C64 90 81 75 84 52 C88 28 65 18 50 30 Z', 'f'], ['M50 30 C50 22 53 15 58 10', 's'], ['M54 21 C62 9 76 10 79 14 C71 23 61 25 54 21 Z', 'F']],
+    'yom-kippur': [['M14 58 C28 40 56 38 70 46 L88 38 L82 54 C74 72 44 76 26 66 Z', 'f'], ['M38 52 C44 30 60 18 82 16 C74 32 64 44 52 52', 'f'], ['M86 41 L96 38', 's'], ['M92 39 c2 -5 6 -6 8 -5', 's']],
+    sukkot: [['M20 90 V40 M80 90 V40', 's'], ['M12 40 H88', 's'], ['M12 40 L22 28 L32 40 L42 28 L52 40 L62 28 L72 40 L82 28 L90 38', 's'], ['M34 40 V52 M50 40 V58 M66 40 V50', 's'], ['M34 56 a4 4 0 1 0 0.1 0 M50 62 a4 4 0 1 0 0.1 0 M66 54 a4 4 0 1 0 0.1 0', 'F']],
+    'simchat-torah': [['M33 26 H67 V74 H33 Z', 'f'], ['M27 14 V86 M73 14 V86', 's'], ['M40 38 H60 M40 48 H60 M40 58 H54', 's']],
+    'tu-bishvat': [['M50 40 m-30 0 a30 28 0 1 0 60 0 a30 28 0 1 0 -60 0', 'f'], ['M50 92 V56 M50 72 L38 60 M50 66 L62 54', 's']],
+    purim: [['M16 30 C30 24 70 24 84 30 C84 60 72 82 50 84 C28 82 16 60 16 30 Z', 'f'], ['M30 46 Q37 38 44 46 M56 46 Q63 38 70 46', 's'], ['M36 62 Q50 76 64 62', 's'], ['M16 30 L8 18 M84 30 L92 18', 's']],
+    pesach: [['M30 16 H70 C70 44 61 56 50 56 C39 56 30 44 30 16 Z', 's'], ['M32 30 H68 C67 46 59 53 50 53 C41 53 33 46 32 30 Z', 'F'], ['M50 56 V82 M34 86 H66', 's']],
+    'lag-baomer': [['M50 12 C62 30 76 44 70 66 C66 80 56 84 50 84 C40 84 30 78 30 64 C30 50 42 46 44 34 C48 44 54 48 54 56 C60 46 56 30 50 12 Z', 'f'], ['M22 94 L78 82 M22 82 L78 94', 's']],
+    'yom-yerushalayim': [['M12 88 V58 H88 V88', 's'], ['M12 58 V50 H20 V58 M28 58 V50 H36 V58 M64 58 V50 H72 V58 M80 58 V50 H88 V58', 's'], ['M34 58 C34 34 66 34 66 58', 'f'], ['M50 36 V24', 's'], ['M44 88 V74 A6 6 0 0 1 56 74 V88', 's']],
+    shavuot: (() => { const p = [['M50 94 V18', 's']]; for (let i = 0; i < 5; i++) { const y = 26 + i * 12; p.push([`M50 ${y + 6} C42 ${y + 4} 38 ${y - 2} 38 ${y - 6} C46 ${y - 4} 50 ${y} 50 ${y + 6} Z`, 'F'], [`M50 ${y + 6} C58 ${y + 4} 62 ${y - 2} 62 ${y - 6} C54 ${y - 4} 50 ${y} 50 ${y + 6} Z`, 'F']); } return p; })(),
+    'tu-beav': [['M50 84 C20 62 12 44 22 30 C32 18 46 22 50 34 C54 22 68 18 78 30 C88 44 80 62 50 84 Z', 'f']],
+    gagarin: [['M50 8 C64 22 66 44 62 66 H38 C34 44 36 22 50 8 Z', 'f'], ['M50 38 m-7 0 a7 7 0 1 0 14 0 a7 7 0 1 0 -14 0', 's'], ['M38 54 L24 74 L38 70 M62 54 L76 74 L62 70', 's'], ['M43 72 Q50 94 57 72', 'F']],
+    'space-week': [['M40 40 H60 V60 H40 Z', 'f'], ['M10 38 H32 V62 H10 Z M68 38 H90 V62 H68 Z', 'f'], ['M32 50 H40 M60 50 H68 M21 38 V62 M79 38 V62', 's'], ['M50 40 V30 M42 26 Q50 18 58 26', 's']],
+    'tisha-beav': candle, columbia: candle, oct7: candle, shoah: candle, zikaron: candle,
+    atzmaut: [['M50 4 L89.8 73 L10.2 73 Z M50 96 L10.2 27 L89.8 27 Z', 's']],
+  };
+  const Glyph = ({ k, c, s, w }) => h('svg', { viewBox: '0 0 100 100', width: s, height: s, style: { display: 'block', overflow: 'visible', filter: `drop-shadow(0 0 ${Math.max(3, s / 14)}px ${c}aa)` } },
+    (GLYPHS[k] || candle).map(([d, how], i) => h('path', { key: i, d, fill: how === 'F' ? c : how === 'f' ? c + '30' : 'none', stroke: how === 'F' ? 'none' : c, strokeWidth: w || 5, strokeLinecap: 'round', strokeLinejoin: 'round' })));
+
+  const OccasionMoment = ({ occ, fx }) => {
+    const o = occ, c = o.color, en = EN(), MX = en ? 1430 : 490, MY = 520, kind = o.kind;
+    const space = kind === 'space', head = space ? o.title : o.greet, sub = space ? o.greet : o.title;
+    const big = head.length > 16 ? 104 : head.length > 11 ? 128 : 156;
+    const side = en ? { left: 150 } : { right: 150 };
+    const scene = [];
+    if (kind === 'holiday' && fx) for (let i = 0; i < 16; i++) {
+      const x = ((i * 137.5 + 40) % 1840), sz = 44 + ((i * 29) % 46), dur = 16 + ((i * 7) % 10);
+      scene.push(h('div', { key: 'f' + i, style: { position: 'absolute', left: x, top: 1110, opacity: 0, willChange: 'transform,opacity', '--r': ((i % 5) - 2) * 14 + 'deg', animation: `occFloat ${dur}s linear ${-((i * 3.7) % dur)}s infinite` } }, h(Glyph, { k: o.key, c: i % 3 ? c : '#ffffff', s: sz, w: 4 })));
+    }
+    if (kind === 'holiday' || kind === 'national') for (let i = 0; i < 26; i++)
+      scene.push(h('span', { key: 's' + i, style: { position: 'absolute', left: (i * 211.7) % 1920, top: (i * 97.3) % 1080, width: i % 4 ? 3 : 5, height: i % 4 ? 3 : 5, borderRadius: '50%', background: i % 2 ? c : '#fff', boxShadow: `0 0 10px ${c}`, opacity: 0.5, animation: fx ? `twinkle ${3 + (i % 4)}s ease-in-out ${-(i * 0.7)}s infinite` : 'none' } }));
+    if (kind === 'national') {
+      const stripe = (top) => h('div', { key: 'st' + top, style: { position: 'absolute', left: -40, right: -40, top, height: 64, background: `linear-gradient(90deg, transparent, ${c} 18%, #2f6fd6 50%, ${c} 82%, transparent)`, opacity: 0.55, boxShadow: `0 0 50px ${c}88`, animation: 'wlDrawX 1600ms cubic-bezier(.16,1,.3,1) 300ms both' } });
+      scene.push(stripe(90), stripe(926));
+      scene.push(h('div', { key: 'mag', style: { position: 'absolute', left: MX - 430, top: MY - 430, width: 860, height: 860, opacity: 0.22, animation: fx ? 'spin 90s linear infinite' : 'none' } }, STAR(c, 2.2)));
+    }
+    if (space) {
+      scene.push(h('div', { key: 'stars', style: { position: 'absolute', left: 0, top: -512, width: 2432, height: 1592, opacity: 0.9, animation: fx ? 'tileX 200s linear infinite' : 'none' } },
+        h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${starTile()})`, backgroundSize: '512px 512px' } })));
+      if (fx) scene.push(h('div', { key: 'craft', style: { position: 'absolute', left: -120, top: 860, willChange: 'transform', animation: 'occCross 22s linear 1s infinite' } }, h('div', { style: { transform: 'rotate(60deg)' } }, h(Glyph, { k: 'gagarin', c, s: 70, w: 4 }))));
+    }
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: `url(${dither()}) 0 0/128px 128px repeat, radial-gradient(circle 900px at ${MX}px ${MY}px, ${c}38, ${o.deep}f0 55%, #02040a 100%)` } }),
+      h('div', { key: 'scene', style: { position: 'absolute', inset: 0, pointerEvents: 'none' } }, scene),
+      // the medallion: a ring of light turning around the glyph
+      h('div', { key: 'med', style: { position: 'absolute', left: MX - 280, top: MY - 280, width: 560, height: 560, animation: 'popIn 1.1s cubic-bezier(.2,1.3,.4,1) .3s both' } },
+        h('div', { style: { position: 'absolute', inset: -70, borderRadius: '50%', background: `radial-gradient(circle closest-side, ${c}40, transparent)`, animation: fx ? 'breathe 5s ease-in-out infinite' : 'none' } }),
+        h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', background: `conic-gradient(from 0deg, ${c}, transparent 30%, ${c}88 50%, transparent 80%, ${c})`, WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px))', mask: 'radial-gradient(farthest-side, transparent calc(100% - 6px), #000 calc(100% - 5px))', animation: fx ? 'spin 14s linear infinite' : 'none' } }),
+        h('div', { style: { position: 'absolute', inset: 22, borderRadius: '50%', background: `radial-gradient(circle at 50% 35%, ${c}55, ${o.deep} 72%)`, border: `1px solid ${c}55`, boxShadow: `inset 0 0 80px ${o.deep}, 0 0 90px ${c}33`, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+          h(Glyph, { k: o.key, c: kind === 'national' ? '#ffffff' : c, s: 300, w: 3.4 }))),
+      // the words
+      h('div', { key: 'words', style: Object.assign({ position: 'absolute', top: 120, bottom: 120, width: 960, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start', gap: 0 }, side) },
+        h('span', { style: { fontSize: 34, fontWeight: 600, color: c, letterSpacing: en ? '.06em' : '.02em', animation: 'rise .9s ease .5s both' } },
+          space ? tr('היום מציינים', 'Today we mark') : tr('מנהלת החלל מאחלת', 'The Space Program Office wishes you')),
+        h('span', { style: { marginTop: 18, fontSize: big, fontWeight: 800, lineHeight: 1.05, color: '#fff', textWrap: 'balance', textShadow: `0 0 50px ${c}66, 0 6px 30px rgba(0,0,0,.5)`, animation: 'rise 1.1s cubic-bezier(.16,1,.3,1) .8s both' } }, head),
+        h('div', { style: { marginTop: 34, width: 620, maxWidth: '100%', height: 3, borderRadius: 2, background: `linear-gradient(${en ? 90 : 270}deg, ${c}, ${c}00)`, transformOrigin: en ? 'left center' : 'right center', animation: 'wlDrawX 1300ms cubic-bezier(.16,1,.3,1) 1.3s both' } }),
+        h('span', { style: { marginTop: 30, fontSize: 52, fontWeight: 600, color: c, lineHeight: 1.2, textWrap: 'balance', animation: 'rise 1s ease 1.5s both' } }, sub),
+        h('div', { style: { marginTop: 70, display: 'flex', alignItems: 'center', gap: 18, animation: 'rise 1s ease 2s both' } },
+          h('img', { src: '/space-wall/assets/emblem-3d.png', alt: '', style: { width: 84, height: 84, margin: '-10px -6px -10px -8px', filter: 'drop-shadow(0 0 14px rgba(90,160,255,.3))' } }),
+          h('span', { style: { fontSize: 26, fontWeight: 700, color: '#e6f1ff', letterSpacing: en ? '.06em' : '.01em' } }, tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')),
+          h('span', { style: { fontFamily: MONO, fontSize: 16, color: 'rgba(230,241,255,.55)', letterSpacing: '.24em' } }, tr('מדינת ישראל', 'STATE OF ISRAEL'))))
+    ]);
+  };
+
+  // ---------- small toast (e.g. "שוגר") ----------
+  const Toast = ({ title, line }) => h('div', { style: { position: 'absolute', top: 104, left: '50%', transform: 'translateX(-50%)', zIndex: 40, display: 'flex', alignItems: 'center', gap: 16, padding: '14px 26px', borderRadius: 999, background: 'rgba(10,20,40,.92)', border: '1px solid rgba(233,184,114,.6)', boxShadow: '0 20px 50px rgba(0,0,0,.5), 0 0 30px rgba(233,184,114,.2)', animation: 'toastIn .7s cubic-bezier(.2,1.3,.4,1) both', direction: EN() ? 'ltr' : 'rtl', fontFamily: 'Heebo', color: '#e6f1ff', whiteSpace: 'nowrap' } },
+    h('span', { style: { width: 12, height: 12, borderRadius: '50%', background: '#e9b872', boxShadow: '0 0 14px #e9b872', animation: 'breathe 1s ease-in-out infinite' } }),
+    h('span', { style: { fontSize: 22, fontWeight: 700, color: '#e9b872' } }, title), h('span', { style: { fontSize: 20 } }, line));
+
+  // ---------- a picture on the whole wall (the remote's agent: attached, or from the internet after approval) ----------
+  // Kept light: the picture once, contained on black, a caption on a plain gradient; no blur or moving layers.
+  const ImageMoment = ({ url, caption }) => shell([
+    h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#02050c' } }),
+    h('img', { key: 'img', src: url, alt: caption || '', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', animation: 'ovIn 1.2s ease both' } }),
+    caption ? h('div', { key: 'cap', style: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: '120px 120px 70px', background: 'linear-gradient(0deg, rgba(2,5,12,.92), rgba(2,5,12,0))', fontSize: 52, fontWeight: 700, lineHeight: 1.2, textAlign: 'center', textWrap: 'balance', animation: 'rise .9s ease .4s both' } }, caption) : null
+  ]);
+
+  // ---------- a screen the remote's agent made (app/src/custom-doc.js): its own page in a sandboxed frame ----------
+  const CustomScene = ({ html, store }) => shell([
+    h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#040914' } }),
+    h('iframe', { key: 'f', srcDoc: window.customDoc ? window.customDoc(html, { store, lang: window.wallLang }) : '', sandbox: 'allow-scripts', title: 'screen', tabIndex: -1,
+      style: { position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, border: 0, background: 'transparent', pointerEvents: 'none' } })]);
+
+  // ---------- a live stream (a launch's webcast) on the whole wall: YouTube, muted, until the remote ends it ----------
+  // In the remote's preview a card stands in for the player, so a phone never loads the video.
+  const LiveStream = ({ videoId, title, preview }) => {
+    const src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(videoId) + '?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&modestbranding=1&iv_load_policy=3';
+    const tag = h('div', { key: 'tag', style: { position: 'absolute', top: 36, [EN() ? 'left' : 'right']: 40, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 22px', borderRadius: 999, background: 'rgba(6,12,26,.78)', border: '1px solid rgba(255,120,110,.6)', fontSize: 26, fontWeight: 700, whiteSpace: 'nowrap', maxWidth: 1200, overflow: 'hidden', textOverflow: 'ellipsis' } },
+      h('span', { style: { width: 14, height: 14, borderRadius: '50%', background: '#ff5a4f', boxShadow: '0 0 14px #ff5a4f', animation: 'breathe 1.4s ease-in-out infinite' } }), tr('שידור חי', 'LIVE') + (title ? ' · ' + title : ''));
+    if (preview) return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#02050c url(https://i.ytimg.com/vi/' + encodeURIComponent(videoId) + '/hqdefault.jpg) center/cover no-repeat', opacity: .55 } }),
+      h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, fontWeight: 700 } }, tr('השידור מוצג בצג', 'Streaming on the wall')), tag]);
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: '#000' } }),
+      h('iframe', { key: 'v', src, title: title || 'Live', allow: 'autoplay; encrypted-media; picture-in-picture', referrerPolicy: 'strict-origin-when-cross-origin', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 } }),
+      tag]);
+  };
+
+  // ---------- space news: one of the newsletter's central stories on the whole wall (every half hour, or from the remote) ----------
+  // The words on the reading side, the story's picture on the other, slowly drifting closer for as long as it stays (fx), a
+  // bar that runs out with it and a QR code to the full story. Text is clamped, so a long story never runs off the screen.
+  const NewsMoment = ({ item, secs, qr, fx }) => {
+    const n = item, col = n.color || '#9fdcff', start = EN() ? 'left' : 'right', end = EN() ? 'right' : 'left', img = n.image || '';
+    const clamp = (lines) => ({ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: lines, overflow: 'hidden' });
+    const chip = (t, c, fill) => h('span', { key: t, style: { padding: '6px 18px', borderRadius: 999, fontSize: 24, fontWeight: 600, color: fill ? '#0a1224' : c, background: fill ? c : 'rgba(6,12,26,.6)', border: `1.5px solid ${c}` } }, t);
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 1300px 900px at 30% 40%, #0e2350 0%, #07122a 55%, #040914 100%)' } }),
+      // (the picture fades into the background by a mask, so no seam shows where it ends)
+      img ? h('div', { key: 'img', style: { position: 'absolute', top: 0, bottom: 0, [end]: 0, width: 1000, overflow: 'hidden', WebkitMaskImage: `linear-gradient(to ${start}, #000 45%, transparent 96%)`, maskImage: `linear-gradient(to ${start}, #000 45%, transparent 96%)` } },
+        h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', animation: fx ? `zoomBg ${secs}s linear both` : 'none' } }),
+        h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(4,9,20,.35) 0%, rgba(4,9,20,0) 30%, rgba(4,9,20,0) 70%, rgba(4,9,20,.55) 100%)' } })) : null,
+      h('div', { key: 'c', style: { position: 'absolute', top: 0, bottom: 0, [start]: 130, width: img ? 900 : 1560, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 30 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, fontSize: 32, fontWeight: 700, color: '#9fdcff', letterSpacing: '.08em', animation: 'rise .8s ease .2s both' } },
+          h('span', { style: { width: 14, height: 14, borderRadius: '50%', background: '#d4f25c', boxShadow: '0 0 14px #d4f25c', animation: 'breathe 2s ease-in-out infinite' } }), tr('חדשות החלל', 'SPACE NEWS')),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', animation: 'rise .8s ease .3s both' } },
+          n.cat ? chip(n.cat, col) : null, n.il ? chip(tr('ישראל', 'Israel'), '#d4f25c', true) : null,
+          h('span', { key: 'meta', style: { fontFamily: MONO, fontSize: 22, color: '#8b9dbd' } }, [n.date, n.src].filter(Boolean).join(' · '))),
+        h('div', { style: Object.assign({ fontSize: img ? 78 : 96, fontWeight: 800, lineHeight: 1.13, letterSpacing: '-0.01em', textWrap: 'balance', animation: 'rise .9s ease .45s both' }, clamp(4)) }, n.title),
+        n.dek ? h('div', { style: Object.assign({ fontSize: 36, color: '#b9c8e2', fontWeight: 300, lineHeight: 1.45, textWrap: 'pretty', animation: 'rise .9s ease .65s both' }, clamp(img ? 5 : 4)) }, n.dek) : null,
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 28, paddingTop: 10, animation: 'rise .9s ease .85s both' } },
+          h('div', { style: { flex: 1, height: 4, borderRadius: 4, background: 'rgba(150,190,240,.14)', overflow: 'hidden' } },
+            h('div', { style: { height: '100%', background: `linear-gradient(${EN() ? 90 : 270}deg,#d4f25c,#6fd6ea)`, transformOrigin: start, animation: `grow ${secs}s linear both` } })),
+          qr ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 14, flex: 'none' } },
+            h('span', { style: { fontSize: 20, color: '#8b9dbd', lineHeight: 1.3, textAlign: end } }, tr('לכתבה', 'Full'), h('br'), tr('המלאה', 'story')),
+            h('img', { src: qr, alt: 'QR', style: { width: 112, height: 112, borderRadius: 12, background: '#0b1430', padding: 5, border: '1px solid rgba(230,241,255,.25)' } })) : null)),
+      h('span', { key: 'src', style: { position: 'absolute', bottom: 54, [start]: 130, fontFamily: MONO, fontSize: 18, letterSpacing: '.16em', color: 'rgba(143,184,220,.6)' } },
+        [tr('ניוזלטר החלל השבועי · רקיע', 'WEEKLY SPACE NEWSLETTER · RAKIA'), n.issue].filter(Boolean).join(' · '))
+    ]);
+  };
+
+  // ---------- the shared way in and out of every full-screen moment but the welcome (whose own is the model) ----------
+  // In: the moment comes up over a slow push-in (scale 1.04 → 1), a line of light sweeps down the screen and the frame's
+  // edge glints once. Out (`out`, closeOv in wall.js): it pulls away (→ 1.05) and fades while a line sweeps back up, and the
+  // wall assembles under it. Only transform and opacity, so the compositor does the work. fx false: no transition.
+  const SWEEP = { position: 'absolute', left: 0, right: 0, top: 0, height: 2, zIndex: 2, pointerEvents: 'none', background: 'linear-gradient(90deg, rgba(212,242,92,0), #d4f25c 20%, #9fdcff 80%, rgba(159,220,255,0))', boxShadow: '0 0 18px rgba(159,220,255,.55)' };
+  const Moment = ({ out, fx, children }) => {
+    if (!fx) return out ? null : children;
+    return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden' } },
+      h('div', { key: 'm', style: { position: 'absolute', inset: 0, animation: out ? 'mvOut 1200ms cubic-bezier(.45,0,.55,1) both' : 'mvIn 1100ms cubic-bezier(.16,1,.3,1) both' } }, children),
+      h('div', { key: out ? 'up' : 'down', style: Object.assign({ animation: out ? 'mvSweepUp 1000ms cubic-bezier(.65,0,.35,1) both' : 'mvSweepDown 1300ms cubic-bezier(.65,0,.35,1) 150ms both' }, SWEEP) }),
+      out ? null : h('div', { key: 'edge', style: { position: 'absolute', inset: 14, zIndex: 2, borderRadius: 30, border: '1px solid rgba(212,242,92,.7)', pointerEvents: 'none', animation: 'wlEdge 1200ms ease 700ms both' } }));
+  };
+
+  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, CustomScene, NewsMoment, Moment, Memorial, Candle, MM_TEXT, OccasionMoment, Glyph };
+};

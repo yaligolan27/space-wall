@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+// An iPhone or iPad lays the wall out 1920 wide and lets the browser zoom the whole page out to fit, instead of the wall
+// shrinking its stage with a CSS scale: Safari keeps every layer of a scaled page at full size times the screen's pixel
+// density, and the welcome screen's layers took more memory than an iPhone has ("A problem repeatedly occurred"). Zoomed
+// out, each layer is kept at about the pixels it covers, so zooming in by hand is off there too. Only Safari's engine
+// (every iOS browser and in-app view) needs it: Chrome on Android draws a scaled layer at the size it is shown. Not in a
+// frame (the remote's preview). ?phone=0 / ?phone=1 overrides.
+// window.__pageScale(): how far the browser has zoomed the page out (1 when it has not), for what is sized by hand.
+(function () {
+  var q = /[?&]phone=([01])/.exec(location.search), big = Math.max(screen.width, screen.height);
+  var ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var on = q ? q[1] === '1' : window.top === window && ios && big < 1400;
+  if (on) {
+    document.querySelector('meta[name=viewport]').setAttribute('content', 'width=1920, minimum-scale=0.1');
+    document.documentElement.style.touchAction = 'pan-x pan-y';   // no pinch or double-tap zoom (layers grow with the zoom)
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); });   // older iOS
+  }
+  window.__pageScale = function () {
+    if (!on) return 1;
+    var vv = window.visualViewport, sw = matchMedia('(orientation: landscape)').matches ? big : Math.min(screen.width, screen.height);
+    var w = (vv && vv.width) || innerWidth, s = w > 0 ? Math.min(1, sw / w) : 1;
+    return vv && vv.scale > 0 ? Math.min(s, vv.scale) : s;   // the screen's width over the page's (the browser's own zoom, where it says)
+  };
+})();
+</script>
+<title>צג חלל · מנהלת החלל</title>
+<link rel="icon" href="/space-wall/assets/logo-mark.png">
+<link rel="manifest" href="/space-wall/manifest.webmanifest">
+<link rel="stylesheet" href="/space-wall/assets/fonts/v4/fonts.css">
+<link rel="stylesheet" href="/space-wall/styles.css">
+</head>
+<body>
+<div id="root"></div>
+<script>
+// Watchdog: if the wall has not rendered after a minute (a script failed to load, say during a reload), reload, but only
+// when the page answers and at most every five minutes (the mark wall.js keeps for its own reloads).
+setTimeout(function check() {
+  if (document.getElementById('root').hasChildNodes()) return;
+  var last = 0; try { last = Number(sessionStorage.getItem('wall:reloadAt')) || 0; } catch (e) {}
+  if (Date.now() - last < 300000) return void setTimeout(check, 60000);
+  fetch(location.href, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined }).then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    try { sessionStorage.setItem('wall:reloadAt', String(Date.now())); } catch (e) {}
+    location.reload();
+  }).catch(function () { setTimeout(check, 60000); });
+}, 60000);
+</script>
+<script src="/space-wall/vendor/react.production.min.js"></script>
+<script src="/space-wall/vendor/react-dom.production.min.js"></script>
+<script src="/space-wall/vendor/qrcode.js"></script>
+<script src="/space-wall/src/custom-doc.js"></script>
+<script src="/space-wall/src/overlays.js"></script>
+<script src="/space-wall/src/emblem-v2.js"></script>
+<script src="/space-wall/src/emblem-v7/kit.js"></script>
+<script src="/space-wall/src/emblem-v7/launch-models.js"></script>
+<script src="/space-wall/src/emblem-v7/launch.js"></script>
+<script src="/space-wall/src/emblem-v7/emblem.js"></script>
+<script src="/space-wall/src/wall.js"></script>
+</body>
+</html>
