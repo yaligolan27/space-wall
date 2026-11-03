@@ -20,7 +20,8 @@ await build({
   minify: true,
   legalComments: 'none',
   define: { 'process.env.APP_BUILD': JSON.stringify(sha) },
-  // CommonJS packages call require() for Node built-ins; Deno gives ES modules a require through node:module.
-  banner: { js: "import { createRequire as __cr } from 'node:module'; import __process from 'node:process'; import { Buffer as __Buffer } from 'node:buffer'; const require = __cr(import.meta.url); globalThis.process ??= __process; globalThis.Buffer ??= __Buffer;" },
+  // CommonJS packages call require() for Node built-ins; Deno gives ES modules a require through node:module
+  // (createRequire wants a file URL, and the module itself is served from https, so any file URL does).
+  banner: { js: "import { createRequire as __cr } from 'node:module'; import __process from 'node:process'; import { Buffer as __Buffer } from 'node:buffer'; const require = __cr('file:///space-wall-edge.js'); globalThis.process ??= __process; globalThis.Buffer ??= __Buffer;" },
 });
 console.log('dist/edge/api.js built', sha);
