@@ -7,7 +7,7 @@
 
 ## השלט
 
-**כניסה:** פותחים את הקישור הפרטי שקיבלתם מהמנהל/ת (`https://space-wall.vercel.app/remote/?t=<קוד>`) וכותבים את השם שלכם. הדפדפן זוכר את הכניסה, והקישור נשאר בשורת הכתובת: אפשר לשמור אותו כסימנייה או כסמל במסך הבית של הטלפון. אם השלט מבקש קוד גישה, מדביקים את הקישור כולו או רק את הקוד שאחרי `?t=`. את הקישור לא מעבירים הלאה.
+**כניסה:** פותחים את הקישור הפרטי שקיבלתם מהמנהל/ת (`https://yaligolan27.github.io/space-wall/remote/?t=<קוד>`) וכותבים את השם שלכם. הדפדפן זוכר את הכניסה, והקישור נשאר בשורת הכתובת: אפשר לשמור אותו כסימנייה או כסמל במסך הבית של הטלפון. אם השלט מבקש קוד גישה, מדביקים את הקישור כולו או רק את הקוד שאחרי `?t=`. את הקישור לא מעבירים הלאה.
 
 **עדכונים:** כשעולה גרסה חדשה של השלט, הוא נטען מחדש לבד: כשחוזרים אליו בטלפון, או אחרי דקה בלי נגיעה. לא באמצע עריכה, כשחלון פתוח או כשמשהו כתוב ועוד לא נשלח. שלט שנפתח לפני שהעדכון הזה עלה (7.10.2026) עוד לא יודע לעשות את זה: סוגרים אותו לגמרי ופותחים שוב, פעם אחת.
 
@@ -92,14 +92,14 @@
 **פתיחה אוטומטית במסך מלא כשהמחשב נדלק** (מחשב Windows עם Chrome):
 1. לוחצים לחיצה ימנית על שולחן העבודה ← חדש ← קיצור דרך.
 2. בשדה המיקום מדביקים:
-   `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk --noerrdialogs --disable-session-crashed-bubble --autoplay-policy=no-user-gesture-required https://space-wall.vercel.app/`
+   `"C:\Program Files\Google\Chrome\Application\chrome.exe" --kiosk --noerrdialogs --disable-session-crashed-bubble --autoplay-policy=no-user-gesture-required https://yaligolan27.github.io/space-wall/`
 3. ממשיכים, קוראים לקיצור "צג חלל" ומסיימים. לחיצה כפולה עליו פותחת את הצג במסך מלא, בלי סרגלים של הדפדפן. אם Chrome כבר פתוח, סוגרים אותו קודם.
 4. כדי שזה יקרה בכל הדלקה: לוחצים Win+R, כותבים `shell:startup`, Enter, ומעתיקים את הקיצור לתיקייה שנפתחת.
 5. יציאה מהמצב הזה: Alt+F4.
 
-עם Edge במקום Chrome: `"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --kiosk https://space-wall.vercel.app/ --edge-kiosk-type=fullscreen`.
+עם Edge במקום Chrome: `"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --kiosk https://yaligolan27.github.io/space-wall/ --edge-kiosk-type=fullscreen`.
 
-אם הוגדר קוד לצג, מוסיפים אותו לסוף הכתובת: `https://space-wall.vercel.app/?key=<קוד>`. "פתיחת הצג" בשלט פותח את הכתובת המלאה.
+אם הוגדר קוד לצג, מוסיפים אותו לסוף הכתובת: `https://yaligolan27.github.io/space-wall/?key=<קוד>`. "פתיחת הצג" בשלט פותח את הכתובת המלאה.
 
 **חדות על מסך 4K:** הצג מצייר בכל הפיקסלים שהמחשב שולח למסך. אם המחשב שולח רק 1920×1080, מסך גדול נראה מפוקסל וזה לא משהו שהאתר יכול לתקן. בדיקה ב-Windows: לחיצה ימנית על שולחן העבודה, "הגדרות תצוגה" (Display settings), ובשורה "רזולוציית תצוגה" (Display resolution) בוחרים 3840 × 2160 (מומלץ), ואז "שמור שינויים". "קנה מידה" (Scale) יכול להישאר כמו שהוא. אם 3840 × 2160 לא מופיע ברשימה, הכבל או החיבור במחשב לא תומכים ב-4K (צריך כבל HDMI 2.0 ומעלה או DisplayPort). אחרי השינוי לוחצים F5 על הצג. ובטלוויזיה עצמה: בתפריט התמונה, "גודל תמונה" (Picture size / Aspect ratio) צריך להיות "התאמה למסך" (Screen Fit, Just Scan או Fit to screen), אחרת הטלוויזיה מגדילה קצת את התמונה ומטשטשת אותה.
 
@@ -123,7 +123,7 @@
 ## חיבור חד-פעמי
 
 **מה צריך:** חשבון Claude ייעודי, וקישור המחבר שמקבלים מהמנהל/ת. הקישור נראה כך:
-`https://space-wall.vercel.app/mcp/<קוד-סודי>`. זו הסיסמה של הצג, ולא מעבירים אותו הלאה.
+`https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/mcp/<קוד-סודי>`. זו הסיסמה של הצג, ולא מעבירים אותו הלאה.
 
 1. ב-Claude פותחים הגדרות ← Connectors ← Add custom connector.
 2. שם: `צג חלל`. כתובת: הקישור שקיבלתם. שומרים.

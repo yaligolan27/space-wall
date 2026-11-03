@@ -39,10 +39,10 @@ Vercel → הפרויקט `space-wall` → **Settings → Environment Variables*
 טלגרם צריך לדעת לאן לשלוח הודעות. פתחו בדפדפן את הכתובת הבאה, אחרי שהחלפתם את שלושת הערכים:
 
 ```
-https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<הדומיין-של-הפרויקט-ב-vercel>/api/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>&drop_pending_updates=true
+https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/telegram&secret_token=<TELEGRAM_WEBHOOK_SECRET>&drop_pending_updates=true
 ```
 
-דוגמה: `https://api.telegram.org/bot123456789:AAF.../setWebhook?url=https://space-wall.vercel.app/api/telegram&secret_token=k9d2...`
+דוגמה: `https://api.telegram.org/bot123456789:AAF.../setWebhook?url=https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/telegram&secret_token=k9d2...`
 
 תשובה תקינה: `{"ok":true,"result":true,"description":"Webhook was set"}`.
 

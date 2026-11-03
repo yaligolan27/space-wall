@@ -37,7 +37,7 @@ const ok = (data: unknown) => ({ content: [{ type: 'text' as const, text: JSON.s
 const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: `שגיאה: ${(e as Error)?.message || String(e)}` }] });
 const guard = <A>(fn: (a: A) => Promise<unknown>) => async (a: A) => { try { return ok(await fn(a)); } catch (e) { return fail(e); } };
 
-function buildServer(): McpServer {
+export function buildServer(): McpServer {
   const server = new McpServer({ name: 'space-wall', version: '1.0.0' }, { instructions: INSTRUCTIONS });
 
   server.registerTool('wall_overview', {
@@ -176,7 +176,7 @@ function buildServer(): McpServer {
   return server;
 }
 
-async function tokenOk(given: string | undefined): Promise<boolean> {
+export async function tokenOk(given: string | undefined): Promise<boolean> {
   const want = await setting('MCP_TOKEN', 'mcp_token');
   if (want.length < 24 || !given) return false;            // no token configured = closed, never open
   const a = Buffer.from(given), b = Buffer.from(want);

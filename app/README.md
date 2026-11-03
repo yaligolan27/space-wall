@@ -56,7 +56,7 @@ personal celebration with fireworks every half hour at :00 and :30 (cycling thro
 The design options (`noon` … `sway`) are normally set from the remote and stored; a URL option overrides the
 stored value on that screen.
 
-Example for the lobby: `https://space-wall.vercel.app/?fx=1&noon=1`.
+Example for the lobby: `https://yaligolan27.github.io/space-wall/?fx=1&noon=1`.
 
 ## Feed shape (`/api/feed`)
 
