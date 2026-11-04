@@ -286,6 +286,32 @@
   const claim = (texts, en) => { if (!PRE || PRE.taken || PRE.key !== stageKey(texts, en)) return null; PRE.taken = true; return PRE.p; };
   const release = (texts, en) => { const k = stageKey(texts, en); setTimeout(() => { if (PRE && !PRE.taken && PRE.key === k) { drop(PRE); PRE = null; } }, 4000); };
 
+  // ---- the video, fetched whole by the standby screen, so the ceremony plays it from memory (a slow or busy network
+  // can't stall it mid-film). One at a time: { src, url (an object URL once all of it is here), ctl, taken }.
+  let VID = null;
+  const vidSrc = (video) => video || '/assets/promo.mp4';
+  const dropVideo = () => { if (!VID) return; try { VID.ctl.abort(); } catch (e) {} if (VID.url) URL.revokeObjectURL(VID.url); VID = null; };
+  function fetchVideo(video) {
+    const src = vidSrc(video);
+    if (VID && VID.src === src && !VID.taken) return;
+    if (VID && !VID.taken) dropVideo();
+    if (!window.fetch || !window.AbortController || !window.URL || !URL.createObjectURL) return;
+    const v = { src, url: null, ctl: new AbortController(), taken: false };
+    VID = v;
+    fetch(src, { signal: v.ctl.signal }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+      .then((b) => { if (VID === v && !v.taken && b.size > 100e3) v.url = URL.createObjectURL(b); }).catch(() => {});
+  }
+  /** what the ceremony plays: the copy in memory if all of it is here, else the link itself (and the fetch stops, so
+   *  the video gets the whole network) */
+  const claimVideo = (video) => {
+    const src = vidSrc(video);
+    if (!VID || VID.src !== src || VID.taken) return { src, mine: null };
+    if (!VID.url) { dropVideo(); return { src, mine: null }; }
+    VID.taken = true; return { src: VID.url, mine: VID };
+  };
+  window.__cerVid = () => VID && { src: VID.src, ready: !!VID.url, taken: VID.taken };   // (for a test: is it all here)
+  const releaseVideo = (video) => { const src = vidSrc(video); setTimeout(() => { if (VID && !VID.taken && VID.src === src) dropVideo(); }, 4000); };
+
   window.makeCeremony = (React) => {
     const h = React.createElement, { useState, useEffect, useRef } = React;
     const C = KK();
@@ -324,6 +350,8 @@
       window.__cerClock = T;   // (where the sequence is: for a preview recording's sync)
       const host = useRef(null), vid = useRef(null), flash = useRef(null), cb = useRef(props); cb.current = props;
       const r = useRef({ fin: null, finAt: 0, cutAt: 0, synth: null, played: false, stage: null, failed: false }).current;
+      const vs = useRef(null); if (!vs.current) vs.current = preview ? { src: vidSrc(video), mine: null } : claimVideo(video);
+      useEffect(() => () => { const m = vs.current.mine; if (m) setTimeout(() => { URL.revokeObjectURL(m.url); if (VID === m) VID = null; }, 1500); }, []);
       const [st, setSt] = useState(() => ({ base: true, fin: null, vidOn: T() >= C.VIDEO }));
       const ftOf = () => (r.fin == null ? null : (performance.now() - r.finAt) / 1000 * rate());
       // without the 3D stage (no WebGL), the video at once and a short closing
@@ -418,14 +446,14 @@
       return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: 'ltr', pointerEvents: 'none', fontFamily: HEB, color: '#e6f1ff', animation: 'ovIn .9s ease both' } },
         st.base ? h('div', { key: 'base', style: full({ background: '#000' }) }) : null,
         h('div', { key: 'stage', ref: host, style: full() }),
-        st.base ? h('video', { key: 'v', ref: vid, src: video || '/assets/promo.mp4', preload: 'auto', playsInline: true, onEnded: () => finish('ended'), onError: () => { if (r.played) finish('novideo'); },
+        st.base ? h('video', { key: 'v', ref: vid, src: vs.current.src, preload: 'auto', playsInline: true, onEnded: () => finish('ended'), onError: () => { if (r.played) finish('novideo'); },
           style: full({ width: '100%', height: '100%', objectFit: 'cover', background: '#000', visibility: st.vidOn ? 'visible' : 'hidden' }) }) : null,
         h('div', { key: 'flash', ref: flash, style: full({ background: '#fffaf2', opacity: 0 }) }));
     };
 
     /** Before the ceremony: the emblem, the title, "it will begin shortly", and whether the browser lets sound play. It
-     *  also builds the 3D stage, hidden, so the opening starts smooth. */
-    const Standby = ({ texts, preview }) => {
+     *  also builds the 3D stage, hidden, so the opening starts smooth, and fetches the video whole (video: its link). */
+    const Standby = ({ texts, video, preview }) => {
       const [snd, setSnd] = useState(() => window.cerSound.ready());
       const was = useRef(snd);
       useEffect(() => {
@@ -440,6 +468,7 @@
         }, 400);
         return () => { clearInterval(id); release(texts, en); };
       }, [JSON.stringify(texts || null)]);
+      useEffect(() => { if (preview) return; fetchVideo(video); return () => releaseVideo(video); }, [video || '']);
       const eyebrow = txt(texts, 'eyebrow'), title = txt(texts, 'title'), line = txt(texts, 'line'), soon = txt(texts, 'soon');
       const tf = titleFont(title), rise = (i) => ({ animation: `cerRise 1400ms cubic-bezier(.16,1,.3,1) ${600 + i * 280}ms both` });
       return h('div', { style: { position: 'absolute', inset: 0, zIndex: 50, overflow: 'hidden', direction: 'ltr', pointerEvents: 'none', fontFamily: HEB, color: '#e6f1ff', background: SKY(), backgroundSize: '512px 512px, 1920px 1080px', animation: 'ovIn 1.2s ease both' } },
