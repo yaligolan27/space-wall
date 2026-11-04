@@ -449,7 +449,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'set_wall_design',
-    description: 'הגדרות העיצוב של הצג (רק מה שנשלח משתנה). noon: סרטון תדמית אוטומטי. qr: קודי QR לכתבות. fx: אפקטי רקע. sway: תנועת מצלמה. feature: שניות לכתבה מרכזית (6–30). list: שניות לכל ידיעה ברשימה (2–10). globe: שניות לסיבוב הגלובוס (20–240). globeStyle: holo (הולוגרפי) או real (ריאליסטי). lang: en = כל הצג באנגלית (למשל כשמשלחת מבקרת; התוכן מתורגם אוטומטית), he = חזרה לעברית. הלוגו במרכז: emblem (v7 הגלובוס התלת מימדי עם שיגורים ולוויינים, v2 הלוגו הקודם); ב-v7: traffic שיגורים ולוויינים פעילים, rate קצב שיגורים (off/low/normal/high), sats מספר לוויינים מרבי במסלול (4–48), stack לוויינים בכל שיגור (2–8), quality איכות ציור (high/ultra).',
+    description: 'הגדרות העיצוב של הצג (רק מה שנשלח משתנה). noon: סרטון תדמית אוטומטי. qr: קודי QR לכתבות. fx: אפקטי רקע. sway: תנועת מצלמה. feature: שניות לכתבה מרכזית (6–30). list: שניות לכל ידיעה ברשימה (2–10). globe: שניות לסיבוב הגלובוס (20–240). globeStyle: holo (הולוגרפי) או real (ריאליסטי). lang: en = כל הצג באנגלית (למשל כשמשלחת מבקרת; התוכן מתורגם אוטומטית), he = חזרה לעברית. הלוגו במרכז: emblem (v7 הגלובוס התלת מימדי עם שיגורים ולוויינים, v2 הלוגו הקודם); ב-v7: traffic שיגורים ולוויינים פעילים, rate קצב שיגורים (off/low/normal/high), sats מספר לוויינים מרבי במסלול (4–48), stack לוויינים בכל שיגור (2–8), quality איכות ציור (high/ultra). מוזיקת רקע: music הפעלה, musicStyle סגנון (drift מרחב, stars כוכבים, piano פסנתר רך), musicVol עוצמה (5–100), musicHours מתי (work 08–18, day 07–20, all כל היום); היא נשתקת לבד בזמן סרטון התדמית, הטקס, שידור שיגור ויום זיכרון.',
     input_schema: obj({
       changes: obj({
         noon: { type: 'boolean' }, qr: { type: 'boolean' }, fx: { type: 'boolean' }, sway: { type: 'boolean' },
@@ -458,6 +458,8 @@ export const TOOLS: Tool[] = [
         lang: { type: 'string', enum: ['he', 'en'] },
         emblem: { type: 'string', enum: ['v7', 'v2'] }, traffic: { type: 'boolean' }, rate: { type: 'string', enum: ['off', 'low', 'normal', 'high'] },
         sats: { type: 'integer', minimum: 4, maximum: 48 }, stack: { type: 'integer', minimum: 2, maximum: 8 }, quality: { type: 'string', enum: ['high', 'ultra'] },
+        music: { type: 'boolean' }, musicStyle: { type: 'string', enum: ['drift', 'stars', 'piano'] }, musicVol: { type: 'integer', minimum: 5, maximum: 100 },
+        musicHours: { type: 'string', enum: ['work', 'day', 'all'] },
         headline: { type: 'string', maxLength: 80, description: 'כותרת באמצע הפס העליון של הצג, למשל "ברוכים הבאים למשלחת מיפן". ריק מסיר' },
         headlineEn: { type: 'string', maxLength: 80, description: 'אותה כותרת באנגלית, למצב האנגלית' },
         hide: { type: 'array', items: { type: 'string', enum: [...PANELS] }, description: 'הפאנלים המוסתרים (הרשימה המלאה; [] מחזיר הכול): news ניוזלטר, events אירועים, people אנשי המנהלת, ticker רצועת האירועים וההזדמנויות, launches שיגורים קרובים. מה שנשאר מתרחב למקום' },

@@ -24,6 +24,8 @@ export const PANELS = ['news', 'events', 'people', 'ticker', 'launches'] as cons
 export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo' as 'holo' | 'real', sway: true, lang: 'he' as 'he' | 'en', vw: false,
   // the emblem in the middle (app/src/wall.js CFG.emblem): v7 the 3D globe with launches and satellites, v2 the previous one
   emblem: 'v7' as 'v7' | 'v2', traffic: true, rate: 'normal' as 'off' | 'low' | 'normal' | 'high', sats: 24, stack: 8, quality: 'high' as 'high' | 'ultra',
+  // quiet background music made on the wall (app/src/music.js)
+  music: true, musicStyle: 'stars' as 'drift' | 'stars' | 'piano', musicVol: 30, musicHours: 'work' as 'work' | 'day' | 'all',
   css: '', headline: '', headlineEn: '', hide: [] as string[], news: [] as Row[],
   scenes: [] as Row[], decor: null as Row | null, shortcuts: [] as Row[] };
 
@@ -48,6 +50,10 @@ export const DesignPatch = z.object({
   sats: z.number().int().min(4).max(48).describe('כמה לוויינים לכל היותר נשארים במסלול בלוגו v7'),
   stack: z.number().int().min(2).max(8).describe('כמה לוויינים כל שיגור מכניס למסלול בלוגו v7'),
   quality: z.enum(['high', 'ultra']).describe('איכות הציור של לוגו v7: high (מומלץ למחשב הלובי), ultra חדה יותר וכבדה יותר'),
+  music: z.boolean().describe('מוזיקת רקע שקטה בצג (נשתקת לבד בזמן סרטון התדמית, הטקס, שידור שיגור ויום זיכרון)'),
+  musicStyle: z.enum(['drift', 'stars', 'piano']).describe('סגנון מוזיקת הרקע: drift מרחב (צלילים ארוכים ורכים), stars כוכבים (עם צלצולים עדינים), piano פסנתר רך'),
+  musicVol: z.number().int().min(5).max(100).describe('עוצמת מוזיקת הרקע באחוזים (5–100)'),
+  musicHours: z.enum(['work', 'day', 'all']).describe('מתי מוזיקת הרקע מתנגנת: work 08:00–18:00, day 07:00–20:00, all כל היום'),
   css: z.string().max(6000).superRefine((v, c) => { const e = cssProblem(v); if (e) c.addIssue({ code: 'custom', message: e }); }),
   headline: z.string().trim().max(80), headlineEn: z.string().trim().max(80),
   hide: z.array(z.enum(PANELS)).max(PANELS.length),
