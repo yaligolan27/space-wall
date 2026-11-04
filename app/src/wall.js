@@ -25,7 +25,7 @@
     feed: q.get('feed') || '/api/feed',
     key: displayKey(),
     refresh: Math.max(10, num('refresh', 60)),
-    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream | occasion
+    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream | occasion | standby | ceremony
     memorial: bool('memorial', false),             // the small Yizkor on the home wall without a memorial day (demos)
     occ: q.get('occ') || '',                       // an occasion's key (lib/occasions.ts): its card, full screen or Yizkor (demos)
     sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
@@ -191,6 +191,10 @@
   // The year's occasions (lib/occasions.ts, from the feed): what kind of day each is, in the events panel.
   const OCC_KIND = { holiday: ['חג', 'Holiday'], national: ['יום לאומי', 'National day'], space: ['יום החלל', 'Space day'], memorial: ['יום זיכרון', 'Remembrance day'], remember: ['יום זיכרון', 'Remembrance'] };
   const isOccasion = (ov) => !!ov && ov.kind === 'occasion';
+  // The ribbon-cutting opening (ceremony.js, the remote's "טקס גזירת הסרט"): a standby screen until "start", then one long
+  // sequence on its own clock (`start`, performance.now() of its second 0) that ends by itself on the home wall.
+  const isCeremony = (ov) => !!ov && ov.kind === 'ceremony';
+  const cerGo = (ov) => isCeremony(ov) && ov.phase === 'go';
 
   class Wall extends React.Component {
     constructor(p) {
@@ -201,6 +205,14 @@
       this.onWlHeroGone = () => { if (this.state.wl) this.setWl({ heroGone: true }, () => this.maybeFinishWl()); };
       this.memTarget = () => this.memorialCandle();
       this.onMemDone = (id) => { const o = this.state.ov; if (isMemorial(o) && o.id === id) this.setState({ ov: null }); };
+      // The ceremony's closing: the wall wakes and assembles under its card (as after any moment), then the card is gone.
+      this.onCerWake = (id) => {
+        const o = this.state.ov; if (!isCeremony(o) || o.id !== id) return;
+        const t = Date.now(); clearTimeout(this._backT);
+        this.setState({ covered: false, back: t });
+        this._backT = setTimeout(() => { if (this.state.back === t) this.setState({ back: 0 }); }, MV.BACK / (window.__cerRate || 1));
+      };
+      this.onCerDone = (id) => { const o = this.state.ov; if (isCeremony(o) && o.id === id) this.setState({ ov: null }); };
     }
 
     // ---- lifecycle ----------------------------------------------------------------------------
@@ -213,14 +225,15 @@
         if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome'); else if (k === 'y') this.demo('memorial'); else if (k === 'o') this.demo('occasion');
         else if ((k === 'enter' || k === ' ') && isWelcome(ov) && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
         else if ((k === 'enter' || k === ' ') && isMemorial(ov) && ov.demo) this.leaveMemorial();
-        else if (k === 'escape') { if (isWelcome(ov) || isMemorial(ov)) { this.clearLeave(); this.setState({ ov: null, wl: null }); } else this.closeOv(); }
+        else if (k === 'escape') { if (isWelcome(ov) || isMemorial(ov)) { this.clearLeave(); this.setState({ ov: null, wl: null }); } else if (isCeremony(ov)) this.endCeremony(); else this.closeOv(); }
+        else if (k === 'k') { if (isCeremony(ov) && ov.demo && ov.phase === 'standby') this.demo('ceremony'); else if (!cerGo(ov)) this.demo('standby'); }
         else if (k === 'h') this.demo('news');
         else if (k === 'v') this.demo('stream'); };
       addEventListener('keydown', this.onKey);
       this.load();
       this.pollLive();
     }
-    componentWillUnmount() { clearTimeout(this._sCovT); removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearTimeout(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); clearTimeout(this._outT); clearTimeout(this._backT); this.clearLeave(); removeEventListener('resize', this.fit); }
+    componentWillUnmount() { clearTimeout(this._sCovT); removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearTimeout(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); clearTimeout(this._outT); clearTimeout(this._backT); clearTimeout(this._cerT); clearTimeout(this._cerT2); this.clearLeave(); removeEventListener('resize', this.fit); }
     /** A full-screen moment covers the wall once it has faded in (`covered`); until it ends the wall under it rests (render). */
     componentDidUpdate(_, prev) {
       const ov = this.state.ov;
@@ -229,6 +242,8 @@
       if (this.state.wl && !this.wl) { this.clearLeave(); this.setState({ wl: null }); }
       // A welcome just came up: ask the remote often from now on, so "enter" starts at once.
       if (isWelcome(ov) && !isWelcome(prev.ov) && ov.live && !CFG.preview) this.pollLive();
+      // …and while the ceremony's standby screen waits for "start", so every screen starts on the same second.
+      if (this.cerWaiting(ov) && !this.cerWaiting(prev.ov)) this.pollLive();
       // Design and data held back during the entrance, once it is over (or cut short); data in the old language is dropped.
       if (!(isWelcome(ov) && ov.leaving)) {
         if (this._pendingDesign) { const d = this._pendingDesign; this._pendingDesign = null; if (this.design(d)) this._pendingData = null; this.setState({ now: serverNow() }); }
@@ -245,7 +260,7 @@
     /** /api/live now, then again after the usual interval, or every 1.5 s while a welcome waits for "enter". */
     pollLive() {
       clearTimeout(this.livePoll);
-      const next = () => { const ov = this.state.ov, fast = isWelcome(ov) && ov.live && !ov.leaving && !CFG.preview;
+      const next = () => { const ov = this.state.ov, fast = (isWelcome(ov) && ov.live && !ov.leaving || this.cerWaiting(ov)) && !CFG.preview;
         clearTimeout(this.livePoll); this.livePoll = setTimeout(() => this.pollLive(), fast ? WL.POLL_FAST : CFG.livePoll * 1000); };
       this.loadLive().then(next, next);
     }
@@ -282,10 +297,10 @@
     syncTakeover() {
       const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow(), wlUp = isWelcome(ov);
       // Forget what was shown once the server reports none, so the remote's undo of "back to normal" brings it back.
-      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else if (isMemorial(ov)) this.leaveMemorial(); else this.closeOv(); } return; }
+      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else if (isMemorial(ov)) this.leaveMemorial(); else if (isCeremony(ov)) this.endCeremony(); else this.closeOv(); } return; }
       // A welcome's way out counts as its own state, so the remote's undo of "enter" (the same welcome, no longer
       // leaving) brings it back once the entrance is over.
-      const seen = tk.id + (tk.leaving ? '|leaving' : '');
+      const seen = tk.id + (tk.leaving ? '|leaving' : '') + (tk.kind === 'ceremony' ? '|' + tk.phase : '');
       // "Enter" from the remote: the server keeps the welcome for a few seconds, marked `leaving`.
       if (wlUp && ov.live && tk.id === ov.id && tk.leaving) { this._tkSeen = seen; return this.leaveWelcome(); }
       if (wlUp && ov.leaving) return;                    // anything new waits (not marked seen) until the entrance is over
@@ -306,6 +321,31 @@
       else if (tk.kind === 'stream' && tk.videoId) this.setState({ ov: { kind: 'stream', id: tk.id, live: true, videoId: tk.videoId, title: tk.title || '', until } });
       else if (tk.kind === 'news') { const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: tk.id, live: true, item, secs: Math.max(5, Math.round((until - now) / 1000)), until } }); }
       else if (tk.kind === 'memorial') this.setState({ ov: { kind: 'memorial', id: tk.id, live: true, until } });
+      else if (tk.kind === 'ceremony') this.ceremonyUp({ id: tk.id, live: true, phase: tk.phase === 'go' ? 'go' : 'standby', at: Date.parse(tk.at) || now, video: tk.video || '', texts: tk.texts || null, until });
+    }
+    // ---- the ribbon-cutting opening -------------------------------------------------------------------
+    /** The ceremony on the wall: its standby screen, or the sequence from `at` (server time; one seen late joins it where
+     *  it is). Until its second 0 the standby screen stays up. The sequence ends by itself (onDone), so the server's end
+     *  of it (until) is only a backstop: a long one here. */
+    ceremonyUp(o) {
+      const now = serverNow(), cur = this.state.ov, base = { kind: 'ceremony', id: o.id, live: o.live, demo: o.demo, video: o.video, texts: o.texts };
+      if (o.phase !== 'go') return this.setState({ ov: Object.assign(base, { phase: 'standby', until: o.until }) });
+      const start = performance.now() + (o.at - now), wait = start - performance.now();
+      this.setState({ ov: Object.assign(base, { phase: 'go', start, since: isCeremony(cur) && cur.phase === 'standby' ? 1 : 0, until: Math.max(o.until, o.at + 3600e3) }) });
+      // redraw at its second 0 (the standby screen gives way) and once the standby screen is no longer needed under it
+      clearTimeout(this._cerT); clearTimeout(this._cerT2);
+      this._cerT = setTimeout(() => this.setState({}), Math.max(0, wait + 30));
+      this._cerT2 = setTimeout(() => this.setState({}), Math.max(0, wait + 1800));
+    }
+    /** Waiting on the remote's "start": the live standby screen (the wall then asks the server every POLL_FAST ms). */
+    cerWaiting(ov) { return isCeremony(ov) && ov.live && ov.phase === 'standby' && !ov.out && !CFG.preview; }
+    /** The remote's "end" (or "back to normal"): a sequence that is playing goes to its closing from wherever it is; the
+     *  standby screen (or a sequence not begun yet) just goes. */
+    endCeremony() {
+      const ov = this.state.ov;
+      if (!isCeremony(ov)) return;
+      if (!cerGo(ov) || performance.now() < ov.start) return this.closeOv();
+      if (!ov.end) this.setState({ ov: Object.assign({}, ov, { end: performance.now() }) });
     }
     /** A moment's way out (not the welcome's, which has its own): with the shared transition it leaves over OUT ms while
      *  the wall, uncovered at once, assembles under it; without, it just goes. */
@@ -348,7 +388,7 @@
      *  in the space news panel with a strip under it. Under the full-screen moments; the remote's preview shows a picture. */
     streamLayer() {
       const s = this.stream();
-      if (!s) return null;
+      if (!s || cerGo(this.state.ov)) return null;   // (nothing under the ceremony: the lobby computer gives it everything)
       const full = s.mode === 'full', fx = M().fx;
       const r = full ? { x: 0, y: 0, w: 1920 } : this.state.sRect || { x: EN() ? 1414 : 36, y: 168, w: 470 };
       const k = r.w / 1920, vh = Math.round(1080 * k), ease = 'cubic-bezier(.65,0,.35,1)';
@@ -534,6 +574,12 @@
         return;
       }
       if (kind === 'noon') { const t = serverNow(); return this.setState({ ov: { kind: 'noon', id: t, demo: true, until: t + 15 * 60e3 } }); }
+      // ?demo=standby (then K: start) or ?demo=ceremony (&cerAt=N: from second N; &cerVideo=url): the ribbon-cutting opening
+      if (kind === 'standby' || kind === 'ceremony') {
+        const t = serverNow(), cur = this.state.ov, L = this.state.live, c = (L && L.design && L.design.ceremony) || {};   // (the remote's video and words)
+        return this.ceremonyUp({ id: isCeremony(cur) && cur.demo ? cur.id : 'demo' + t, demo: true, phase: kind === 'ceremony' ? 'go' : 'standby', at: t + 400 - num('cerAt', 0) * 1000,
+          video: q.get('cerVideo') || c.video || '', texts: c.texts || null, until: t + 3600e3 });
+      }
       // ?demo=stream or V: a launch broadcast, full screen, then (V again) in the news corner, then (V) gone.
       if (kind === 'stream') {
         const d = this.state.demoStream, vid = q.get('video') || 'M7lc1UVf-VE';
@@ -569,13 +615,14 @@
         if (isWelcome(ov) && !ov.leaving) this.leaveWelcome();   // a forgotten welcome still ends with its entrance
         else if (isMemorial(ov) && !ov.leaving) this.leaveMemorial();   // the Yizkor screen lands on the home wall
         else if (isWelcome(ov)) { ov = null; this.clearLeave(); this.setState({ ov: null, wl: null }); }
+        else if (isCeremony(ov)) { this.endCeremony(); return; }
         else { if (ov.kind === 'launch' && !ov.demo) this._toastAfter = { title: tr('שוגר', 'Liftoff'), line: ov.launch.mission + ' · ' + ov.launch.vehicle }; this.closeOv(); return; }
       }
       if (!ov && this._toastAfter) { this.setState({ toast: Object.assign(this._toastAfter, { until: now + 45000 }) }); this._toastAfter = null; }
       if (this.state.toast && now > this.state.toast.until) this.setState({ toast: null });
       const T = this.ilParts(now);
       this.maybeReload(T, ov);
-      if (ov && (ov.kind === 'noon' || ov.live)) return;
+      if (ov && (ov.kind === 'noon' || ov.live || isCeremony(ov))) return;
       if (Date.now() < (this._wlWakeAt || 0) + WL.QUIET) return;   // the wall has just made its entrance: let it be seen
       // The 12:00 show is decided by the server (it can be skipped or stopped from the remote); locally only as a fallback.
       // On a memorial day neither the 12:00 promo nor the scheduled celebrations and space news.
@@ -619,13 +666,17 @@
       this._reloadTry = Date.now() + 60e3;
       reloadPage(nightly ? 3600e3 : 10 * 60e3);
     }
+    /** The ceremony's two flags for drawing it: before its second 0 (only the standby screen), and in its first moments
+     *  (the standby screen still under the sequence fading in). */
+    cerStage(ov) { const n = performance.now(), go = cerGo(ov); return [!go || n < ov.start, go && !!ov.since && n < ov.start + 1800]; }
     /** The welcome's way-out state, when it belongs to the welcome on screen. */
     get wl() { const ov = this.state.ov, wl = this.state.wl; return isWelcome(ov) && wl && wl.id === ov.id ? wl : null; }
     overlay() {
       const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
       const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) + (ov.out ? '|out' : '') + '|' + M().fx : '') + '|' + (toast ? toast.until : '')
         + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '')
-        + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang, this.memorialKey()].join('|') : '');
+        + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang, this.memorialKey()].join('|') : '')
+        + (isCeremony(ov) ? '|' + this.cerStage(ov).join('|') + '|' + [ov.end || 0, CFG.lang, JSON.stringify(ov.texts || null), ov.video].join('|') : '');
       if (this._ovK === k) return this._ov; this._ovK = k;
       if (!window.makeWallOverlays) return (this._ov = null);
       const O = this._O || (this._O = window.makeWallOverlays(React));
@@ -646,9 +697,17 @@
       // The remote's preview (often a phone) shows a card for a stream instead of loading the video player.
       if (ov && ov.kind === 'stream') el = h(O.LiveStream, { key: mk, videoId: ov.videoId, title: ov.title, preview: CFG.preview });
       if (ov && ov.kind === 'scene') el = h(O.CustomScene, { key: mk, html: ov.html, store: (this.state.live && this.state.live.store) || '' });
+      // The ceremony: its standby screen (with the shared transition when it goes), then the sequence, which comes in over
+      // the standby screen and ends on the home wall by itself; keyed per ceremony, so "end" reaches the one playing.
+      if (isCeremony(ov)) {
+        const Cer = this._Cer || (this._Cer = window.makeCeremony && window.makeCeremony(React)), [pre, under] = this.cerStage(ov);
+        const sb = Cer && (pre || under) ? h(O.Moment, { key: 'mv-sb' + ov.id, out: !!ov.out, fx: M().fx }, h(Cer.Standby, { key: 'sb', texts: ov.texts, preview: CFG.preview })) : null;
+        el = !Cer ? null : h(React.Fragment, { key: 'cer' + ov.id }, sb, pre ? null :
+          h(Cer.Ceremony, { key: 'cer', start: ov.start, video: ov.video, texts: ov.texts, preview: CFG.preview, end: ov.end || 0, onWake: () => this.onCerWake(ov.id), onDone: () => this.onCerDone(ov.id) }));
+      }
       if (ov && ov.kind === 'news') el = h(O.NewsMoment, { key: mk, item: ov.item, secs: ov.secs, qr: CFG.showQr && ov.item.url ? qrData(ov.item.url) : '', fx: CFG.ambientFx });
       // Every moment but the welcome (which has its own) comes and goes with the shared transition.
-      if (el && !wlUp && !isMemorial(ov) && O.Moment) el = h(O.Moment, { key: 'mv' + mk, out: !!ov.out, fx: M().fx }, el);
+      if (el && !wlUp && !isMemorial(ov) && !isCeremony(ov) && O.Moment) el = h(O.Moment, { key: 'mv' + mk, out: !!ov.out, fx: M().fx }, el);
       return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
     }
 
