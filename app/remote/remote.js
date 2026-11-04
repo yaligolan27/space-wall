@@ -76,7 +76,10 @@
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 
   const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he', vw: false,
-    emblem: 'v7', traffic: true, rate: 'normal', sats: 24, stack: 8, quality: 'high' };
+    emblem: 'v7', traffic: true, rate: 'normal', sats: 24, stack: 8, quality: 'high', music: true, musicStyle: 'stars', musicVol: 30, musicHours: 'work' };
+  // Background music on the wall (app/src/music.js, made in the browser): styles and hours as the server takes them.
+  const MUSIC_STYLES = [['drift', 'מרחב'], ['stars', 'כוכבים'], ['piano', 'פסנתר רך']];
+  const MUSIC_HOURS = [['work', '08:00 עד 18:00'], ['day', '07:00 עד 20:00'], ['all', 'כל היום']];
   /** Which emblem the wall shows: 'v2' the previous one, 'earth' the new globe on its own, 'v7' the new globe with traffic. */
   const emblemMode = (d) => (d.emblem === 'v2' ? 'v2' : d.traffic === false ? 'earth' : 'v7');
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
@@ -103,6 +106,11 @@
     { title: 'שפה', controls: [{ key: 'lang', label: 'שפת הצג (השלט נשאר בעברית)', kind: 'seg', options: [['he', 'עברית'], ['en', 'English']] }] },
     { title: 'קיר המסכים', controls: [{ key: 'vw', label: 'מצב קיר מסכים: טקסט גדול ועבה יותר לקיר של 9 הטלוויזיות', kind: 'toggle' }] },
     { title: 'רגעים', controls: [{ key: 'noon', label: 'סרטון תדמית אוטומטי ב-12:00', kind: 'toggle' }] },
+    { title: 'מוזיקת רקע', controls: [
+      { key: 'music', label: 'מוזיקת רקע שקטה', kind: 'toggle' },
+      { key: 'musicStyle', label: 'סגנון המוזיקה', kind: 'seg', options: MUSIC_STYLES },
+      { key: 'musicVol', label: 'עוצמת המוזיקה', kind: 'slider', min: 5, max: 100, unit: '%' },
+      { key: 'musicHours', label: 'מתי המוזיקה מתנגנת', kind: 'seg', options: MUSIC_HOURS }] },
     { title: 'תוכן', controls: [{ key: 'qr', label: 'קודי QR לכתבות', kind: 'toggle' }] },
     { title: 'תנועה', controls: [
       { key: 'feature', label: 'זמן לכתבה מרכזית', kind: 'slider', min: 6, max: 30, unit: 's' },
@@ -420,6 +428,7 @@
     componentDidUpdate(_p, prev) {
       if (prev && prev.chatInput !== this.state.chatInput) fitBox(document.getElementById('agent-input'));
       this.observe();
+      if (this.state.musicTry && this._music) { const d = this.design(); this._music.set({ on: true, vol: d.musicVol, style: d.musicStyle }); }
       const src = this.buildSrc();
       if (src && src !== this._src) { this._src = src; clearTimeout(this.srcT); if (src !== this.state.wallSrc) this.srcT = setTimeout(() => this.setState({ wallSrc: src }), this.state.wallSrc ? 700 : 0); }
       const sig = this.state.messages.length + '|' + this.state.chatOpen;
@@ -660,9 +669,24 @@
             pick('מתחיל לפני השיגור', 'stream', 'before', mo.stream.before, [2, 5, 10, 15, 30], minLbl, (t) => 'שידור שיגור ' + t + ' לפני'),
             pick('על כל המסך אחרי ההמראה', 'stream', 'full', mo.stream.full, [5, 10, 15, 30, 60], minLbl, (t) => 'שידור שיגור על כל המסך ' + t + ' אחרי'),
             { label: 'אחר כך', value: mo.stream.small ? '1' : '0', options: [['1', 'עובר לפינה'], ['0', 'נגמר']], set: (e) => this.setMoment('stream', 'small', e.target.value === '1', e.target.value === '1' ? 'שידור ממשיך בפינה' : 'שידור נגמר אחרי המסך המלא') }] : [] }, onOff('stream', 'שידור חי של שיגורים')),
+        // Background music: its settings live in the design (setDesign), and "listen here" plays the same music on this phone.
+        { key: 'music', title: 'מוזיקת רקע', sub: design.music ? 'מוזיקה שקטה מתנגנת ברקע בשעות שנבחרו. היא נשתקת לבד בזמן סרטון התדמית, הטקס, שידור שיגור ויום זיכרון, וחוזרת אחריהם' : 'כבוי: הצג שקט',
+          sw: sw(design.music), toggle: () => this.setDesign('music', !design.music, !design.music ? 'פעיל' : 'כבוי'),
+          selects: design.music ? [
+            { label: 'סגנון', value: design.musicStyle, options: MUSIC_STYLES, set: (e) => this.setDesign('musicStyle', e.target.value, MUSIC_STYLES.find((x) => x[0] === e.target.value)[1]) },
+            { label: 'עוצמה', value: String(design.musicVol), options: [...new Set([10, 20, 30, 40, 50, 70, 100, design.musicVol])].sort((a, b) => a - b).map((x) => [String(x), x + '%']), set: (e) => this.setDesign('musicVol', Number(e.target.value), e.target.value + '%') },
+            { label: 'מתי', value: design.musicHours, options: MUSIC_HOURS, set: (e) => this.setDesign('musicHours', e.target.value, MUSIC_HOURS.find((x) => x[0] === e.target.value)[1]) }] : [],
+          btn: { label: this.state.musicTry ? '■ לעצור את ההאזנה' : '♪ להאזין כאן בטלפון', go: () => this.tryMusic(design) } },
         { key: 'welcome', title: 'ברוכים הבאים', sub: 'עולה רק מהשלט. אפשר לקבוע שייכנס לצג הבית לבד אחרי זמן מסוים', sw: null,
           selects: [pick('נשאר על המסך', 'welcome', 'auto', mo.welcome.auto, [0, 15, 30, 60, 120, 240], (x) => (x ? minLbl(x) : 'עד שלוחצים "כניסה"'), (t) => 'ברוכים הבאים: ' + t)] },
       ].filter(Boolean);
+    }
+    /** Plays the wall's music here, with its current style and volume, to hear what the lobby hears (a tap starts it). */
+    tryMusic(design) {
+      if (!window.SpaceMusic) return;
+      const m = this._music || (this._music = window.SpaceMusic.create()), on = !this.state.musicTry;
+      m.set({ on, vol: design.musicVol, style: design.musicStyle });
+      this.setState({ musicTry: on });
     }
     setMoment(group, field, value, label) {
       const patch = field ? { [group]: { [field]: value } } : { [group]: value };

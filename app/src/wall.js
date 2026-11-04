@@ -35,6 +35,12 @@
     listSeconds: Math.min(10, Math.max(2, num('list', 4))),
     ambientFx: bool('fx', true),
     videoWall: bool('vw', false),                  // the lobby's 3×3 wall of TVs: bigger, bolder text (the remote's switch)
+    // Quiet background music made in the browser (app/src/music.js): on/off, a style, volume 5–100, and in which hours
+    // (work 08–18, day 07–20, all). Silent in the remote's preview, under a moment with its own sound and on a memorial day.
+    music: bool('music', true),
+    musicStyle: ['drift', 'stars', 'piano'].includes(q.get('musicStyle')) ? q.get('musicStyle') : 'stars',
+    musicVol: Math.min(100, Math.max(5, num('musicVol', 30))),
+    musicHours: ['work', 'day', 'all'].includes(q.get('musicHours')) ? q.get('musicHours') : 'work',
     globeSpeed: Math.min(240, Math.max(20, num('globe', 90))),
     globeStyle: q.get('globeStyle') === 'real' ? 'real' : 'holo',
     cameraSway: bool('sway', true),
@@ -59,7 +65,9 @@
   };
   // Stored design (from the remote) → CFG, except where the URL sets the option explicitly.
   const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang', vw: 'videoWall',
-    emblem: 'emblem', traffic: 'traffic', rate: 'launchRate', sats: 'maxSats', stack: 'stackSize', quality: 'quality' };
+    emblem: 'emblem', traffic: 'traffic', rate: 'launchRate', sats: 'maxSats', stack: 'stackSize', quality: 'quality',
+    music: 'music', musicStyle: 'musicStyle', musicVol: 'musicVol', musicHours: 'musicHours' };
+  const MUSIC_HOURS = { work: [8, 18], day: [7, 20], all: [0, 24] };
   function applyDesign(d) {
     let changed = false;
     for (const k in DESIGN_KEYS) {
@@ -220,7 +228,7 @@
       this.t0 = Date.now();
       this.fit = () => { const s = Math.min(innerWidth / 1920, innerHeight / 1080); if (s > 0) this.setState({ scale: s }); };
       this.fit(); addEventListener('resize', this.fit); this.fitRetry = setTimeout(this.fit, 800);
-      this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } }, 1000);
+      this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } try { this.musicSync(); } catch (e) { console.warn('music failed', e); } }, 1000);
       this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(), ov = this.state.ov;
         if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome'); else if (k === 'y') this.demo('memorial'); else if (k === 'o') this.demo('occasion');
         else if ((k === 'enter' || k === ' ') && isWelcome(ov) && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
@@ -788,6 +796,27 @@
     }
     /** Today's occasion on the home wall (not a memorial day, which has its candle): a card under the emblem, from the day
      *  the wall starts greeting it to its last day (lib/occasions.ts occasionGreets). ?occ=<key> shows one (demos). */
+    // ---- background music ---------------------------------------------------------------------------
+    /** Every second: the music plays while it is on, in its hours, with nothing else making sound on the wall (the 12:00
+     *  video, the ceremony, a launch broadcast, any video playing with sound) and never on a memorial day or a day of
+     *  mourning, or with the Yizkor screen up. It fades out and back in by itself. Until the browser lets the page make
+     *  sound (a click on the wall, or the lobby shortcut's autoplay flag) a small note in the corner says so. */
+    musicSync() {
+      if (CFG.preview || !window.SpaceMusic) return;
+      const mus = this._music || (this._music = window.SpaceMusic.create());
+      const ov = this.state.ov, L = this.state.live, D = this.D, T = this.ilParts(serverNow()), [a, b] = MUSIC_HOURS[CFG.musicHours] || MUSIC_HOURS.work;
+      const loud = !!ov && (ov.kind === 'noon' || ov.kind === 'stream' || isCeremony(ov) || isMemorial(ov))
+        || Array.from(document.querySelectorAll('video,audio')).some((v) => !v.paused && !v.muted && v.volume > 0);
+      const mourning = !!(L && L.memorial) || ((D && D.occasions) || []).some((o) => o.kind === 'memorial' || o.kind === 'remember');
+      mus.set({ on: CFG.music && T.h >= a && T.h < b && !loud && !mourning, vol: CFG.musicVol, style: CFG.musicStyle });
+      let note = document.getElementById('wall-music-note');
+      if (!mus.blocked()) { if (note) note.remove(); return; }
+      if (note) return;
+      note = document.createElement('div'); note.id = 'wall-music-note';
+      note.textContent = tr('♪ לחיצה על המסך מפעילה את מוזיקת הרקע', '♪ Click the screen to start the background music');
+      note.style.cssText = 'position:fixed;bottom:10px;left:12px;z-index:90;font:500 13px Heebo,sans-serif;color:rgba(223,231,245,.55);background:rgba(4,9,20,.55);padding:4px 10px;border-radius:8px;pointer-events:none';
+      document.body.appendChild(note);
+    }
     occasionToday() {
       const D = this.D, list = (D && D.occasions) || [];
       return list.find((o) => o.key === CFG.occ) || list.find((o) => o.kind !== 'memorial') || null;
