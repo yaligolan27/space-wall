@@ -993,7 +993,7 @@
       const showEvents = !hidden('events'), showPeople = !hidden('people'), showNews = !hidden('news');
       const right = !showEvents && !showPeople ? null : h('section', { key: 'r', style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }, enW('wlPanelIn', 2600, rightFirst)) },
         showEvents ? h('div', { 'data-w': 'events', style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }, showPeople ? {} : { flex: 1, minHeight: 0 }) },
-          this.sheen(1, 0), seam('insetInlineEnd', 8400), edgeFlash(8450), panelHead(tr('אירועים', 'Events'), tr('השבוע', 'THIS WEEK')), directorate.length ? directorate : quiet(tr('אין אירועים השבוע', 'No events this week'))) : null,
+          this.sheen(1, 0), seam('insetInlineEnd', 8400), edgeFlash(8450), panelHead(tr('אירועים', 'Events'), tr('הקרובים', 'UPCOMING')), directorate.length ? directorate : quiet(tr('אין אירועים קרובים', 'No upcoming events'))) : null,
         showPeople ? h('div', { 'data-w': 'people', style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
           this.sheen(2, 4.5), seam('insetInlineEnd', showEvents ? 8520 : 8400), edgeFlash(8450),
           panelHead(tr('אנשי המנהלת', 'Our people'), D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),

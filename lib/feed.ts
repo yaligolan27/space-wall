@@ -24,7 +24,9 @@ import sample from '../app/data/feed.json' with { type: 'json' };
 export type Settings = { peopleHorizonDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
 const DEFAULTS: Settings = { peopleHorizonDays: 10, directorateDays: 7, eventsHorizonDays: 120, launchCount: 4 };
 /** Tiles in the wall's people panel and rows in its events panel. */
-export const PEOPLE_TILES = 6, EVENT_ROWS = 4;
+export const PEOPLE_TILES = 6, EVENT_ROWS = 5;
+/** The people panel always has the next BIRTHDAYS_SHOWN birthdays, however far off (and any others in its horizon). */
+export const BIRTHDAYS_SHOWN = 3;
 /** settings.feed over the defaults. Production's row calls the people horizon lifeEventsHorizonDays. */
 export function feedSettings(raw: any): Settings {
   const given = { peopleHorizonDays: raw?.lifeEventsHorizonDays, ...raw }, cfg = { ...DEFAULTS };
@@ -129,11 +131,14 @@ export function peopleTiles(life: any[], roster: any[], today: string, cfg: Sett
     all.push({ ...lifeCard(e, p, today), sort: e.event_date, until: windowed ? lifeWindow(e).until : e.event_date,
       ref: { kind: 'life', id: e.id, personId: e.person_id || null } });
   }
-  for (const p of roster) {
-    const next = nextYearly(p.birthday.slice(5), from, cfg.peopleHorizonDays);
-    if (!next || seen.has(`birthday|${p.display_name}|${next}`)) continue;
+  // Birthdays: the next BIRTHDAYS_SHOWN of the year, however far off, and any others inside the horizon.
+  const bdays = roster.map(p => ({ p, next: nextYearly(p.birthday.slice(5), from, 366) }))
+    .filter((b): b is { p: any; next: string } => !!b.next && !seen.has(`birthday|${b.p.display_name}|${b.next}`))
+    .sort((a, b) => a.next.localeCompare(b.next));
+  bdays.forEach(({ p, next }, i) => {
+    if (i >= BIRTHDAYS_SHOWN && next > until) return;
     all.push({ ...birthdayCard(p, next, today), sort: next, until: next, ref: { kind: 'bday', personId: p.id } });
-  }
+  });
   all.sort((a, b) => Math.abs(dayDiff(today, a.sort)) - Math.abs(dayDiff(today, b.sort)) || a.sort.localeCompare(b.sort));
   return { shown: all.slice(0, PEOPLE_TILES), waiting: all.slice(PEOPLE_TILES), doubles };
 }
@@ -143,11 +148,11 @@ export const eventEnd = (e: any) => (e.ends_at ? Date.parse(e.ends_at) : Date.pa
 /** When an event leaves the wall: the midnight (Israel time) after the day it ends. An all-day one ends at midnight
  *  already, so it goes then. */
 export const eventGone = (e: any) => Date.parse(ilToIso(addDays(isoDateIL(new Date(eventEnd(e) - 1)), 1), '00:00'));
-/** The events panel: events of the next `directorateDays` days, and the ones that ended today (until midnight, within
+/** The events panel: the next events, and the ones that ended today (until midnight, within
  *  their own show_from and show_until, when set). `shown` are the panel's rows and `waiting` don't fit. */
 export function eventTiles(rows: any[], t: number, today: string, cfg: Settings) {
-  const until = Date.parse(ilToIso(addDays(today, cfg.directorateDays + 1), '00:00'));
-  const due = rows.filter(e => eventGone(e) > t && Date.parse(e.starts_at) < until && (!e.show_from || e.show_from <= today) && (!e.show_until || e.show_until >= today));
+  // The next EVENT_ROWS events, however far off (the query reaches two months ahead).
+  const due = rows.filter(e => eventGone(e) > t && (!e.show_from || e.show_from <= today) && (!e.show_until || e.show_until >= today));
   return { shown: due.slice(0, EVENT_ROWS), waiting: due.slice(EVENT_ROWS) };
 }
 
