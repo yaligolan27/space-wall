@@ -1,0 +1,1134 @@
+// Space Wall v4 — the lobby display. A direct port of the Claude Design "Space Wall v4" template:
+// the same 1920×1080 stage, layout, styles and motion, rendered with React (vendored UMD, no build).
+// Content comes from /api/feed (weekly newsletter + database). Until it answers the wall shows a calm "connecting"
+// state, never invented content: the bundled sample (data/feed.json) appears only with ?sample=1, or lends a ?demo= its
+// moment when there is no real one. Full-screen moments (launch mode, personal celebration, 12:00 show, important
+// event) live in overlays.js, the 3D emblem in emblem-v7/ (the previous one, emblem-v2.js, a switch away in the remote). The remote control (app/remote) drives design, brightness,
+// the urgent banner and full-screen moments through /api/live, polled every few seconds; URL options override the
+// stored design. /api/live also gives the server's clock, which times everything here, and the deployment, so the
+// wall reloads itself after a deploy (and nightly at 04:00) and runs for weeks unattended.
+(() => {
+  const h = React.createElement;
+  const { useState, useEffect } = React;
+
+  // ---- config (URL query) ----------------------------------------------------------------------
+  const q = new URLSearchParams(location.search);
+  const bool = (k, d) => q.has(k) ? !/^(0|false|no|off)$/i.test(q.get(k)) : d;
+  const num = (k, d) => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : d);
+  // The display key: the URL's, kept for visits without one (an installed app opens "/" with no query).
+  function displayKey() {
+    const k = q.get('key') || '';
+    try { if (k) localStorage.setItem('wall:key', k); else return localStorage.getItem('wall:key') || ''; } catch (e) { /* no storage: the URL's only */ }
+    return k;
+  }
+  const CFG = {
+    feed: q.get('feed') || 'https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/feed',
+    key: displayKey(),
+    refresh: Math.max(10, num('refresh', 60)),
+    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream | occasion | standby | ceremony
+    memorial: bool('memorial', false),             // the small Yizkor on the home wall without a memorial day (demos)
+    occ: q.get('occ') || '',                       // an occasion's key (lib/occasions.ts): its card, full screen or Yizkor (demos)
+    sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
+    noonShow: bool('noon', true),
+    showQr: bool('qr', true),
+    featureSeconds: Math.min(30, Math.max(6, num('feature', 12))),
+    listSeconds: Math.min(10, Math.max(2, num('list', 4))),
+    ambientFx: bool('fx', true),
+    videoWall: bool('vw', false),                  // the lobby's 3×3 wall of TVs: bigger, bolder text (the remote's switch)
+    // Quiet background music made in the browser (app/src/music.js): on/off, a style, volume 5–100, and in which hours
+    // (all: always, the default; work 08–18; day 07–20). Silent in the remote's preview, under a moment with its own sound and on a memorial day.
+    music: bool('music', true),
+    musicStyle: ['drift', 'stars', 'piano'].includes(q.get('musicStyle')) ? q.get('musicStyle') : 'stars',
+    musicVol: Math.min(100, Math.max(5, num('musicVol', 30))),
+    musicHours: ['work', 'day', 'all'].includes(q.get('musicHours')) ? q.get('musicHours') : 'all',
+    globeSpeed: Math.min(240, Math.max(20, num('globe', 90))),
+    globeStyle: q.get('globeStyle') === 'real' ? 'real' : 'holo',
+    cameraSway: bool('sway', true),
+    // The emblem in the middle: v7, the 3D globe with launches and satellites (app/src/emblem-v7/), or v2, the previous
+    // one. v7's launches and satellites: traffic on/off, how often a launch goes up (rate), at most how many satellites
+    // stay in orbit (sats) and how many a launch puts there (stack); quality: high (1.5× the screen's pixels) or ultra (2×).
+    emblem: q.get('emblem') === 'v2' ? 'v2' : 'v7',
+    traffic: bool('traffic', true),
+    launchRate: ['off', 'low', 'normal', 'high'].includes(q.get('rate')) ? q.get('rate') : 'normal',
+    maxSats: Math.min(48, Math.max(4, Math.round(num('sats', 24)))),
+    stackSize: Math.min(8, Math.max(2, Math.round(num('stack', 8)))),
+    quality: q.get('quality') === 'ultra' ? 'ultra' : 'high',
+    staleAfterMin: num('stale', 180),
+    live: q.get('live') || 'https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/live',
+    livePoll: Math.max(3, num('livePoll', 8)),   // 8 s: the free server plan counts every request
+    preview: bool('preview', false),               // embedded in the remote: muted, no keyboard
+    lang: q.get('lang') === 'en' ? 'en' : 'he',    // en: the whole wall in English (the remote's switch, for delegations)
+    // From the remote's agent (design): a style layer, a headline in the header, hidden panels, news items. ?css=0 skips the layer.
+    css: '', headline: '', headlineEn: '', hide: [], news: [],
+    moments: null,                                 // the remote's schedules (design.moments), see M()
+    noCss: q.has('css') && /^(0|false|no|off)$/i.test(q.get('css')),
+  };
+  // Stored design (from the remote) → CFG, except where the URL sets the option explicitly.
+  const DESIGN_KEYS = { noon: 'noonShow', qr: 'showQr', feature: 'featureSeconds', list: 'listSeconds', fx: 'ambientFx', globe: 'globeSpeed', globeStyle: 'globeStyle', sway: 'cameraSway', lang: 'lang', vw: 'videoWall',
+    emblem: 'emblem', traffic: 'traffic', rate: 'launchRate', sats: 'maxSats', stack: 'stackSize', quality: 'quality',
+    music: 'music', musicStyle: 'musicStyle', musicVol: 'musicVol', musicHours: 'musicHours' };
+  const MUSIC_HOURS = { work: [8, 18], day: [7, 20], all: [0, 24] };
+  function applyDesign(d) {
+    let changed = false;
+    for (const k in DESIGN_KEYS) {
+      if (q.has(k) || d[k] === undefined) continue;
+      if (CFG[DESIGN_KEYS[k]] !== d[k]) { CFG[DESIGN_KEYS[k]] = d[k]; changed = true; }
+    }
+    for (const k of ['headline', 'headlineEn']) { const v = typeof d[k] === 'string' ? d[k] : ''; if (CFG[k] !== v) { CFG[k] = v; changed = true; } }
+    for (const k of ['hide', 'news']) { const v = Array.isArray(d[k]) ? d[k] : []; if (JSON.stringify(CFG[k]) !== JSON.stringify(v)) { CFG[k] = v; changed = true; } }
+    CFG.moments = d.moments && typeof d.moments === 'object' ? d.moments : null;   // read when used: no redraw needed
+    styleLayer(typeof d.css === 'string' ? d.css : '');
+    videoWallLayer();
+    window.wallLang = CFG.lang;                    // overlays.js reads it
+    return changed;
+  }
+  /** The agent's CSS (checked on the server: nothing loaded from outside) in a <style> after the wall's own. The wall's
+   *  elements carry data-w="…" names for it; their styles are inline, so its rules use !important. */
+  function styleLayer(css) {
+    if (CFG.noCss) css = '';
+    if (css === CFG.css) return;
+    CFG.css = css;
+    let el = document.getElementById('wall-style');
+    if (!el) { el = document.createElement('style'); el.id = 'wall-style'; document.head.appendChild(el); }
+    el.textContent = css;
+  }
+  /** "מצב קיר מסכים": the lobby wall is 9 TVs fed one 1920×1080 picture, so each shows 640×360 of it three times
+   *  enlarged, and small, thin or faint text there turns to mush. Every font size on the stage goes up a step (by its
+   *  inline style, which React writes as "font-size: 12px"), light and regular weights a step bolder, and faint text
+   *  brighter. Before the agent's layer, so its rules still win. */
+  const VW_SIZES = { 10: 14, 11: 15, 12: 16, 13: 17, 14: 18, 15: 19, 16: 20, 17: 21, 18: 22, 20: 24, 22: 26, 24: 28, 25: 29, 26: 30 };
+  const VW_CSS = Object.entries(VW_SIZES).map(([a, b]) => `[data-w=stage] [style*="font-size: ${a}px"]{font-size:${b}px!important}`).join('\n') + `
+[data-w=stage] [style*="font-weight: 300"]{font-weight:400!important}
+[data-w=stage] [style*="font-weight: 400"]{font-weight:500!important}
+[data-w=stage] [style*="font-weight: 500"]{font-weight:600!important}
+[data-w=stage] [style*="color: rgb(111, 130, 166)"]{color:#a3b3cf!important}
+[data-w=stage] [style*="color: rgb(139, 157, 189)"]{color:#b3c2dc!important}
+[data-w=stage] [style*="color: rgb(179, 194, 220)"]{color:#d2dcec!important}`;
+  function videoWallLayer() {
+    let el = document.getElementById('wall-vw');
+    if (!CFG.videoWall) { if (el) el.remove(); return; }
+    if (el) return;
+    el = document.createElement('style'); el.id = 'wall-vw'; el.textContent = VW_CSS;
+    const agent = document.getElementById('wall-style');
+    document.head.insertBefore(el, agent || null);
+  }
+  videoWallLayer();
+  window.wallLang = CFG.lang;
+  // English (CFG.lang 'en'): the wall's own words here; what changes comes translated from /api/feed?lang=en.
+  const EN = () => CFG.lang === 'en';
+  const tr = (he, en) => (EN() ? en : he);
+
+  // ---- time, fetches, reloads --------------------------------------------------------------------
+  // The server's clock (from /api/live's `at`): a kiosk whose own clock drifts still opens and closes moments on time.
+  let skew = 0;
+  const serverNow = () => Date.now() + skew;
+  window.wallNow = serverNow;                       // overlays.js counts down with it
+  const timeout = (ms) => { if (AbortSignal.timeout) return AbortSignal.timeout(ms); const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
+  const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+  // A reload happens only when the page itself answers (never strand the lobby on the browser's offline page) and at
+  // most once per `gap` across reloads (sessionStorage), so a page that breaks on load cannot loop.
+  const store = { get: (k) => { try { return sessionStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} } };
+  async function reloadPage(gap) {
+    if (Date.now() - (Number(store.get('wall:reloadAt')) || 0) < gap) return;
+    try { if (!(await fetch(location.href, { cache: 'no-store', signal: timeout(10e3) })).ok) return; } catch (e) { return; }
+    store.set('wall:reloadAt', String(Date.now()));
+    location.reload();
+  }
+  // Launch Library statuses for a launch that has flown; a Go launch counts as flown after its time only while the data
+  // is recent, since the launches come from a daily cron (the feed refreshes them near a launch).
+  const FLOWN = { Success: 1, 'In Flight': 1, Failure: 1, 'Partial Failure': 1 };
+  const goNow = (l, now) => l.code === 'Go' && now - Date.parse(l.checked) < 6 * 3600e3;
+
+  // ---- QR, generated locally (no third-party image service) ------------------------------------
+  const qrCache = {};
+  function qrData(url) {
+    if (!url) return '';
+    if (qrCache[url]) return qrCache[url];
+    try {
+      if (qrcode.stringToBytesFuncs && qrcode.stringToBytesFuncs['UTF-8']) qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+      const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
+      const n = qr.getModuleCount(), size = 120, cell = size / n;
+      const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
+      g.fillStyle = '#0b1430'; g.fillRect(0, 0, size, size); g.fillStyle = '#e6f1ff';
+      for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (qr.isDark(r, k)) {
+        const x = Math.round(k * cell), y = Math.round(r * cell);
+        g.fillRect(x, y, Math.round((k + 1) * cell) - x, Math.round((r + 1) * cell) - y);
+      }
+      return (qrCache[url] = c.toDataURL());
+    } catch (e) { console.warn('QR failed', e); return ''; }
+  }
+
+  const fmtIL = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const fmtUTC = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false });
+  const fmtDateHe = new Intl.DateTimeFormat('he-IL', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long' });
+  const fmtDateEn = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', weekday: 'long', day: 'numeric', month: 'long' });
+  const fmtWhen = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  const fmtParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+  // Shared panel look (the glass cards).
+  const PANEL = { position: 'relative', overflow: 'hidden', borderRadius: 26, background: 'linear-gradient(180deg,rgba(40,62,104,.42) 0%,rgba(12,22,44,.6) 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.07),0 24px 60px rgba(0,0,0,.35)', transition: 'border-color 1s ease' };
+  const PILL = { borderRadius: 999, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' };
+  const MUTED = '#8b9dbd';
+  // The welcome screen's way out (overlays.js Welcome), in ms from its start (T0): the wall wakes under the still-opaque
+  // welcome (WAKE), its emblem starts again on the welcome emblem's clock (EMB_WAKE) and shows under it (EMB_SHOW), the
+  // entrance animations end (SETTLE) and the overlay goes (DONE). A leave starts no earlier than MIN_AFTER_REVEAL after the
+  // logo appeared (its assembly and the guest's name are in by then). While a welcome is up the remote is asked every
+  // POLL_FAST ms, so "enter" starts at once; after one, no local moment for QUIET ms and no reload for NO_RELOAD ms.
+  const WL = { COVER: 800, REVEAL_CAP: 6000, MIN_AFTER_REVEAL: 4400, WAKE: 400, EMB_WAKE: 8200, EMB_SHOW: 8600, EMB_SHOW_CAP: 1500, SETTLE: 10400, DONE: 12000, POLL_FAST: 1500, QUIET: 20000, NO_RELOAD: 60000 };
+  const isWelcome = (ov) => !!ov && ov.kind === 'welcome';
+  // The schedules from the remote (lib/remote-ops.ts MOMENTS0, the same defaults): what comes up by itself, how often
+  // (every, lead: minutes) and for how long (secs: seconds), and the shared entry and exit transition (fx).
+  const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
+    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 },
+    stream: { on: true, which: 'all', before: 5, full: 15, small: true } };
+  function M() {
+    const raw = CFG.moments || {}, out = { fx: typeof raw.fx === 'boolean' ? raw.fx : MOMENTS0.fx };
+    for (const k in MOMENTS0) { const d = MOMENTS0[k]; if (typeof d !== 'object') continue; const r = raw[k] || {}; out[k] = {}; for (const f in d) out[k][f] = typeof r[f] === typeof d[f] ? r[f] : d[f]; }
+    return out;
+  }
+  // The shared transition: a moment leaves in OUT ms (overlays.js Moment) while the wall assembles under it in BACK ms
+  // (render: `back`, the welcome's entrance on a shorter clock).
+  const MV = { OUT: 1300, BACK: 3000 };
+  // A launch's broadcast (https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/live `stream`, lib/launch-stream.ts): one video layer that moves between the whole screen
+  // and the space news corner (the featured story's box) in MOVE ms; the wall rests under it once it has covered it.
+  const ST = { MOVE: 1400, COVER: 1600, STRIP: 54 };
+  // Yizkor (a memorial day, from /api/live): the small candle on the home wall is drawn at MM_K px per candle unit
+  // (overlays.js Candle), and the Yizkor screen's candle lands on it.
+  const isMemorial = (ov) => !!ov && ov.kind === 'memorial';
+  const MM_K = 0.24;
+  // The year's occasions (lib/occasions.ts, from the feed): what kind of day each is, in the events panel.
+  const OCC_KIND = { holiday: ['חג', 'Holiday'], national: ['יום לאומי', 'National day'], space: ['יום החלל', 'Space day'], memorial: ['יום זיכרון', 'Remembrance day'], remember: ['יום זיכרון', 'Remembrance'] };
+  const isOccasion = (ov) => !!ov && ov.kind === 'occasion';
+  // The ribbon-cutting opening (ceremony.js, the remote's "טקס גזירת הסרט"): a standby screen until "start", then one long
+  // sequence on its own clock (`start`, performance.now() of its second 0) that ends by itself on the home wall.
+  const isCeremony = (ov) => !!ov && ov.kind === 'ceremony';
+  const cerGo = (ov) => isCeremony(ov) && ov.phase === 'go';
+
+  class Wall extends React.Component {
+    constructor(p) {
+      super(p); this.state = { scale: 1, now: serverNow(), data: null, ov: null, toast: null, live: null, feedErr: 0, covered: false, wl: null, back: 0, sCov: false, sRect: null, demoStream: null };
+      this._wlT = [];
+      this.embRef = (el) => { this.embEl = el; };
+      this.onWlReveal = (at, ok, hero) => { if (at) this._wlRevealAt = at; this._wlHeroOk = !!ok; this._wlHero = ok ? hero : null; };
+      this.onWlHeroGone = () => { if (this.state.wl) this.setWl({ heroGone: true }, () => this.maybeFinishWl()); };
+      this.memTarget = () => this.memorialCandle();
+      this.onMemDone = (id) => { const o = this.state.ov; if (isMemorial(o) && o.id === id) this.setState({ ov: null }); };
+      // The ceremony's closing: the wall wakes and assembles under its card (as after any moment), then the card is gone.
+      this.onCerWake = (id) => {
+        const o = this.state.ov; if (!isCeremony(o) || o.id !== id) return;
+        const t = Date.now(); clearTimeout(this._backT);
+        this.setState({ covered: false, back: t });
+        this._backT = setTimeout(() => { if (this.state.back === t) this.setState({ back: 0 }); }, MV.BACK / (window.__cerRate || 1));
+      };
+      this.onCerDone = (id) => { const o = this.state.ov; if (isCeremony(o) && o.id === id) this.setState({ ov: null }); };
+    }
+
+    // ---- lifecycle ----------------------------------------------------------------------------
+    componentDidMount() {
+      this.t0 = Date.now();
+      this.fit = () => { const s = Math.min(innerWidth / 1920, innerHeight / 1080); if (s > 0) this.setState({ scale: s }); };
+      this.fit(); addEventListener('resize', this.fit); this.fitRetry = setTimeout(this.fit, 800);
+      this.tick = setInterval(() => { this.setState({ now: serverNow() }); try { this.schedule(); } catch (e) { console.warn('schedule failed', e); } try { this.musicSync(); } catch (e) { console.warn('music failed', e); } }, 1000);
+      this.onKey = (e) => { if (CFG.preview) return; const k = e.key.toLowerCase(), ov = this.state.ov;
+        if (k === 'l') this.demo('launch'); else if (k === 'g') this.demo('greeting'); else if (k === 'n') this.demo('noon'); else if (k === 'w') this.demo('welcome'); else if (k === 'y') this.demo('memorial'); else if (k === 'o') this.demo('occasion');
+        else if ((k === 'enter' || k === ' ') && isWelcome(ov) && ov.demo) this.leaveWelcome();   // a demo's "enter"; a real one is the remote's
+        else if ((k === 'enter' || k === ' ') && isMemorial(ov) && ov.demo) this.leaveMemorial();
+        else if (k === 'escape') { if (isWelcome(ov) || isMemorial(ov)) { this.clearLeave(); this.setState({ ov: null, wl: null }); } else if (isCeremony(ov)) this.endCeremony(); else this.closeOv(); }
+        else if (k === 'k') { if (isCeremony(ov) && ov.demo && ov.phase === 'standby') this.demo('ceremony'); else if (!cerGo(ov)) this.demo('standby'); }
+        else if (k === 'h') this.demo('news');
+        else if (k === 'v') this.demo('stream'); };
+      addEventListener('keydown', this.onKey);
+      this.load();
+      this.pollLive();
+    }
+    componentWillUnmount() { clearTimeout(this._sCovT); removeEventListener('keydown', this.onKey); clearInterval(this.tick); clearTimeout(this.poll); clearTimeout(this.livePoll); clearTimeout(this.fitRetry); clearTimeout(this.coverT); clearTimeout(this._outT); clearTimeout(this._backT); clearTimeout(this._cerT); clearTimeout(this._cerT2); this.clearLeave(); removeEventListener('resize', this.fit); }
+    /** A full-screen moment covers the wall once it has faded in (`covered`); until it ends the wall under it rests (render). */
+    componentDidUpdate(_, prev) {
+      const ov = this.state.ov;
+      this.streamUpdate();
+      // A welcome's way out that something else cut short (a key, a launch): drop its steps.
+      if (this.state.wl && !this.wl) { this.clearLeave(); this.setState({ wl: null }); }
+      // A welcome just came up: ask the remote often from now on, so "enter" starts at once.
+      if (isWelcome(ov) && !isWelcome(prev.ov) && ov.live && !CFG.preview) this.pollLive();
+      // …and while the ceremony's standby screen waits for "start", so every screen starts on the same second.
+      if (this.cerWaiting(ov) && !this.cerWaiting(prev.ov)) this.pollLive();
+      // Design and data held back during the entrance, once it is over (or cut short); data in the old language is dropped.
+      if (!(isWelcome(ov) && ov.leaving)) {
+        if (this._pendingDesign) { const d = this._pendingDesign; this._pendingDesign = null; if (this.design(d)) this._pendingData = null; this.setState({ now: serverNow() }); }
+        if (this._pendingData) { const d = this._pendingData; this._pendingData = null; this.resetCaches(); this.setState({ data: d }); }
+      }
+      if (!ov === !prev.ov && (!ov || ov.kind === prev.ov.kind)) return;
+      clearTimeout(this.coverT);
+      if (ov) this.coverT = setTimeout(() => this.setState({ covered: true }), isWelcome(ov) ? WL.COVER : 1200);
+      else if (this.state.covered) this.setState({ covered: false });
+    }
+
+    // ---- live state from the remote -------------------------------------------------------------
+    get liveOk() { return Date.now() - (this._liveOkAt || 0) < 30e3; }   // one missed poll is not an outage
+    /** /api/live now, then again after the usual interval, or every 1.5 s while a welcome waits for "enter". */
+    pollLive() {
+      clearTimeout(this.livePoll);
+      const next = () => { const ov = this.state.ov, fast = (isWelcome(ov) && ov.live && !ov.leaving || this.cerWaiting(ov)) && !CFG.preview;
+        clearTimeout(this.livePoll); this.livePoll = setTimeout(() => this.pollLive(), fast ? WL.POLL_FAST : CFG.livePoll * 1000); };
+      this.loadLive().then(next, next);
+    }
+    async loadLive() {
+      if (this._liveBusy) return;
+      this._liveBusy = true;
+      try {
+        const t0 = Date.now(), L = JSON.parse(await this.fetchText(CFG.live, 8e3)), t1 = Date.now(), at = Date.parse(L.at);
+        if (at) {
+          // A late answer must not undo a newer one (e.g. close a moment); a server clock set back by minutes is not late.
+          if (at < (this._liveAt || 0) && this._liveAt - at < 120e3) return;
+          this._liveAt = at;
+          const off = at - (t0 + t1) / 2;                 // server clock minus ours, give or take half the round trip
+          if (Math.abs(off - skew) > 1000) skew = off;
+        }
+        this._liveOkAt = Date.now();
+        // A new deployment counts once it has answered twice in a row; '' (unknown) never does.
+        if (L.build && !this._build) this._build = L.build;
+        this._newBuild = L.build && L.build !== this._build ? (this._newBuild || 0) + 1 : 0;
+        // Not during a welcome's entrance: its emblem lands in the slot of the layout it started with (applied after it).
+        if (L.design) { if (isWelcome(this.state.ov) && this.state.ov.leaving) this._pendingDesign = L.design; else { this._pendingDesign = null; this.design(L.design); } }
+        this.setState({ live: L, now: serverNow() }, () => this.syncTakeover());
+      } catch (e) { /* liveOk lapses by itself */ } finally { this._liveBusy = false; }
+    }
+    /** The remote's design (applyDesign), with what it changes drawn anew. True when the language changed. */
+    design(d) {
+      const lang = CFG.lang;
+      if (applyDesign(d)) { this.resetCaches(); this._amb = this._emb = this._sh1 = this._sh2 = this._sh3 = null; this._ambFx = undefined; this._ovK = null; }
+      if (CFG.lang === lang) return false;
+      this._lastBody = null; clearTimeout(this.poll); this.poll = setTimeout(() => this.load(), 0);
+      return true;
+    }
+    /** A full-screen moment from the remote (or an important event / the 12:00 show, decided by the server). */
+    syncTakeover() {
+      const L = this.state.live, tk = L && L.takeover, ov = this.state.ov, now = serverNow(), wlUp = isWelcome(ov);
+      // Forget what was shown once the server reports none, so the remote's undo of "back to normal" brings it back.
+      if (!tk) { this._tkSeen = null; if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else if (isMemorial(ov)) this.leaveMemorial(); else if (isCeremony(ov)) this.endCeremony(); else this.closeOv(); } return; }
+      // A welcome's way out counts as its own state, so the remote's undo of "enter" (the same welcome, no longer
+      // leaving) brings it back once the entrance is over.
+      const seen = tk.id + (tk.leaving ? '|leaving' : '') + (tk.kind === 'ceremony' ? '|' + tk.phase : '');
+      // "Enter" from the remote: the server keeps the welcome for a few seconds, marked `leaving`.
+      if (wlUp && ov.live && tk.id === ov.id && tk.leaving) { this._tkSeen = seen; return this.leaveWelcome(); }
+      if (wlUp && ov.leaving) return;                    // anything new waits (not marked seen) until the entrance is over
+      if (seen === this._tkSeen) return;                 // shown already, maybe ended here first: not again
+      this._tkSeen = seen;
+      // Seen first on its way out (opened mid-entrance, or "enter" pressed between two looks): just the home wall, after
+      // the entrance of whatever welcome is up here.
+      if (tk.kind === 'welcome' && tk.leaving) { if (ov && ov.live) { if (wlUp) this.leaveWelcome(); else this.closeOv(); } return; }
+      const until = Date.parse(tk.until) || now + 60e3;
+      if (until <= now) return;
+      if (tk.kind === 'noon') this.setState({ ov: { kind: 'noon', id: tk.id, live: true, until } });
+      else if (tk.kind === 'celebrate' && tk.person) this.setState({ ov: { kind: 'celebrate', id: tk.id, live: true, person: tk.person, until } });
+      else if (tk.kind === 'event') this.setState({ ov: { kind: 'event', id: tk.id, live: true, event: tk, until } });
+      // (a minute past its server end, so the server's "none" leads into the entrance rather than schedule() cutting it)
+      else if (tk.kind === 'welcome') this.welcomeUp({ id: tk.id, live: true, guest: tk.guest || '', until: until + 60e3 });
+      else if (tk.kind === 'image' && tk.url) this.setState({ ov: { kind: 'image', id: tk.id, live: true, url: tk.url, caption: tk.caption || '', captionEn: tk.captionEn || '', until } });
+      else if (tk.kind === 'scene' && tk.html) this.setState({ ov: { kind: 'scene', id: tk.id, live: true, html: tk.html, until } });
+      else if (tk.kind === 'stream' && tk.videoId) this.setState({ ov: { kind: 'stream', id: tk.id, live: true, videoId: tk.videoId, title: tk.title || '', until } });
+      else if (tk.kind === 'news') { const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: tk.id, live: true, item, secs: Math.max(5, Math.round((until - now) / 1000)), until } }); }
+      else if (tk.kind === 'memorial') this.setState({ ov: { kind: 'memorial', id: tk.id, live: true, until } });
+      else if (tk.kind === 'ceremony') this.ceremonyUp({ id: tk.id, live: true, phase: tk.phase === 'go' ? 'go' : 'standby', at: Date.parse(tk.at) || now, video: tk.video || '', texts: tk.texts || null, until });
+    }
+    // ---- the ribbon-cutting opening -------------------------------------------------------------------
+    /** The ceremony on the wall: its standby screen, or the sequence from `at` (server time; one seen late joins it where
+     *  it is). Until its second 0 the standby screen stays up. The sequence ends by itself (onDone), so the server's end
+     *  of it (until) is only a backstop: a long one here. */
+    ceremonyUp(o) {
+      const now = serverNow(), cur = this.state.ov, base = { kind: 'ceremony', id: o.id, live: o.live, demo: o.demo, video: o.video, texts: o.texts };
+      if (o.phase !== 'go') return this.setState({ ov: Object.assign(base, { phase: 'standby', until: o.until }) });
+      const start = performance.now() + (o.at - now), wait = start - performance.now();
+      this.setState({ ov: Object.assign(base, { phase: 'go', start, since: isCeremony(cur) && cur.phase === 'standby' ? 1 : 0, until: Math.max(o.until, o.at + 3600e3) }) });
+      // redraw at its second 0 (the standby screen gives way) and once the standby screen is no longer needed under it
+      clearTimeout(this._cerT); clearTimeout(this._cerT2);
+      this._cerT = setTimeout(() => this.setState({}), Math.max(0, wait + 30));
+      this._cerT2 = setTimeout(() => this.setState({}), Math.max(0, wait + 1800));
+    }
+    /** Waiting on the remote's "start": the live standby screen (the wall then asks the server every POLL_FAST ms). */
+    cerWaiting(ov) { return isCeremony(ov) && ov.live && ov.phase === 'standby' && !ov.out && !CFG.preview; }
+    /** The remote's "end" (or "back to normal"): a sequence that is playing goes to its closing from wherever it is; the
+     *  standby screen (or a sequence not begun yet) just goes. */
+    endCeremony() {
+      const ov = this.state.ov;
+      if (!isCeremony(ov)) return;
+      if (!cerGo(ov) || performance.now() < ov.start) return this.closeOv();
+      if (!ov.end) this.setState({ ov: Object.assign({}, ov, { end: performance.now() }) });
+    }
+    /** A moment's way out (not the welcome's, which has its own): with the shared transition it leaves over OUT ms while
+     *  the wall, uncovered at once, assembles under it; without, it just goes. */
+    closeOv() {
+      const ov = this.state.ov;
+      if (!ov || ov.out || isWelcome(ov) || isMemorial(ov)) return;
+      clearTimeout(this._outT); clearTimeout(this._backT);
+      if (!M().fx) return this.setState({ ov: null });
+      const t = Date.now();
+      this.setState({ ov: Object.assign({}, ov, { out: t }), covered: false, back: t });
+      this._outT = setTimeout(() => { const o = this.state.ov; if (o && o.out === t) this.setState({ ov: null }); }, MV.OUT);
+      this._backT = setTimeout(() => { if (this.state.back === t) this.setState({ back: 0 }); }, MV.BACK);
+    }
+    // ---- a launch's live broadcast ----------------------------------------------------------------
+    /** The broadcast on the wall: the server's (when the schedules allow it), or the V demo. */
+    stream() { const L = this.state.live; return this.state.demoStream || (L && L.stream && L.stream.videoId ? L.stream : null); }
+    streamFull() { const s = this.stream(); return !!s && s.mode === 'full'; }
+    /** After each render: the wall rests under a full-screen broadcast once it is covered, and wakes (assembling, as after
+     *  any moment) when the broadcast moves to the corner; the corner is the featured story's box as laid out now. */
+    streamUpdate() {
+      const s = this.stream(), full = !!s && s.mode === 'full';
+      if (full !== !!this._sFull) {
+        this._sFull = full; clearTimeout(this._sCovT);
+        if (full) this._sCovT = setTimeout(() => { if (this.streamFull()) this.setState({ sCov: true }); }, ST.COVER);
+        else if (this.state.sCov) {
+          const t = Date.now(); clearTimeout(this._backT);
+          this.setState({ sCov: false, back: M().fx && !this.state.ov ? t : 0 });
+          this._backT = setTimeout(() => { if (this.state.back === t) this.setState({ back: 0 }); }, MV.BACK);
+        }
+      }
+      if (!s || full) return;
+      const st = document.querySelector('[data-w="stage"]'), f = st && st.querySelector('[data-w="featured"]');
+      let r = null;
+      // (by layout, not by what is drawn, so the panels' entrance animation doesn't move it)
+      if (f && f.offsetWidth) { let x = 0, y = 0, e = f; while (e && e !== st) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; } if (e === st) r = { x, y, w: f.offsetWidth }; }
+      const o = this.state.sRect;
+      if (r && (!o || o.x !== r.x || o.y !== r.y || o.w !== r.w)) this.setState({ sRect: r });
+    }
+    /** One video layer (kept while it moves, so the broadcast never reloads): the whole screen, or the featured story's box
+     *  in the space news panel with a strip under it. Under the full-screen moments; the remote's preview shows a picture. */
+    streamLayer() {
+      const s = this.stream();
+      if (!s || cerGo(this.state.ov)) return null;   // (nothing under the ceremony: the lobby computer gives it everything)
+      const full = s.mode === 'full', fx = M().fx;
+      const r = full ? { x: 0, y: 0, w: 1920 } : this.state.sRect || { x: EN() ? 1414 : 36, y: 168, w: 470 };
+      const k = r.w / 1920, vh = Math.round(1080 * k), ease = 'cubic-bezier(.65,0,.35,1)';
+      const tr8 = fx ? ['left', 'top', 'width', 'height', 'border-radius'].map((p) => p + ' ' + ST.MOVE + 'ms ' + ease).join(',') : 'none';
+      const src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(s.videoId) + '?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&modestbranding=1&iv_load_policy=3';
+      const dot = h('span', { style: { width: full ? 14 : 10, height: full ? 14 : 10, borderRadius: '50%', background: '#ff5a4f', boxShadow: '0 0 14px #ff5a4f', flex: 'none', animation: 'breathe 1.4s ease-in-out infinite' } });
+      const words = tr('שידור חי', 'LIVE') + ' · ' + s.title;
+      return h('div', { 'data-w': 'stream', style: { position: 'absolute', zIndex: 40, left: r.x, top: r.y, width: r.w, height: full ? 1080 : vh + ST.STRIP, borderRadius: full ? 0 : 22, overflow: 'hidden', background: '#000',
+          boxShadow: full ? 'none' : '0 0 0 1px rgba(255,120,110,.45), 0 20px 50px rgba(0,0,0,.45)', transition: tr8, animation: 'ovIn .9s ease both' } },
+        h('div', { style: { position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, transform: 'scale(' + k + ')', transformOrigin: '0 0', transition: fx ? 'transform ' + ST.MOVE + 'ms ' + ease : 'none' } },
+          CFG.preview ? h('div', { style: { position: 'absolute', inset: 0, background: '#02050c url(https://i.ytimg.com/vi/' + encodeURIComponent(s.videoId) + '/hqdefault.jpg) center/cover no-repeat' } })
+            : h('iframe', { key: s.videoId, src, title: s.title || 'Live', allow: 'autoplay; encrypted-media; picture-in-picture', referrerPolicy: 'strict-origin-when-cross-origin', style: { position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, pointerEvents: 'none' } })),
+        full ? h('div', { key: 'tag', style: { position: 'absolute', top: 36, [EN() ? 'left' : 'right']: 40, display: 'flex', alignItems: 'center', gap: 12, padding: '10px 22px', borderRadius: 999, background: 'rgba(6,12,26,.78)', border: '1px solid rgba(255,120,110,.6)', fontSize: 26, fontWeight: 700, whiteSpace: 'nowrap', maxWidth: 1200, overflow: 'hidden', textOverflow: 'ellipsis', animation: 'rise .8s ease .4s both' } }, dot, words)
+          : h('div', { key: 'strip', style: { position: 'absolute', left: 0, right: 0, top: vh, height: ST.STRIP, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', background: 'rgba(8,16,34,.96)', fontSize: 17, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', animation: 'rise .8s ease ' + (fx ? ST.MOVE : 0) + 'ms both' } },
+            dot, h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, words)));
+    }
+    /** The space news item for the next news moment: the newsletter's central stories in turn (the remote's own first),
+     *  carried on from where this screen left off. */
+    nextNews() {
+      const D = this.D; if (!D || !D.news.length) return null;
+      const list = D.featured.length ? D.featured.map((i) => D.news[i]).filter(Boolean) : D.news;
+      let i = 0; try { i = Number(localStorage.getItem('wall:newsAt')) || 0; localStorage.setItem('wall:newsAt', String(i + 1)); } catch (e) { i = this._newsAt = (this._newsAt || 0) + 1; }
+      const n = list[i % list.length];
+      return Object.assign({}, n, { image: n.image || D.catImage[n.cat] || '', color: D.catColor[n.cat] || '#9fdcff', issue: D.issue.range || '' });
+    }
+    /** Which memorial day's words the Yizkor speaks (https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/live's memorial.key; ?occ= in a demo): 7/10 unless told. */
+    memorialKey() { const L = this.state.live, k = L && L.memorial && L.memorial.key; return k || (CFG.occ && /^(oct7|shoah|zikaron)$/.test(CFG.occ) ? CFG.occ : 'oct7'); }
+    /** Yizkor today (the server says so; ?memorial=1 or the Yizkor demo without one): the small candle on the home wall. */
+    memorialOn() { const L = this.state.live; return CFG.memorial || CFG.demo === 'memorial' || isMemorial(this.state.ov) && this.state.ov.demo || !!(L && L.memorial); }
+    /** The Yizkor screen's way out: the wall wakes under it and its candle lands in the small one (overlays.js Memorial). */
+    leaveMemorial() {
+      const ov = this.state.ov;
+      if (!isMemorial(ov) || ov.leaving) return;
+      this.setState({ ov: Object.assign({}, ov, { leaving: performance.now(), until: serverNow() + 8000 }) });
+    }
+    /** The small candle's wick on the stage (1920×1080 px) and its scale, or null when the home wall has none. */
+    memorialCandle() {
+      const st = document.querySelector('[data-w="stage"]'), c = st && st.querySelector('[data-w="memorial"] [data-mm="candle"]');
+      if (!c || !this.memorialOn()) return null;
+      const a = c.getBoundingClientRect(), b = st.getBoundingClientRect(), k = b.width / 1920;
+      return a.width && k ? { x: (a.left - b.left) / k + 100 * MM_K, y: (a.top - b.top) / k + 190 * MM_K, k: MM_K } : null;
+    }
+    /** Shows a welcome. One already up only takes the new words (its scene and emblem stay); one on its way out starts over. */
+    welcomeUp(o) {
+      const cur = this.state.ov, keep = isWelcome(cur) && !cur.leaving;
+      this.clearLeave();
+      if (!keep) {
+        this._wlKey = (this._wlKey || 0) + 1; this._wlRevealAt = null; this._wlHeroOk = !CFG.preview; this._wlHero = null;
+        // the welcome emblem draws with the wall emblem's own settings, so the two can be swapped unseen
+        this._wlAttrs = { speed: String(CFG.globeSpeed), sway: CFG.cameraSway ? 'on' : 'off', word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE') };
+      }
+      this.setState({ ov: Object.assign({ kind: 'welcome', shownAt: keep ? cur.shownAt : performance.now() }, o), wl: null });
+    }
+    setWl(patch, then) { this.setState((s) => (s.wl ? { wl: Object.assign({}, s.wl, patch) } : null), then); }
+    clearLeave() { this._wlT.forEach(clearTimeout); this._wlT = []; this._wlDoneDue = false; }
+    /** "Enter" on the welcome screen: its way out (overlays.js Welcome) as one timeline from T0. The wall wakes early
+     *  under the still-opaque welcome and assembles around the arriving emblem (render: `entering`); its own emblem then
+     *  takes over from the welcome's on the same clock (`mode`: dissolve when both are the realistic globe, a scan wipe
+     *  to the hologram, none without a welcome emblem). */
+    leaveWelcome() {
+      const ov = this.state.ov;
+      if (!isWelcome(ov) || ov.leaving) return;
+      const now = performance.now(), revealAt = this._wlRevealAt || (ov.shownAt || now) + WL.REVEAL_CAP;
+      const t0 = Math.max(now, revealAt + WL.MIN_AFTER_REVEAL);
+      // the emblem's slot as the wall will lay it out (panels the remote's design hid give their room to the emblem)
+      const hid = (k) => CFG.hide.includes(k), pR = !hid('events') || !hid('people'), pN = !hid('news');
+      const target = window.wallGeo.landing(window.wallGeo.slot({ data: !!this.D, pl: EN() ? pR : pN, pr: EN() ? pN : pR, ticker: !hid('ticker'), launches: !hid('launches') }));
+      const A = this._wlAttrs || {}, same = A.speed === String(CFG.globeSpeed) && A.sway === (CFG.cameraSway ? 'on' : 'off') && A.word === tr('מנהלת החלל', 'SPACE PROGRAM OFFICE');
+      const mode = CFG.preview || !this._wlHeroOk ? 'none' : CFG.emblem === 'v2' && CFG.globeStyle === 'real' && same ? 'dissolve' : 'scan';
+      this.clearLeave();
+      const id = ov.id, at = (ms, fn) => this._wlT.push(setTimeout(() => { const o = this.state.ov; if (isWelcome(o) && o.id === id) fn(); }, Math.max(0, t0 + ms - performance.now())));
+      this.setState({ ov: Object.assign({}, ov, { leaving: t0, until: serverNow() + (t0 - now) + WL.DONE + 8000 }), wl: { id, t0, mode, target } });
+      at(WL.WAKE, () => { this._wlWakeAt = Date.now(); this.setWl({ woke: true }, () => {
+        // The slot as the wall really lays it out (the remote's style layer may move or size the emblem): the camera
+        // move, which starts at 1 s, lands there.
+        const box = this.embBox(), wl = this.state.wl;
+        if (!box || !wl || wl.id !== id) return;
+        const t = window.wallGeo.landing(box), o = wl.target;
+        if (Math.abs(t.tx - o.tx) > 0.5 || Math.abs(t.ty - o.ty) > 0.5 || Math.abs(t.s - o.s) > 0.001) this.setWl({ target: t });
+      }); });
+      // The wall's emblem shows once it has drawn a fresh frame (a slow computer may need a moment), at EMB_SHOW at the
+      // earliest and EMB_SHOW_CAP after it at the latest; the welcome's hand-off starts from whenever that is.
+      let fresh = false, due = false;
+      const show = () => { if (due) { due = false; this.setWl({ embShown: true }); } };
+      at(mode === 'none' ? 2600 : WL.EMB_WAKE, () => {
+        const e = this.embEl, hero = this._wlHero;
+        // the one thing the clock does not carry: which satellite the ground station is linked to
+        if (mode !== 'none' && e && e.setLink && hero && hero.getLink) e.setLink(hero.getLink());
+        if (e) e.addEventListener('emblem-frame', () => { fresh = true; const o = this.state.ov; if (isWelcome(o) && o.id === id) show(); }, { once: true });
+        else fresh = true;
+        this.setWl({ embWake: true });
+      });
+      at(mode === 'none' ? 3000 : WL.EMB_SHOW, () => { due = true; if (fresh) show(); });
+      at((mode === 'none' ? 3000 : WL.EMB_SHOW) + WL.EMB_SHOW_CAP, () => { fresh = true; show(); });
+      at(WL.SETTLE, () => this.setWl({ settled: true }));
+      at(WL.DONE, () => { this._wlDoneDue = true; this.maybeFinishWl(); });
+    }
+    /** The wall emblem's box on the stage (1920×1080 px) as laid out now, or null (not laid out). */
+    embBox() {
+      const e = this.embEl, st = e && e.closest('[data-w="stage"]');
+      if (!st) return null;
+      const a = e.getBoundingClientRect(), b = st.getBoundingClientRect(), k = b.width / 1920;
+      return a.width && a.height && k ? { x: (a.left - b.left) / k, y: (a.top - b.top) / k, w: a.width / k, h: a.height / k } : null;
+    }
+    maybeFinishWl() {
+      const wl = this.state.wl;
+      if (this._wlDoneDue && wl && (wl.heroGone || wl.mode === 'none')) { this.clearLeave(); this.setState({ ov: null, wl: null }); }
+    }
+
+    async fetchText(url, ms) {
+      const sep = url.includes('?') ? '&' : '?';
+      const res = await fetch(url + sep + 't=' + Date.now() + (CFG.key ? '&key=' + encodeURIComponent(CFG.key) : '') + (EN() ? '&lang=en' : ''), { cache: 'no-store', signal: timeout(ms) });
+      if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
+      // The server names the site's own files from the root ("/space-wall/assets/ceremony/promo-v9-1080.mp4"); on a site served under a path
+      // (GitHub Pages: /space-wall/) scripts/build-pages.mjs gives ASSETS that prefix.
+      const text = await res.text(), ASSETS = '/space-wall/assets/';
+      return ASSETS === '/' + 'assets/' ? text : text.replace(/"\/assets\//g, '"' + ASSETS);
+    }
+    /** The feed, every `refresh` seconds. Until the first answer: retry within seconds and show nothing invented. */
+    async load() {
+      if (this._loading) return;
+      this._loading = true;
+      let wait = CFG.refresh;
+      const lang = CFG.lang;
+      try {
+        const body = await this.fetchText(CFG.sample ? '/space-wall/data/feed.json' : CFG.occ ? CFG.feed + (CFG.feed.includes('?') ? '&' : '?') + 'occ=' + encodeURIComponent(CFG.occ) : CFG.feed, 20e3);
+        // The language changed while this was on its way: ask again in the new one.
+        if (lang !== CFG.lang) { wait = 0; return; }
+        // English with some text still being translated (it shows in Hebrew meanwhile): look again soon.
+        if (EN() && /"missing":[1-9]/.test(body)) wait = Math.min(wait, 15);
+        if (body !== this._lastBody) {
+          const data = JSON.parse(body);
+          if (!Array.isArray(data.news) || !Array.isArray(data.people)) throw new Error('feed is not in the v4 shape');
+          for (const k of ['featured', 'ticker', 'launches', 'directorate']) if (!Array.isArray(data[k])) data[k] = [];
+          data.issue = data.issue || {}; data.catColor = data.catColor || {}; data.catImage = data.catImage || {};
+          this._lastBody = body;
+          // Not while the welcome's emblem is landing in its slot: the layout (and the slot) must hold still until then.
+          if (isWelcome(this.state.ov) && this.state.ov.leaving) this._pendingData = data;
+          else { this._pendingData = null; this.resetCaches(); this.setState({ data }); }
+          // Once: the realistic globe's textures and the wordmark's font, so a welcome's emblem appears without waiting.
+          if (!this._preloaded && !CFG.preview) { this._preloaded = true; setTimeout(() => {
+            ['earth_atmos_2048.jpg', 'earth_normal_2048.jpg', 'earth_lights_2048.png', 'earth_clouds_1024.png', 'earth_specular_2048.jpg'].forEach((f) => { new Image().src = '/space-wall/assets/textures/' + f; });
+            try { document.fonts.load("800 condensed 200px 'Open Sans'", tr('מנהלת החלל', 'SPACE PROGRAM OFFICE')); } catch (e) {}
+          }, 5000); }
+        }
+        this._feedOkAt = Date.now(); this._fails = 0;
+        if (this.state.feedErr) this.setState({ feedErr: 0 });
+      } catch (e) {
+        console.warn('feed load failed', e);
+        // Without data yet: 5 s, doubling up to the poll interval. With data: keep it (it is real) and the usual pace.
+        if (!this.state.data) { this._fails = (this._fails || 0) + 1; wait = Math.min(CFG.refresh, 5 * 2 ** (this._fails - 1)); this.setState({ feedErr: e.status || -1 }); }
+      } finally {
+        this._loading = false;
+        clearTimeout(this.poll); this.poll = setTimeout(() => this.load(), wait * 1000);
+        if (CFG.demo !== 'off' && !this._demoDone) { this._demoDone = true; this.setState({}, () => this.demo(CFG.demo)); }
+      }
+    }
+    resetCaches() { this._feat = this._list = this._tick = this._spot = this._trk = this._typ = null; this._featK = this._listS = this._spotI = undefined; }
+    async sample() { return this._sample || (this._sample = JSON.parse(await this.fetchText('/space-wall/data/feed.json', 20e3))); }
+
+    // ---- moments --------------------------------------------------------------------------------
+    /** The feed, with the news items added from the remote first (featured, in the newsletter panel). */
+    get D() {
+      const d = this.state.data, extra = CFG.news;
+      if (!d || !extra.length) return d;
+      if (this._mSrc === d && this._mNews === extra && this._mLang === CFG.lang) return this._mD;
+      const NEW = tr('חדש', 'New'), dm = (iso) => { const t = new Date(iso); return isNaN(t) ? '' : String(t.getDate()).padStart(2, '0') + '.' + String(t.getMonth() + 1).padStart(2, '0'); };
+      const items = extra.map((n) => ({ cat: n.cat || NEW, il: false, date: dm(n.added), src: n.src || '', url: n.url || '', image: n.image || '',
+        title: (EN() && n.titleEn) || n.title, dek: (EN() && n.dekEn) || n.dek || '' }));
+      const catColor = Object.assign({}, d.catColor);
+      items.forEach((n) => { if (!catColor[n.cat]) catColor[n.cat] = '#d4f25c'; });
+      this._mSrc = d; this._mNews = extra; this._mLang = CFG.lang;
+      return (this._mD = Object.assign({}, d, { news: [...items, ...d.news], featured: [...items.map((_, i) => i), ...d.featured.map((i) => i + items.length)], catColor }));
+    }
+    ilParts(now) { const o = {}; fmtParts.formatToParts(new Date(now)).forEach((p) => (o[p.type] = p.value)); return { day: o.year + o.month + o.day, iso: o.year + '-' + o.month + '-' + o.day, h: +o.hour, m: +o.minute, s: +o.second }; }
+    /** People greeted full-screen today: from the day of their moment to two days after it, never mourning. */
+    celebratable(today) { const D = this.D; return D ? D.people.filter((p) => p.celebrate !== false && p.on && p.on <= today && today <= addDays(p.on, 2)) : []; }
+    /** A moment on request (?demo=, keys L/G/N): real content when there is some, else the sample's; it is a demo. */
+    async demo(kind) {
+      if (kind === 'welcome') {
+        const t = serverNow(); this.welcomeUp({ id: t, demo: true, guest: q.get('guest') || '', until: t + 3600e3 });
+        if (num('enterAfter', 0) > 0) setTimeout(() => { const o = this.state.ov; if (isWelcome(o) && o.id === t) this.leaveWelcome(); }, num('enterAfter', 0) * 1000);   // ?demo=welcome&enterAfter=N
+        return;
+      }
+      if (kind === 'noon') { const t = serverNow(); return this.setState({ ov: { kind: 'noon', id: t, demo: true, until: t + 15 * 60e3 } }); }
+      // ?demo=standby (then K: start) or ?demo=ceremony (&cerAt=N: from second N; &cerVideo=url): the ribbon-cutting opening
+      if (kind === 'standby' || kind === 'ceremony') {
+        const t = serverNow(), cur = this.state.ov, L = this.state.live, c = (L && L.design && L.design.ceremony) || {};   // (the remote's video and words)
+        return this.ceremonyUp({ id: isCeremony(cur) && cur.demo ? cur.id : 'demo' + t, demo: true, phase: kind === 'ceremony' ? 'go' : 'standby', at: t + 400 - num('cerAt', 0) * 1000,
+          video: q.get('cerVideo') || c.video || '', texts: c.texts || null, until: t + 3600e3 });
+      }
+      // ?demo=stream or V: a launch broadcast, full screen, then (V again) in the news corner, then (V) gone.
+      if (kind === 'stream') {
+        const d = this.state.demoStream, vid = q.get('video') || 'M7lc1UVf-VE';
+        return this.setState({ demoStream: !d ? { key: 'demo', videoId: vid, title: 'Demo launch', mode: 'full' } : d.mode === 'full' ? Object.assign({}, d, { mode: 'small' }) : null });
+      }
+      if (kind === 'news') {
+        const item = this.nextNews(), t = serverNow(), secs = M().news.secs;
+        if (item) this.setState({ ov: { kind: 'news', id: t, demo: true, item, secs, until: t + secs * 1000 } });
+        return;
+      }
+      // ?demo=memorial&leaveAfter=N: the Yizkor screen, landing on the home wall after N seconds (else Enter, or an hour)
+      if (kind === 'memorial') { const t = serverNow(); return this.setState({ ov: { kind: 'memorial', id: t, demo: true, until: t + (num('leaveAfter', 0) > 0 ? num('leaveAfter', 0) * 1000 : 3600e3) } }); }
+      // ?demo=occasion (&occ=<key>) or O: today's occasion on the whole wall, else the next one in the events panel.
+      if (kind === 'occasion') {
+        const D = this.D, o = this.occasionToday() || (D && (D.directorate.find((d) => d.occ && d.occ.kind !== 'memorial' && d.occ.kind !== 'remember') || {}).occ), t = serverNow();
+        if (o) this.setState({ ov: { kind: 'occasion', id: t, demo: true, occ: Object.assign({ title: o.title || '' }, o), until: t + (num('leaveAfter', 0) > 0 ? num('leaveAfter', 0) * 1000 : 30e3) } });
+        return;
+      }
+      if (kind !== 'launch' && kind !== 'greeting') return;
+      const pick = (S) => (kind === 'launch' ? S.launches : S.people.filter((p) => p.celebrate !== false)) || [];
+      let list = this.D ? pick(this.D) : [];
+      if (!list.length) { try { list = pick(await this.sample()); } catch (e) { return; } }
+      const t = serverNow();
+      if (!list.length) return;
+      if (kind === 'launch') this.setState({ ov: { kind: 'launch', id: t, demo: true, launch: Object.assign({}, list[Math.min(2, list.length - 1)], { at: new Date(t + 15000).toISOString() }), until: t + 27000 } });
+      else this.setState({ ov: { kind: 'celebrate', id: t, demo: true, person: list[(this._demoP = ((this._demoP ?? -1) + 1)) % list.length], until: t + 14000 } });
+    }
+    schedule() {
+      const D = this.D, now = serverNow();
+      let ov = this.state.ov;
+      if (ov && ov.out) return;                                   // on its way out (closeOv)
+      if (ov && now > ov.until) {
+        if (isWelcome(ov) && !ov.leaving) this.leaveWelcome();   // a forgotten welcome still ends with its entrance
+        else if (isMemorial(ov) && !ov.leaving) this.leaveMemorial();   // the Yizkor screen lands on the home wall
+        else if (isWelcome(ov)) { ov = null; this.clearLeave(); this.setState({ ov: null, wl: null }); }
+        else if (isCeremony(ov)) { this.endCeremony(); return; }
+        else { if (ov.kind === 'launch' && !ov.demo) this._toastAfter = { title: tr('שוגר', 'Liftoff'), line: ov.launch.mission + ' · ' + ov.launch.vehicle }; this.closeOv(); return; }
+      }
+      if (!ov && this._toastAfter) { this.setState({ toast: Object.assign(this._toastAfter, { until: now + 45000 }) }); this._toastAfter = null; }
+      if (this.state.toast && now > this.state.toast.until) this.setState({ toast: null });
+      const T = this.ilParts(now);
+      this.maybeReload(T, ov);
+      if (ov && (ov.kind === 'noon' || ov.live || isCeremony(ov))) return;
+      if (Date.now() < (this._wlWakeAt || 0) + WL.QUIET) return;   // the wall has just made its entrance: let it be seen
+      // The 12:00 show is decided by the server (it can be skipped or stopped from the remote); locally only as a fallback.
+      // On a memorial day neither the 12:00 promo nor the scheduled celebrations and space news.
+      const mem = this.memorialOn(), S = M(), [nh, nm] = S.noon.at.split(':').map(Number);
+      if (!this.liveOk && !mem && CFG.noonShow && T.h === nh && T.m === nm && T.s < 5 && this._noonDay !== T.day) { this._noonDay = T.day; this.setState({ ov: { kind: 'noon', id: now, until: now + 15 * 60e3 } }); return; }
+      if (!D) return;
+      // A launch broadcast on the whole screen: no countdown (the broadcast has its own) and nothing else comes up by itself.
+      if (this.streamFull()) { if (ov && ov.kind === 'launch' && !ov.demo) this.closeOv(); return; }
+      // Launch mode only for a launch Launch Library calls Go (and recently): never for TBD/TBC/Hold.
+      const L = S.launch.on && D.launches.find((l) => { const d = Date.parse(l.at) - now; return d > -12000 && d <= S.launch.lead * 60e3 && goNow(l, now); });
+      if (L) { if (!ov || ov.kind !== 'launch' || ov.launch.at !== L.at) this.setState({ ov: { kind: 'launch', id: L.at, launch: L, until: Date.parse(L.at) + 12000 } }); return; }
+      // Held, scrubbed or moved during the countdown (the feed no longer has a Go launch at that time): close, no "שוגר".
+      if (ov && ov.kind === 'launch' && !ov.demo && now < ov.until && !(S.launch.on && D.launches.some((l) => l.at === ov.launch.at && l.code === 'Go'))) { this.closeOv(); return; }
+      // On the schedules' clock (minutes of the day): personal celebrations every `every` minutes from :00, cycling
+      // through the people whose day it is, and space news every `every` minutes from halfway between (a quarter past
+      // and to, at 30). One that falls due while another moment is up waits for it, for up to two minutes.
+      const mins = T.h * 60 + T.m, slot = (every, off) => (T.s < 5 && (mins - off) % every === 0 ? T.day + ':' + mins : null);
+      const due = this._due || (this._due = {});
+      const cs = !mem && S.celebrate.on && slot(S.celebrate.every, 0), ns = !mem && S.news.on && slot(S.news.every, Math.floor(S.news.every / 2));
+      if (cs && due.cSlot !== cs) { due.cSlot = cs; due.c = { at: now, k: Math.floor(mins / S.celebrate.every) }; }
+      if (ns && due.nSlot !== ns) { due.nSlot = ns; due.n = now; }
+      for (const k of ['c', 'n']) if (due[k] && now - (due[k].at || due[k]) > 120e3) due[k] = null;
+      if (ov) return;
+      // Today's holiday, national day or day of space takes a turn in the celebrations, first (lib/occasions.ts), unless the
+      // remote's agent built a screen scheduled for today: then that one is the day's screen, never two.
+      if (due.c) {
+        const L = this.state.live, built = L && L.design && Array.isArray(L.design.scenes) && L.design.scenes.some((x) => x.schedule && x.schedule.from <= T.iso && T.iso <= x.schedule.to);
+        const o = !built && (D.occasions || []).find((x) => x.kind === 'holiday' || x.kind === 'national' || x.kind === 'space'), P = [...(o ? [o] : []), ...this.celebratable(T.iso)], k = due.c.k, pick = P[k % P.length];
+        due.c = null;
+        if (pick === o && o) return this.setState({ ov: { kind: 'occasion', id: now, occ: o, until: now + Math.max(20, S.celebrate.secs) * 1000 } });
+        if (pick) return this.setState({ ov: { kind: 'celebrate', id: now, person: pick, until: now + S.celebrate.secs * 1000 } });
+      }
+      if (due.n) { due.n = null; const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: now, item, secs: S.news.secs, until: now + S.news.secs * 1000 } }); }
+    }
+    /** After a deploy (https://rrbivwhratkmzcfxqjih.supabase.co/functions/v1/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment or
+     *  during a launch broadcast. */
+    maybeReload(T, ov) {
+      if (ov || this.wl || this.stream() || (this.state.live && this.state.live.takeover) || Date.now() < (this._reloadTry || 0) || Date.now() < (this._wlWakeAt || 0) + WL.NO_RELOAD) return;
+      const nightly = T.h === 4 && T.m < 20 && Date.now() - this.t0 > 3600e3;
+      if (!nightly && (this._newBuild || 0) < 2) return;
+      this._reloadTry = Date.now() + 60e3;
+      reloadPage(nightly ? 3600e3 : 10 * 60e3);
+    }
+    /** The ceremony's two flags for drawing it: before its second 0 (only the standby screen), and in its first moments
+     *  (the standby screen still under the sequence fading in). */
+    cerStage(ov) { const n = performance.now(), go = cerGo(ov); return [!go || n < ov.start, go && !!ov.since && n < ov.start + 1800]; }
+    /** The welcome's way-out state, when it belongs to the welcome on screen. */
+    get wl() { const ov = this.state.ov, wl = this.state.wl; return isWelcome(ov) && wl && wl.id === ov.id ? wl : null; }
+    overlay() {
+      const ov = this.state.ov, toast = this.state.toast, wl = this.wl, wlUp = isWelcome(ov);
+      const k = (ov ? ov.kind + (wlUp ? this._wlKey : ov.id) + (ov.out ? '|out' : '') + '|' + M().fx : '') + '|' + (toast ? toast.until : '')
+        + (wlUp ? '|' + [ov.guest, ov.leaving || 0, wl && wl.woke, wl && wl.embShown, wl && wl.mode, wl && wl.target && wl.target.tx + ',' + wl.target.ty + ',' + wl.target.s, CFG.ambientFx, CFG.lang].join('|') : '')
+        + (isMemorial(ov) ? '|' + [ov.leaving || 0, CFG.ambientFx, CFG.lang, this.memorialKey()].join('|') : '')
+        + (isCeremony(ov) ? '|' + this.cerStage(ov).join('|') + '|' + [ov.end || 0, CFG.lang, JSON.stringify(ov.texts || null), ov.video].join('|') : '');
+      if (this._ovK === k) return this._ov; this._ovK = k;
+      if (!window.makeWallOverlays) return (this._ov = null);
+      const O = this._O || (this._O = window.makeWallOverlays(React));
+      // Keyed by the moment alone: a toast coming or going must not start it over (the 12:00 video from the top).
+      const mk = ov ? ov.kind + ov.id : '';
+      let el = null;
+      if (ov && ov.kind === 'launch') el = h(O.LaunchMode, { key: mk, launch: ov.launch });
+      if (ov && ov.kind === 'celebrate') el = h(O.Celebration, { key: mk, person: ov.person });
+      // The remote covers its preview with its own card during the server's 12:00 show, so the preview skips the video.
+      if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: mk, src: CFG.preview && ov.live ? '' : (this.D && this.D.promoVideo) || '/space-wall/assets/ceremony/promo-v9-1080.mp4', logo: '/space-wall/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.closeOv() });
+      if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: mk, event: ov.event, until: ov.until });
+      // Keyed per welcome scene, not per remote press: new words for a welcome already up keep its emblem.
+      if (wlUp) el = h(O.Welcome, { key: 'welcome' + this._wlKey, guest: ov.guest, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, woke: !!(wl && wl.woke), embShown: !!(wl && wl.embShown),
+        mode: (wl && wl.mode) || '', target: wl && wl.target, attrs: this._wlAttrs, onReveal: this.onWlReveal, onHeroGone: this.onWlHeroGone });
+      if (isMemorial(ov)) el = h(O.Memorial, { key: mk, which: this.memorialKey(), fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, target: this.memTarget, onDone: () => this.onMemDone(ov.id) });
+      if (isOccasion(ov)) el = h(O.OccasionMoment, { key: mk, occ: ov.occ, fx: CFG.ambientFx && !CFG.preview });
+      if (ov && ov.kind === 'image') el = h(O.ImageMoment, { key: mk, url: ov.url, caption: (EN() && ov.captionEn) || ov.caption });
+      // The remote's preview (often a phone) shows a card for a stream instead of loading the video player.
+      if (ov && ov.kind === 'stream') el = h(O.LiveStream, { key: mk, videoId: ov.videoId, title: ov.title, preview: CFG.preview });
+      if (ov && ov.kind === 'scene') el = h(O.CustomScene, { key: mk, html: ov.html, store: (this.state.live && this.state.live.store) || '' });
+      // The ceremony: its standby screen (with the shared transition when it goes), then the sequence, which comes in over
+      // the standby screen and ends on the home wall by itself; keyed per ceremony, so "end" reaches the one playing.
+      if (isCeremony(ov)) {
+        const Cer = this._Cer || (this._Cer = window.makeCeremony && window.makeCeremony(React)), [pre, under] = this.cerStage(ov);
+        const sb = Cer && (pre || under) ? h(O.Moment, { key: 'mv-sb' + ov.id, out: !!ov.out, fx: M().fx }, h(Cer.Standby, { key: 'sb', texts: ov.texts, video: ov.video, preview: CFG.preview })) : null;
+        el = !Cer ? null : h(React.Fragment, { key: 'cer' + ov.id }, sb, pre ? null :
+          h(Cer.Ceremony, { key: 'cer', start: ov.start, video: ov.video, texts: ov.texts, preview: CFG.preview, end: ov.end || 0, onWake: () => this.onCerWake(ov.id), onDone: () => this.onCerDone(ov.id) }));
+      }
+      if (ov && ov.kind === 'news') el = h(O.NewsMoment, { key: mk, item: ov.item, secs: ov.secs, qr: CFG.showQr && ov.item.url ? qrData(ov.item.url) : '', fx: CFG.ambientFx });
+      // Every moment but the welcome (which has its own) comes and goes with the shared transition.
+      if (el && !wlUp && !isMemorial(ov) && !isCeremony(ov) && O.Moment) el = h(O.Moment, { key: 'mv' + mk, out: !!ov.out, fx: M().fx }, el);
+      return (this._ov = h(React.Fragment, null, el, toast && !ov ? h(O.Toast, { key: 't', title: toast.title, line: toast.line }) : null));
+    }
+
+    // ---- decorative layers (verbatim from the design) --------------------------------------------
+    ambient() {
+      if (this._amb) return this._amb;
+      const fx = CFG.ambientFx, s = [];
+      const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d');
+      for (let i = 0; i < 260; i++) { const x = (i * 97.7) % 512, y = (i * 61.3 + (i * i) % 37) % 512, r = 0.4 + ((i * 13) % 7) / 10, a = 0.1 + ((i * 7) % 5) * 0.05; g.fillStyle = `rgba(223,231,245,${a})`; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill(); }
+      // (moved by transforms on a tile larger than the screen, the same drift as before)
+      s.push(h('div', { key: 'far', style: { position: 'absolute', left: 0, top: -512, width: 2432, height: 1592, opacity: .75, animation: fx ? 'tileX 240s linear infinite' : 'none' } },
+        h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${c.toDataURL()})`, backgroundSize: '512px 512px', animation: fx ? 'tileY 960s linear infinite' : 'none' } })));
+      s.push(h('div', { key: 'neb1', style: { position: 'absolute', width: 900, height: 600, left: -200, top: 380, borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(60,120,220,.12), rgba(60,120,220,0))', animation: fx ? 'drift 38s ease-in-out infinite' : 'none' } }));
+      s.push(h('div', { key: 'neb2', style: { position: 'absolute', width: 800, height: 520, right: -160, top: -120, borderRadius: '50%', background: 'radial-gradient(closest-side, rgba(111,214,234,.08), rgba(111,214,234,0))', animation: fx ? 'drift 46s ease-in-out -12s infinite reverse' : 'none' } }));
+      const near = [];
+      for (let i = 0; i < 80; i++) { const size = i % 7 === 0 ? 2.5 : 1.5; near.push(h('span', { key: i, style: { position: 'absolute', left: ((i * 137.5) % 100) + '%', top: ((i * 71.3) % 100) + '%', width: size, height: size, borderRadius: '50%', background: '#e6f1ff', opacity: .3, boxShadow: i % 7 === 0 ? '0 0 6px rgba(230,241,255,.6)' : 'none', animation: `twinkle ${4 + (i % 5)}s ease-in-out ${(i % 9) * .7}s infinite` } })); }
+      s.push(h('div', { key: 'near', style: { position: 'absolute', inset: -80, animation: fx ? 'parallaxB 60s ease-in-out infinite alternate' : 'none' } }, near));
+      if (fx) s.push(h('div', { key: 'vig', style: { position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.45) 100%)' } }));
+      return (this._amb = h('div', { style: { position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden' } }, s));
+    }
+    /** The ambient extras that blend and blur (flare, grain, scan line): held back while a welcome is up or the wall makes
+     *  its entrance after one, then faded in. */
+    ambientFx() {
+      if (this._ambFx !== undefined) return this._ambFx;
+      const s = [];
+      if (CFG.ambientFx) {
+        const n = document.createElement('canvas'); n.width = n.height = 256; const ng = n.getContext('2d'), id = ng.createImageData(256, 256);
+        for (let i = 0; i < id.data.length; i += 4) { const v = Math.random() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; } ng.putImageData(id, 0, 0);
+        s.push(h('div', { key: 'flare', style: { position: 'absolute', left: 560, top: 300, width: 800, height: 3, borderRadius: 3, background: 'linear-gradient(90deg, rgba(111,190,255,0), rgba(160,215,255,.55) 45%, rgba(230,245,255,.8) 50%, rgba(160,215,255,.55) 55%, rgba(111,190,255,0))', filter: 'blur(1.5px)', mixBlendMode: 'screen', animation: 'flare 11s ease-in-out infinite' } }));
+        s.push(h('div', { key: 'grain', style: { position: 'absolute', inset: '-10%', backgroundImage: `url(${n.toDataURL()})`, opacity: .045, mixBlendMode: 'overlay', animation: 'grain 1.2s steps(5) infinite' } }));
+        s.push(h('div', { key: 'scan', style: { position: 'absolute', left: 0, right: 0, top: 0, height: 2, background: 'linear-gradient(90deg, rgba(111,214,234,0), rgba(111,214,234,.28) 30%, rgba(212,242,92,.22) 50%, rgba(111,214,234,.28) 70%, rgba(111,214,234,0))', boxShadow: '0 0 18px rgba(111,214,234,.25)', animation: 'scan 22s linear 4s infinite', opacity: 0 } }));
+      }
+      return (this._ambFx = s.length ? h('div', { style: { position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden', animation: 'ovIn 1.6s ease both' } }, s) : null);
+    }
+    sheen(k, delay) {
+      const key = '_sh' + k; if (this[key]) return this[key];
+      const fx = CFG.ambientFx, c = 'rgba(159,220,255,.55)';
+      const corner = (pos, bw) => h('span', { key: JSON.stringify(pos), style: Object.assign({ position: 'absolute', width: 18, height: 18, borderColor: c, borderStyle: 'solid', borderWidth: bw, pointerEvents: 'none', zIndex: 2 }, pos) });
+      return (this[key] = h(React.Fragment, null,
+        fx ? h('div', { style: { position: 'absolute', top: 0, bottom: 0, left: 0, width: '45%', pointerEvents: 'none', background: 'linear-gradient(90deg, rgba(255,255,255,0), rgba(170,215,255,.07) 50%, rgba(255,255,255,0))', animation: `sheen 14s ease-in-out ${delay}s infinite`, zIndex: 0 } }) : null,
+        h('div', { style: { position: 'absolute', top: 0, left: '12%', right: '12%', height: 1, background: 'linear-gradient(90deg, rgba(159,220,255,0), rgba(200,235,255,.7) 50%, rgba(159,220,255,0))', boxShadow: '0 0 14px rgba(159,220,255,.5)', pointerEvents: 'none', animation: fx ? `breathe 6s ease-in-out ${delay}s infinite` : 'none' } }),
+        h('div', { style: { position: 'absolute', inset: 0, borderRadius: 26, background: 'radial-gradient(ellipse 70% 40% at 50% 0%, rgba(120,180,255,.10), rgba(120,180,255,0))', pointerEvents: 'none' } }),
+        corner({ top: 10, right: 10, borderRadius: '0 8px 0 0' }, '1.5px 1.5px 0 0'), corner({ top: 10, left: 10, borderRadius: '8px 0 0 0' }, '1.5px 0 0 1.5px'),
+        corner({ bottom: 10, right: 10, borderRadius: '0 0 8px 0' }, '0 1.5px 1.5px 0'), corner({ bottom: 10, left: 10, borderRadius: '0 0 0 8px' }, '0 0 1.5px 1.5px')));
+    }
+    /** The 3D emblem in its slot. Under a welcome it waits paused and hidden, on the page clock (clock="page"), and wakes
+     *  under the welcome's emblem as it lands, drawing the same frame (overlays.js Welcome); it then shows, and the welcome's
+     *  goes. Its glow fades in as the welcome emblem's own glow fades out. */
+    emblem(rest, entering) {
+      const ov = this.state.ov, wlUp = isWelcome(ov), wl = this.wl;
+      // (only once the welcome has faded in over the wall: until then the wall shows as it was)
+      const cov = wlUp && (this.state.covered || !!ov.leaving);
+      const paused = rest || (cov && !(wl && wl.embWake)), hidden = cov && !(wl && wl.embShown), page = cov, evOff = cov && !(wl && wl.settled);
+      const v7 = CFG.emblem !== 'v2';
+      const k = [paused, hidden, page, evOff, entering, CFG.globeStyle, CFG.lang, CFG.emblem, CFG.globeSpeed, CFG.cameraSway, CFG.traffic, CFG.launchRate, CFG.maxSats, CFG.stackSize, CFG.quality].join('|');
+      if (this._emb && this._embK === k) return this._emb;
+      this._embK = k;
+      return (this._emb = h('div', { style: { position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+        h('div', { style: Object.assign({ position: 'absolute', inset: 0 }, entering === 'wl' ? { animation: 'wlGlowIn 1700ms ease-in-out 6100ms both' } : entering === 'back' ? { animation: 'wlGlowIn 1000ms ease-in-out 1240ms both' } : {}) },
+          h('div', { style: { position: 'absolute', width: 980, height: 980, left: '50%', top: '47%', marginLeft: -490, marginTop: -490, borderRadius: '50%', background: 'radial-gradient(circle, rgba(90,160,240,.2) 0%, rgba(70,120,210,.08) 32%, rgba(60,90,160,0) 66%)', animation: 'breathe 9s ease-in-out infinite' } })),
+        v7 ? h('space-emblem-v7', { key: 'v7' + CFG.globeStyle + CFG.lang + CFG.quality, ref: this.embRef, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off',
+          fx: 'full', quality: CFG.quality, traffic: CFG.traffic ? 'on' : 'off', 'launch-rate': CFG.launchRate, 'max-sats': CFG.maxSats, 'stack-size': CFG.stackSize,
+          paused: paused ? '' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, opacity: hidden ? 0 : 1 } })
+        : h('space-emblem-v2', { key: CFG.globeStyle + CFG.lang, ref: this.embRef, word: tr('מנהלת החלל', 'SPACE PROGRAM OFFICE'), speed: CFG.globeSpeed, globe: CFG.globeStyle, sway: CFG.cameraSway ? 'on' : 'off',
+          paused: paused ? '' : null, clock: page ? 'page' : null, events: evOff ? 'off' : null, style: { width: '100%', height: '100%', maxWidth: 860, position: 'relative', zIndex: 2, opacity: hidden ? 0 : 1 } })));
+    }
+
+    /** An occasion in the events panel (lib/occasions.ts): its glyph on its own colours instead of a picture, what kind
+     *  of day it is instead of an hour, and "היום" while it runs. */
+    occasionRow(d, i, today) {
+      const o = d.occ, c = o.color, O = this._O || (this._O = window.makeWallOverlays(React));
+      return h('div', { key: i, 'data-w': 'occasion-row', style: { display: 'grid', gridTemplateColumns: '62px 58px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, background: `linear-gradient(${EN() ? 90 : 270}deg, ${c}${today ? '2e' : '1a'}, rgba(8,16,34,.35) 70%)`, border: `1px solid ${c}${today ? '80' : '40'}` } },
+        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: `1px solid ${c}40` } },
+          h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
+        h('div', { style: { width: 58, height: 58, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `radial-gradient(circle at 50% 35%, ${c}55, ${o.deep} 75%)`, border: `1px solid ${c}66`, boxShadow: today ? `0 0 18px ${c}40` : 'none' } }, h(O.Glyph, { k: o.key, c, s: 40, w: 6 })),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } }, h('span', { style: { fontSize: 17, fontWeight: 600, lineHeight: 1.25, textWrap: 'pretty' } }, d.name), h('span', { style: { fontSize: 13, color: c } }, OCC_KIND[o.kind] ? tr(OCC_KIND[o.kind][0], OCC_KIND[o.kind][1]) : '')),
+        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), h('span', { style: { fontSize: 12, fontWeight: 500, color: c } }, today ? tr('היום', 'TODAY') : '')));
+    }
+    /** Today's occasion on the home wall (not a memorial day, which has its candle): a card under the emblem, from the day
+     *  the wall starts greeting it to its last day (lib/occasions.ts occasionGreets). ?occ=<key> shows one (demos). */
+    // ---- background music ---------------------------------------------------------------------------
+    /** Every second: the music plays while it is on, in its hours, with nothing else making sound on the wall (the 12:00
+     *  video, the ceremony, a launch broadcast, any video playing with sound) and never on a memorial day or a day of
+     *  mourning, or with the Yizkor screen up. It fades out and back in by itself. Until the browser lets the page make
+     *  sound (a click on the wall, or the lobby shortcut's autoplay flag) a small note in the corner says so. */
+    musicSync() {
+      if (CFG.preview || !window.SpaceMusic) return;
+      const mus = this._music || (this._music = window.SpaceMusic.create());
+      const ov = this.state.ov, L = this.state.live, D = this.D, T = this.ilParts(serverNow()), [a, b] = MUSIC_HOURS[CFG.musicHours] || MUSIC_HOURS.all;
+      const loud = !!ov && (ov.kind === 'noon' || ov.kind === 'stream' || isCeremony(ov) || isMemorial(ov))
+        || Array.from(document.querySelectorAll('video,audio')).some((v) => !v.paused && !v.muted && v.volume > 0);
+      const mourning = !!(L && L.memorial) || ((D && D.occasions) || []).some((o) => o.kind === 'memorial' || o.kind === 'remember');
+      mus.set({ on: CFG.music && T.h >= a && T.h < b && !loud && !mourning, vol: CFG.musicVol, style: CFG.musicStyle });
+      let note = document.getElementById('wall-music-note');
+      if (!mus.blocked()) { if (note) note.remove(); return; }
+      if (note) return;
+      note = document.createElement('div'); note.id = 'wall-music-note';
+      note.textContent = tr('♪ לחיצה על המסך מפעילה את מוזיקת הרקע', '♪ Click the screen to start the background music');
+      note.style.cssText = 'position:fixed;bottom:10px;left:12px;z-index:90;font:500 13px Heebo,sans-serif;color:rgba(223,231,245,.55);background:rgba(4,9,20,.55);padding:4px 10px;border-radius:8px;pointer-events:none';
+      document.body.appendChild(note);
+    }
+    occasionToday() {
+      const D = this.D, list = (D && D.occasions) || [];
+      return list.find((o) => o.key === CFG.occ) || list.find((o) => o.kind !== 'memorial') || null;
+    }
+    occasionCard(o) {
+      const today = this.ilParts(serverNow()).iso, k = [CFG.lang, CFG.ambientFx, o.key, o.title, o.greet, o.first, o.last, today].join('|');
+      if (this._oc && this._ocK === k) return this._oc;
+      this._ocK = k;
+      const c = o.color, quiet = o.kind === 'remember', O = this._O || (this._O = window.makeWallOverlays(React));
+      const eve = !quiet && o.first > today;
+      return (this._oc = h('div', { key: 'oc', 'data-w': 'occasion', style: { flex: 'none', alignSelf: 'center', position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 22, height: 112, padding: EN() ? '0 44px 0 26px' : '0 26px 0 44px', borderRadius: 26, overflow: 'hidden', background: `linear-gradient(180deg, ${c}26, ${o.deep}d9)`, border: `1px solid ${c}59`, boxShadow: `0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 ${c}22`, animation: 'rise 1.2s ease both' } },
+        h('div', { style: { position: 'absolute', top: -60, [EN() ? 'left' : 'right']: -40, width: 220, height: 220, borderRadius: '50%', background: `radial-gradient(circle closest-side, ${c}30, transparent)`, pointerEvents: 'none' } }),
+        quiet ? h('div', { style: { position: 'relative', width: 200 * MM_K, height: 112, flex: 'none' } }, h('div', { style: { position: 'absolute', left: 0, top: 9 } }, h(O.Candle, { k: MM_K, len: 400, fx: CFG.ambientFx })))
+          : h('div', { style: { position: 'relative', width: 80, height: 80, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 52, lineHeight: 1, borderRadius: '50%', background: `radial-gradient(circle at 50% 35%, ${c}50, ${o.deep} 72%)`, border: `1.5px solid ${c}80`, boxShadow: `0 0 30px ${c}40` } }, h(O.Glyph, { k: o.key, c, s: 54, w: 5 })),
+        h('div', { style: { position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 } },
+          h('span', { style: { fontSize: 38, fontWeight: 800, lineHeight: 1, color: '#fff', whiteSpace: 'nowrap', textShadow: `0 0 24px ${c}55` } }, quiet ? o.title : o.greet),
+          h('span', { style: { fontSize: 17, color: c, whiteSpace: 'nowrap' } }, quiet ? o.greet : (eve ? tr('ערב ', 'Eve of ') : '') + o.title + ' · ' + tr('מנהלת החלל', 'Space Program Office')))));
+    }
+    /** Yizkor on the home wall: a lit candle and a line under the emblem, all day on a memorial day. */
+    memorialCard() {
+      const k = CFG.lang + CFG.ambientFx + this.memorialKey();
+      if (this._mm && this._mmK === k) return this._mm;
+      this._mmK = k;
+      const O = this._O || (this._O = window.makeWallOverlays(React)), W = O.MM_TEXT[this.memorialKey()] || O.MM_TEXT.oct7;
+      return (this._mm = h('div', { key: 'mm', 'data-w': 'memorial', style: { flex: 'none', alignSelf: 'center', position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 22, height: 112, padding: EN() ? '0 44px 0 30px' : '0 30px 0 44px', borderRadius: 26, overflow: 'hidden', background: 'linear-gradient(180deg, rgba(50,36,22,.55), rgba(10,14,26,.8))', border: '1px solid rgba(233,184,114,.32)', boxShadow: '0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,228,186,.10)', animation: 'rise 1.2s ease both' } },
+        h('div', { style: { position: 'absolute', top: -60, [EN() ? 'left' : 'right']: -40, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle closest-side, rgba(255,180,100,.18), transparent)', pointerEvents: 'none' } }),
+        h('div', { style: { position: 'relative', width: 200 * MM_K, height: 112, flex: 'none' } },
+          h('div', { style: { position: 'absolute', left: 0, top: 9 } }, h(O.Candle, { k: MM_K, len: 400, fx: CFG.ambientFx }))),
+        h('div', { style: { position: 'relative', display: 'flex', flexDirection: 'column', gap: 6 } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, lineHeight: 1 } },
+            h('span', { style: { fontSize: 40, fontWeight: 800, color: '#f6efe3', letterSpacing: EN() ? 0 : '.02em', textShadow: '0 0 24px rgba(255,190,110,.25)' } }, tr('יזכור', 'We Remember')),
+            h('span', { style: { width: 1.5, height: 34, background: 'rgba(233,184,114,.5)' } }),
+            h('span', { dir: W.lex ? 'ltr' : null, style: { fontFamily: W.lex ? "'Lexend',sans-serif" : 'Heebo, sans-serif', fontSize: W.lex ? 44 : 36, fontWeight: W.lex ? 500 : 800, color: '#e9b872', whiteSpace: 'nowrap', textShadow: '0 0 20px rgba(233,160,80,.3)' } }, tr(W.tag[0], W.tag[1]))),
+          h('span', { style: { fontSize: 17, color: '#cdbb9c', whiteSpace: 'nowrap' } }, tr(W.line[0], W.line[1])))));
+    }
+
+    // ---- content blocks ---------------------------------------------------------------------------
+    featured(D, idx, sec) {
+      const k = idx + ':' + sec;
+      if (this._feat && this._featK === k) return this._feat;
+      this._featK = k;
+      const n = D.news[D.featured[idx]] || D.news[0], col = D.catColor[n.cat] || '#9fdcff', total = D.featured.length;
+      const img = n.image || D.catImage[n.cat] || Object.values(D.catImage)[0];
+      const chip = (t, c, fill) => h('span', { style: { padding: '4px 12px', borderRadius: 999, fontSize: 13, fontWeight: 500, color: fill ? '#0a1224' : c, background: fill ? c : 'rgba(6,12,26,.6)', border: `1px solid ${c}` } }, t);
+      return (this._feat = h('article', { key: idx, 'data-w': 'featured', style: { position: 'relative', zIndex: 1, borderRadius: 22, overflow: 'hidden', background: 'rgba(8,16,34,.55)', border: '1px solid rgba(150,190,240,.16)', flex: 'none', animation: 'rise .8s ease both' } },
+        h('div', { style: { height: 150, position: 'relative', overflow: 'hidden' } },
+          h('div', { style: { position: 'absolute', inset: 0, backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', animation: `zoomBg ${sec}s linear both` } }),
+          h('div', { style: { position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(6,12,26,.15) 0%, rgba(6,12,26,.35) 55%, rgba(8,16,34,.98) 100%)' } }),
+          h('div', { style: { position: 'absolute', top: 12, [EN() ? 'left' : 'right']: 12, display: 'flex', gap: 6 } }, chip(n.cat, col), n.il ? chip(tr('ישראל', 'Israel'), '#d4f25c', true) : null),
+          h('span', { dir: 'ltr', style: { position: 'absolute', top: 14, [EN() ? 'right' : 'left']: 14, fontFamily: "'Lexend',sans-serif", fontSize: 13, color: '#e6f1ff', letterSpacing: '.08em' } }, String(idx + 1).padStart(2, '0') + ' / ' + String(total).padStart(2, '0'))),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 18px 16px', marginTop: -26, position: 'relative' } },
+          h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: MUTED } }, n.date + ' · ' + n.src),
+          h('h3', { style: { margin: 0, fontSize: 25, fontWeight: 700, lineHeight: 1.22, textWrap: 'pretty' } }, n.title),
+          h('p', { style: { margin: 0, fontSize: 16, color: '#b3c2dc', fontWeight: 300, lineHeight: 1.4, textWrap: 'pretty' } }, n.dek),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, paddingTop: 4 } },
+            h('div', { style: { flex: 1, height: 3, borderRadius: 3, background: 'rgba(150,190,240,.14)', overflow: 'hidden' } }, h('div', { style: { height: '100%', background: `linear-gradient(${EN() ? 90 : 270}deg,#d4f25c,#6fd6ea)`, transformOrigin: EN() ? 'left' : 'right', animation: `grow ${sec}s linear both` } })),
+            CFG.showQr && n.url ? h('img', { src: qrData(n.url), alt: 'QR', style: { width: 50, height: 50, borderRadius: 8, background: '#0b1430', padding: 3, border: '1px solid rgba(230,241,255,.22)' } }) : null))));
+    }
+    newsList(D) {
+      const sec = CFG.listSeconds;
+      if (this._list && this._listS === sec) return this._list;
+      this._listS = sec;
+      const row = (n, i) => h('div', { key: i, style: { display: 'flex', flexDirection: 'column', gap: 5, padding: '12px 4px', borderBottom: '1px solid rgba(150,190,240,.1)' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
+          h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: D.catColor[n.cat], boxShadow: `0 0 8px ${D.catColor[n.cat]}` } }),
+          h('span', { style: { color: D.catColor[n.cat], fontWeight: 500 } }, n.cat),
+          h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", color: '#6f82a6' } }, n.date + ' · ' + n.src)),
+        h('div', { style: { fontSize: 17, fontWeight: 500, lineHeight: 1.3, textWrap: 'pretty' } }, n.title));
+      return (this._list = h('div', { 'data-w': 'news-list', style: { flex: 1, minHeight: 0, position: 'relative', zIndex: 1, overflow: 'hidden', WebkitMaskImage: 'linear-gradient(180deg,transparent 0,#000 8%,#000 88%,transparent 100%)', maskImage: 'linear-gradient(180deg,transparent 0,#000 8%,#000 88%,transparent 100%)' } },
+        h('div', { style: { animation: `scrollY ${Math.max(1, D.news.length) * sec}s linear infinite` } }, [...D.news, ...D.news].map(row))));
+    }
+    spotlight(D, idx) {
+      if (this._spot && this._spotI === idx) return this._spot;
+      this._spotI = idx; const p = D.people[idx];
+      if (!p) return (this._spot = null);
+      return (this._spot = h('div', { key: idx, style: { flex: 1, minHeight: 120, position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 18, padding: '10px 16px', borderRadius: 22, background: `radial-gradient(ellipse at 85% 50%, ${p.color}22, rgba(8,16,34,.4) 70%)`, border: '1px solid rgba(150,190,240,.14)', animation: 'rise .8s ease both' } },
+        h('div', { style: { position: 'relative', width: 100, height: 100, flex: 'none' } },
+          h('div', { style: { position: 'absolute', inset: 0, borderRadius: '50%', background: `conic-gradient(from 0deg, ${p.color}, rgba(111,214,234,.1) 40%, ${p.color}00 60%, ${p.color})`, animation: 'spin 6s linear infinite' } }),
+          h('div', { style: { position: 'absolute', inset: -8, borderRadius: '50%', border: `1px solid ${p.color}`, animation: 'ping 2.8s ease-out infinite' } }),
+          h('img', { src: window.wallAvatar(240, p.photo, p.name), alt: p.name, style: { position: 'absolute', inset: 4, width: 92, height: 92, borderRadius: '50%', objectFit: 'cover', border: '3px solid #0a1428' } })),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 } },
+          h('span', { style: { alignSelf: 'flex-start', padding: '4px 12px', borderRadius: 999, fontSize: 14, fontWeight: 700, color: '#0a1224', background: p.color } }, p.type),
+          h('span', { style: { fontSize: 26, fontWeight: 700, lineHeight: 1.1 } }, p.name),
+          h('span', { style: { fontSize: 15, color: '#b3c2dc', lineHeight: 1.35, textWrap: 'pretty' } }, p.line),
+          h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 14, color: '#9fdcff' } }, p.date))));
+    }
+    ticker(D) {
+      if (this._tick) return this._tick;
+      const item = (e, i) => { const opp = e.kind === 'הזדמנות' || e.kind === 'Opportunity', c = opp ? '#d4f25c' : '#6fd6ea'; return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '0 26px', whiteSpace: 'nowrap', fontSize: 16 } },
+        h('span', { style: { padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 500, color: c, border: `1px solid ${c}` } }, e.kind),
+        h('span', { style: { fontFamily: "'Lexend',sans-serif", color: '#9fdcff', fontSize: 14 } }, e.date),
+        h('span', null, e.name), h('span', { style: { color: 'rgba(150,190,240,.3)', [EN() ? 'marginLeft' : 'marginRight']: 14 } }, '◆')); };
+      return (this._tick = h('div', { style: { flex: 1, minWidth: 0, overflow: 'hidden', height: '100%', display: 'flex', alignItems: 'center' } },
+        h('div', { style: { display: 'flex', width: 'max-content', animation: `${EN() ? 'scrollXL' : 'scrollX'} ${Math.max(1, D.ticker.length) * 8}s linear infinite` } }, [...D.ticker, ...D.ticker].map(item))));
+    }
+    launchVals(L, now) {
+      let nextFound = false; const p = (n) => String(n).padStart(2, '0');
+      return L.map((l) => {
+        const at = Date.parse(l.at), d = at - now, gone = d <= 0;
+        const when = fmtWhen.format(new Date(at)).replace(',', ' ·');
+        const isNext = !gone && !nextFound; if (isNext) nextFound = true;
+        const a = Math.abs(d), dd = Math.floor(a / 86400e3), hh = Math.floor(a / 3600e3) % 24, mm = Math.floor(a / 60e3) % 60, ss = Math.floor(a / 1e3) % 60;
+        // Past its time a launch reads as launched only on Launch Library's word; otherwise it probably slipped.
+        const flew = gone && (FLOWN[l.code] || goNow(l, now));
+        const U = EN() ? { d: 'DAYS', h: 'HRS', m: 'MIN', s: 'SEC' } : { d: 'ימים', h: 'שע׳', m: 'דק׳', s: 'שנ׳' };
+        const segs = !gone ? [{ v: p(dd), u: U.d }, { v: p(hh), u: U.h }, { v: p(mm), u: U.m }, { v: p(ss), u: U.s }]
+          : flew ? [{ v: 'T+', u: '' }, { v: p(Math.min(99, Math.floor(a / 3600e3))), u: U.h }, { v: p(mm), u: U.m }] : [{ v: '--', u: U.h }, { v: '--', u: U.m }];
+        const status = !gone ? l.status : !flew ? tr('ממתין לעדכון', 'Awaiting update') : l.code === 'Go' ? tr('שוגר', 'Launched') : l.status;
+        const statusColor = gone ? '#6f82a6' : l.code === 'Go' ? '#8fe0b8' : '#e9b872';
+        return Object.assign({}, l, { when, segs, status, statusColor, numColor: gone ? '#6f82a6' : isNext ? '#d4f25c' : '#e6f1ff', border: isNext ? 'rgba(212,242,92,.55)' : 'rgba(150,190,240,.14)', shadow: isNext ? '0 0 24px rgba(212,242,92,.16)' : 'none' });
+      });
+    }
+    /** "updated X ago" from the feed's generatedAt; amber when stale, or when the feed itself has stopped answering. */
+    updatedAgo(D) {
+      const off = !CFG.sample && Date.now() - (this._feedOkAt || Date.now()) > Math.max(5 * 60e3, 3 * CFG.refresh * 1000);
+      const noData = tr('אין חיבור לנתונים', 'No data connection');
+      const t = Date.parse(D.generatedAt); if (!t) return { text: off ? noData : tr('עודכן —', 'Updated —'), stale: true };
+      const min = Math.max(0, Math.round((this.state.now - t) / 6e4));
+      const text = EN() ? (min < 1 ? 'just now' : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.floor(min / 60)} h ago` : `${Math.floor(min / 1440)} days ago`)
+        : min < 1 ? 'עכשיו' : min < 60 ? `לפני ${min} דק׳` : min < 1440 ? `לפני ${Math.floor(min / 60)} שע׳` : `לפני ${Math.floor(min / 1440)} ימים`;
+      return { text: (off ? noData + ' · ' : '') + tr('עודכן ', 'Updated ') + text, stale: off || min > CFG.staleAfterMin };
+    }
+
+    // ---- the template -----------------------------------------------------------------------------
+    render() {
+      const D = this.D, now = this.state.now, t = Date.now() - (this.t0 || Date.now()), nd = new Date(now);
+      const hidden = (k) => CFG.hide.includes(k), headline = (EN() && CFG.headlineEn) || CFG.headline;
+      // Under a full-screen moment the wall rests: its layers are not drawn and the 3D emblem stops, so a lobby computer
+      // gives everything to the moment (the 12:00 video stuttered with the whole wall still animating beneath it).
+      const ov = this.state.ov, wl = this.wl, wlUp = isWelcome(ov);
+      const rest = (!!ov && this.state.covered && !(wl && wl.woke) && !(isMemorial(ov) && ov.leaving)) || (!ov && this.state.sCov);
+      // On the welcome's way out the wall wakes under it and assembles around the arriving emblem: the column the Earth
+      // crosses first, then the other, header, ticker and launches, then light runs down the panels' inner edges as the
+      // emblem docks. All in one commit (the wake), with fixed delays (ms) measured from it.
+      // After any other moment (the shared transition, closeOv) the same assembly runs on a shorter clock: `bk` maps the
+      // welcome's times (ms from the wake) onto it.
+      const entering = !!(wl && wl.woke && !wl.settled), back = !entering && !!this.state.back && !wlUp, asm = entering || back;
+      const bk = (ms, delay) => (back ? [Math.round(ms * 0.6), Math.round(Math.max(0, delay - 3000) * 0.4)] : [ms, delay]);
+      const enW = (name, ms, delay) => { if (!asm) return {}; const [m, d] = bk(ms, delay); return { animation: `${name} ${m}ms cubic-bezier(.16,1,.3,1) ${d}ms both` }; };
+      const seam = (side, delay) => (asm ? h('div', { key: 'seam', style: { position: 'absolute', top: 0, bottom: 0, [side]: 0, width: 2, zIndex: 3, pointerEvents: 'none', transformOrigin: 'top', background: 'linear-gradient(180deg, rgba(212,242,92,0), #d4f25c 20%, #9fdcff 80%, rgba(159,220,255,0))', animation: `wlSeam ${bk(1000, delay)[0]}ms cubic-bezier(.16,1,.3,1) ${bk(1000, delay)[1]}ms both` } }) : null);
+      const edgeFlash = (delay) => (asm ? h('div', { key: 'edge', style: { position: 'absolute', inset: 0, borderRadius: 26, border: '1px solid rgba(212,242,92,.8)', zIndex: 3, pointerEvents: 'none', animation: `wlEdge ${bk(1000, delay)[0]}ms ease ${bk(1000, delay)[1]}ms both` } }) : null);
+      const rightFirst = EN() ? 3800 : 3200, leftFirst = EN() ? 3200 : 3800;   // the physical right column is "r" in Hebrew, "l" in English
+      const stage = (layers) => h('div', { style: { width: '100vw', height: '100vh', background: '#040914', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'Heebo,system-ui,sans-serif', color: '#e6f1ff' } },
+        h('div', { 'data-w': 'stage', dir: EN() ? 'ltr' : 'rtl', lang: CFG.lang, style: { width: 1920, height: 1080, flex: 'none', position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 1100px 760px at 50% 50%, #0c1d3d 0%, #07122a 45%, #040914 100%)', transform: `scale(${this.state.scale})`, transformOrigin: 'center center', backfaceVisibility: 'hidden', WebkitFontSmoothing: 'antialiased', display: 'grid', gridTemplateRows: '88px minmax(0,1fr) ' + (hidden('ticker') ? '0px ' : '50px ') + (hidden('launches') ? '16px' : '118px') } },
+          h('div', { key: 'wall', style: { display: rest ? 'none' : 'contents' } }, layers, h(React.Fragment, { key: 'decor' }, this.decorLayer()), h(React.Fragment, { key: 'fx' }, !asm && !(wlUp && this.state.covered) ? this.ambientFx() : null)),
+          h(React.Fragment, { key: 'sv' }, this.streamLayer()), h(React.Fragment, { key: 'ov' }, this.overlay()), this.liveLayers()));
+      const ago = D && this.updatedAgo(D);
+      const dot = ago && h('span', { style: { width: 9, height: 9, borderRadius: '50%', background: ago.stale ? '#e9b872' : '#8fe0b8', boxShadow: `0 0 10px ${ago.stale ? '#e9b872' : '#8fe0b8'}`, animation: 'breathe 2.4s ease-in-out infinite', display: 'inline-block' } });
+      const timeBox = (big, small, extra, smallStyle) => h('div', { 'data-w': 'clock', style: Object.assign({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, borderRadius: 22, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(150,190,240,.14)' }, extra.box) },
+        h('span', { style: Object.assign({ fontSize: 26, letterSpacing: '.03em' }, extra.big) }, big), h('span', { style: Object.assign({ fontSize: 12, color: MUTED }, smallStyle) }, small));
+
+      const header = h('header', { key: 'hdr', 'data-w': 'header', style: Object.assign({ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 36px', position: 'relative', zIndex: 2 }, enW('wlHeadIn', 2000, 5000)) },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+          // The mark alone, its emblem centred in the disc: the file also has the name under the emblem (cut off here),
+          // and the emblem sits a little right of the file's middle.
+          h('div', { 'data-w': 'logo', style: { position: 'relative', width: 52, height: 52, flex: 'none', borderRadius: '50%', background: 'radial-gradient(circle at 35% 30%,#ffffff 0%,#dfeaf7 60%,#a9c3e2 100%)', boxShadow: '0 0 0 1px rgba(160,200,255,.35),0 0 24px rgba(111,214,234,.35)', overflow: 'hidden' } },
+            h('img', { 'data-w': 'logo-img', src: '/space-wall/assets/logo-mark.png', alt: '', style: { position: 'absolute', left: '50%', top: '50%', width: 54, height: 'auto', marginLeft: -28.4, marginTop: -23.3, clipPath: 'inset(0 0 23% 0)' } })),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('div', { 'data-w': 'title', style: { fontSize: 24, fontWeight: 700, letterSpacing: '-0.01em' } }, tr('צג חלל · מנהלת החלל', 'Space Wall · Space Program Office')))),
+        headline ? h('div', { 'data-w': 'headline', style: { padding: '8px 28px', borderRadius: 999, background: 'rgba(14,26,50,.7)', border: '1px solid rgba(212,242,92,.35)', fontSize: 26, fontWeight: 700, color: '#e6f1ff', whiteSpace: 'nowrap', maxWidth: 820, overflow: 'hidden', textOverflow: 'ellipsis' } }, headline) : h('div'),
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, fontFamily: "'Lexend',sans-serif" } },
+          ago ? h('div', { 'data-w': 'updated', style: Object.assign({ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', fontFamily: 'Heebo', fontSize: 14, color: MUTED }, PILL) }, dot, h('span', null, ago.text)) : null,
+          timeBox(fmtIL.format(nd), (EN() ? fmtDateEn : fmtDateHe).format(nd), { box: { padding: '6px 20px' }, big: { fontWeight: 400 } }, { fontFamily: 'Heebo' }),
+          timeBox(fmtUTC.format(nd), 'UTC', { box: { padding: '6px 18px' }, big: { fontWeight: 300, color: '#9fdcff' } }, { letterSpacing: '.12em' })));
+      const quiet = (text, extra) => h('span', { style: Object.assign({ fontSize: 15, color: MUTED, lineHeight: 1.4 }, extra) }, text);
+
+      // No feed yet: the emblem, the clock and a calm word. Nothing invented; full-screen moments from the remote still show.
+      if (!D) {
+        const denied = this.state.feedErr === 401 || this.state.feedErr === 403;
+        return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header,
+          h('div', { key: 'e', 'data-w': 'emblem', style: { gridRow: '2 / 4', display: 'flex', minHeight: 0 } }, this.emblem(rest, entering ? 'wl' : back ? 'back' : '')),
+          h('div', { key: 'w', style: Object.assign({ gridRow: '4', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, position: 'relative', zIndex: 2 }, enW('wlFootIn', 1800, 5800)) },
+            h('span', { style: { fontSize: 26, fontWeight: 500, color: '#b3c2dc' } }, tr('מתחבר לנתונים…', 'Connecting…')),
+            denied ? quiet(tr('הצג לא קיבל גישה לנתונים: בדקו את מפתח התצוגה (key) בכתובת', 'The wall has no access to its data: check the display key (key) in the address')) : null)]);
+      }
+
+      const fsec = CFG.featureSeconds, fIdx = D.featured.length ? Math.floor(t / (fsec * 1000)) % D.featured.length : 0;
+      const pIdx = D.people.length ? Math.floor(t / 7000) % D.people.length : 0, focusIdx = Math.floor(t / 9000) % 4;
+      const hi = (i) => (focusIdx === i ? 'rgba(212,242,92,.45)' : 'rgba(150,190,240,.16)');
+      const cur = D.people[pIdx];
+
+      // An event that ended stays, dimmed and marked "הסתיים", to the end of its day and goes at midnight (`gone`, from the
+      // feed; an older feed has only `end`), between feed updates too; "עכשיו" while one runs, "הבא" only for the next.
+      let nextTagged = false;
+      const directorate = D.directorate.filter((d) => { const g = d.gone || d.end; return !g || Date.parse(g) > now; }).map((d, i) => {
+        const over = !!(d.end && Date.parse(d.end) <= now);
+        if (d.occ) return this.occasionRow(d, i, !over && d.start && Date.parse(d.start) <= now);
+        const tag = over ? '' : d.start && Date.parse(d.start) <= now ? tr('עכשיו', 'NOW') : nextTagged ? '' : ((nextTagged = true), tr('הבא', 'NEXT'));
+        return h('div', { key: i, style: { display: 'grid', gridTemplateColumns: d.img ? '62px 58px minmax(0,1fr) auto' : '62px minmax(0,1fr) auto', alignItems: 'center', gap: 14, padding: '6px 12px', borderRadius: 18, opacity: over ? 0.6 : 1, background: tag ? 'rgba(212,242,92,.06)' : 'rgba(8,16,34,.35)', border: `1px solid ${tag ? 'rgba(212,242,92,.3)' : 'rgba(150,190,240,.1)'}` } },
+          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 58, borderRadius: 14, background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } },
+            h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 24, fontWeight: 500, lineHeight: 1 } }, d.day), h('span', { style: { fontSize: 12, color: MUTED } }, d.dow + ' · ' + d.mon)),
+          d.img ? h('img', { src: d.img, alt: '', onError: (ev) => { ev.currentTarget.style.visibility = 'hidden'; }, style: { width: 58, height: 58, borderRadius: 14, objectFit: 'cover', background: 'rgba(8,16,34,.7)', border: '1px solid rgba(150,190,240,.14)' } }) : null,
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } }, h('span', { style: { fontSize: 17, fontWeight: 500, lineHeight: 1.25, textWrap: 'pretty' } }, d.name), h('span', { style: { fontSize: 13, color: MUTED } }, d.place)),
+          h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } }, h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 15, color: '#9fdcff' } }, d.time), over ? h('span', { style: { fontSize: 12, fontWeight: 500, color: MUTED } }, tr('הסתיים', 'ENDED')) : h('span', { style: { fontSize: 12, fontWeight: 500, color: '#d4f25c' } }, tag)));
+      });
+
+      const peopleGrid = D.people.map((p, i) => { const on = p === cur; return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 14, background: on ? 'rgba(111,214,234,.1)' : 'rgba(8,16,34,.35)', border: `1px solid ${on ? p.color : 'rgba(150,190,240,.1)'}`, transition: 'all .6s ease', minWidth: 0 } },
+        h('img', { src: window.wallAvatar(96, p.photo, p.name), alt: '', style: { width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', flex: 'none', border: `1.5px solid ${p.color}` } }),
+        h('div', { style: { display: 'flex', flexDirection: 'column', minWidth: 0 } }, h('span', { style: { fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, p.name), h('span', { style: { fontSize: 12, color: p.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, p.type))); });
+
+      const panelHead = (title, meta) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+        h('span', { style: { fontSize: 20, fontWeight: 700 } }, title), h('span', { style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: MUTED, letterSpacing: '.08em' } }, meta));
+
+      const showEvents = !hidden('events'), showPeople = !hidden('people'), showNews = !hidden('news');
+      const right = !showEvents && !showPeople ? null : h('section', { key: 'r', style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 16, minHeight: 0 }, enW('wlPanelIn', 2600, rightFirst)) },
+        showEvents ? h('div', { 'data-w': 'events', style: Object.assign({}, PANEL, { border: `1px solid ${hi(2)}`, padding: '18px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }, showPeople ? {} : { flex: 1, minHeight: 0 }) },
+          this.sheen(1, 0), seam('insetInlineEnd', 8400), edgeFlash(8450), panelHead(tr('אירועים', 'Events'), tr('הקרובים', 'UPCOMING')), directorate.length ? directorate : quiet(tr('אין אירועים קרובים', 'No upcoming events'))) : null,
+        showPeople ? h('div', { 'data-w': 'people', style: Object.assign({}, PANEL, { flex: 1, minHeight: 0, border: `1px solid ${hi(2)}`, padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }) },
+          this.sheen(2, 4.5), seam('insetInlineEnd', showEvents ? 8520 : 8400), edgeFlash(8450),
+          panelHead(tr('אנשי המנהלת', 'Our people'), D.people.length ? String(pIdx + 1).padStart(2, '0') + ' / ' + String(D.people.length).padStart(2, '0') : ''),
+          D.people.length ? this.spotlight(D, pIdx) : quiet(tr('אין ימי הולדת או רגעים אישיים בימים הקרובים', 'No birthdays or personal moments in the coming days')),
+          D.people.length ? h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 8, flex: 'none' } }, peopleGrid) : null) : null);
+
+      let occ = null;
+      const center = h('section', { key: 'c', style: { display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0, position: 'relative' } },
+        h('div', { 'data-w': 'emblem', style: { flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } }, this.emblem(rest, entering ? 'wl' : back ? 'back' : '')),
+        this.memorialOn() ? this.memorialCard() : (occ = this.occasionToday()) ? this.occasionCard(occ) : null);
+
+      const left = !showNews ? null : h('section', { key: 'l', 'data-w': 'news', style: Object.assign({}, PANEL, { minHeight: 0, border: `1px solid ${hi(1)}`, padding: '18px 18px 0', display: 'flex', flexDirection: 'column', gap: 14 }, enW('wlPanelIn', 2600, leftFirst)) },
+        this.sheen(3, 9), seam('insetInlineStart', 8400), edgeFlash(8450),
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 } },
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } }, h('span', { style: { fontSize: 20, fontWeight: 700 } }, tr('ניוזלטר החלל השבועי', 'Weekly space newsletter')), h('span', { style: { fontSize: 13, color: MUTED } }, [tr('רקיע · הפורום הישראלי לחלל', 'Rakia · The Israeli Space Forum'), D.issue.range].filter(Boolean).join(' · '))),
+          CFG.showQr && D.issue.url ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+            h('span', { style: { fontSize: 11, color: MUTED, textAlign: EN() ? 'right' : 'left', lineHeight: 1.3 } }, tr('לגיליון', 'Full'), h('br'), tr('המלא', 'issue')),
+            h('img', { src: qrData(D.issue.url), alt: 'QR', style: { width: 52, height: 52, borderRadius: 8, background: '#0b1430', padding: 3, border: '1px solid rgba(230,241,255,.25)' } })) : null),
+        D.news.length ? this.featured(D, fIdx, fsec) : quiet(tr('הגיליון השבועי יופיע כאן אחרי שייקלט', 'The weekly issue will appear here once it is imported')),
+        D.news.length ? this.newsList(D) : null);
+
+      // A hidden side panel gives its column to the emblem.
+      const main = h('main', { key: 'main', style: { display: 'grid', gridTemplateColumns: [right ? '470px' : '', 'minmax(0,1fr)', left ? '470px' : ''].filter(Boolean).join(' '), gap: 26, padding: '14px 36px 16px', minHeight: 0, position: 'relative', zIndex: 2 } }, right, center, left);
+
+      const tickerBar = hidden('ticker') ? h('div', { key: 'tk' }) : h('div', { key: 'tk', 'data-w': 'ticker', style: Object.assign({ display: 'flex', alignItems: 'center', margin: '0 36px', borderRadius: 999, background: 'rgba(10,20,40,.72)', border: '1px solid rgba(150,190,240,.14)', position: 'relative', zIndex: 2, minWidth: 0, overflow: 'hidden' }, enW('wlFootIn', 2000, 5500)) },
+        h('div', { style: { flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', height: '100%', [EN() ? 'borderRight' : 'borderLeft']: '1px solid rgba(150,190,240,.14)', fontSize: 15, fontWeight: 700 } }, tr('אירועים והזדמנויות', 'Events & opportunities')),
+        D.ticker.length ? this.ticker(D) : quiet(tr('אין אירועים או הזדמנויות קרובים', 'No upcoming events or opportunities'), { padding: '0 26px' }));
+
+      const launches = this.launchVals(D.launches, now).slice(0, 4).map((l, i) => h('div', { key: i, 'data-w': 'launch', style: Object.assign({ height: 84, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '0 14px', borderRadius: 22, background: 'linear-gradient(180deg,rgba(40,62,104,.38),rgba(12,22,44,.6))', border: `1px solid ${l.border}`, boxShadow: l.shadow, minWidth: 0 }, enW('wlFootIn', 1800, 5900 + 80 * i)) },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+            h('span', { style: { padding: '2px 9px', borderRadius: 999, fontSize: 11, fontWeight: 500, color: l.statusColor, border: `1px solid ${l.statusColor}` } }, l.status),
+            h('span', { dir: 'ltr', style: { fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: MUTED } }, l.when)),
+          h('span', { style: { fontSize: 16, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, l.mission),
+          h('span', { style: { fontSize: 12, color: MUTED, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, l.vehicle + ' · ' + l.site)),
+        h('div', { dir: 'ltr', style: { display: 'flex', gap: 4, flex: 'none' } }, l.segs.map((s, j) => h('div', { key: j, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 34, padding: '5px 3px', borderRadius: 10, background: 'rgba(6,12,26,.7)', border: '1px solid rgba(150,190,240,.12)' } },
+          h('span', { style: { fontFamily: "'Lexend',sans-serif", fontSize: 17, fontWeight: 400, color: l.numColor, lineHeight: 1.1 } }, s.v), h('span', { style: { fontSize: 10, color: '#6f82a6' } }, s.u))))));
+      const footer = hidden('launches') ? h('div', { key: 'ft' }) : h('footer', { key: 'ft', 'data-w': 'launches', style: { display: 'grid', gridTemplateColumns: '150px repeat(4,minmax(0,1fr))', alignItems: 'center', gap: 16, padding: '12px 36px 16px', position: 'relative', zIndex: 2 } },
+        h('div', { style: Object.assign({ display: 'flex', flexDirection: 'column', gap: 3 }, enW('wlFootIn', 1800, 5800)) }, h('span', { style: { fontSize: 18, fontWeight: 700 } }, tr('שיגורים קרובים', 'Upcoming launches')), h('span', { style: { fontSize: 12, color: MUTED, whiteSpace: 'nowrap' } }, tr('שעון ישראל', 'Israel time') + ' · Launch Library')),
+        launches.length ? launches : quiet(tr('אין כרגע נתוני שיגורים', 'No launch data right now'), Object.assign({ gridColumn: '2 / -1' }, enW('wlFootIn', 1800, 5900))));
+
+      return stage([h(React.Fragment, { key: 'amb' }, this.ambient()), header, main, tickerBar, footer]);
+    }
+    /** The remote's agent's decoration layer (design.decor, app/src/custom-doc.js): a transparent page over the home wall,
+     *  under the full-screen moments and the urgent banner, that never takes a click. ?css=0 leaves it out. */
+    decorLayer() {
+      const L = this.state.live, d = L && L.design && L.design.decor;
+      if (!d || !d.html || CFG.noCss || !window.customDoc) return null;
+      const k = d.id + '|' + CFG.lang + '|' + (L.store || '');
+      if (this._decK !== k) { this._decK = k; this._decDoc = window.customDoc(d.html, { store: L.store, lang: CFG.lang, transparent: true }); }
+      return h('iframe', { key: d.id, srcDoc: this._decDoc, sandbox: 'allow-scripts', title: 'decorations', tabIndex: -1, 'data-w': 'decor',
+        style: { position: 'absolute', left: 0, top: 0, width: 1920, height: 1080, border: 0, zIndex: 30, background: 'transparent', colorScheme: 'normal', pointerEvents: 'none' } });
+    }
+    /** From the remote: the urgent banner on top, and brightness as a dimming layer over everything. */
+    liveLayers() {
+      const L = this.state.live, b = L ? Math.max(10, Math.min(100, Number(L.brightness) || 100)) : 100;
+      return h(React.Fragment, { key: 'live' },
+        L && L.urgent ? h('div', { key: 'urgent', style: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 70, padding: '19px 38px', background: '#b3261e', color: '#fff', fontSize: 36, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, boxShadow: '0 10px 40px rgba(0,0,0,.45)' } }, L.urgent) : null,
+        b < 100 ? h('div', { key: 'dim', style: { position: 'absolute', inset: 0, zIndex: 80, background: '#000', opacity: (1 - b / 100).toFixed(2), pointerEvents: 'none', transition: 'opacity .6s ease' } }) : null);
+    }
+  }
+
+  // ---- kiosk: full screen and the cursor ----------------------------------------------------------
+  // Full screen needs a user gesture (the corner button, a double-click or F), so it is never asked for on load. It also
+  // ends when the page reloads itself (a deploy, 04:00); F11 or a kiosk-mode browser keeps it. The button and the cursor
+  // show while the mouse moves and go after three seconds still.
+  const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  function toggleFullscreen() {
+    const d = document, el = d.documentElement, on = fsOn(), fn = on ? d.exitFullscreen || d.webkitExitFullscreen : el.requestFullscreen || el.webkitRequestFullscreen;
+    try { const r = fn && fn.call(on ? d : el); if (r && r.catch) r.catch((e) => console.warn('fullscreen refused', e)); } catch (e) { console.warn('fullscreen refused', e); }
+  }
+  if (!CFG.preview) document.head.appendChild(Object.assign(document.createElement('style'), { textContent: 'html{-webkit-user-select:none;user-select:none}html.idle,html.idle *{cursor:none!important}' }));
+  function ScreenControls() {
+    const [awake, setAwake] = useState(false), [full, setFull] = useState(fsOn());
+    useEffect(() => {
+      let idle = 0, last = '';
+      const wake = (e) => {
+        if (e.type === 'mousemove') { const at = e.screenX + ',' + e.screenY; if (at === last) return; last = at; }   // Chrome repeats a move that did not happen
+        setAwake(true); clearTimeout(idle); idle = setTimeout(() => setAwake(false), 3000);
+      };
+      const sync = () => setFull(fsOn());
+      const dbl = (e) => { if (!(e.target.closest && e.target.closest('button'))) toggleFullscreen(); };
+      const key = (e) => { if ((e.code === 'KeyF' || e.key === 'f' || e.key === 'F') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) toggleFullscreen(); };
+      const on = [['mousemove', wake], ['pointerdown', wake], ['dblclick', dbl], ['keydown', key]], fsEvents = ['fullscreenchange', 'webkitfullscreenchange'];
+      on.forEach(([t, f]) => addEventListener(t, f)); fsEvents.forEach((t) => document.addEventListener(t, sync));
+      return () => { clearTimeout(idle); on.forEach(([t, f]) => removeEventListener(t, f)); fsEvents.forEach((t) => document.removeEventListener(t, sync)); document.documentElement.classList.remove('idle'); };
+    }, []);
+    useEffect(() => { document.documentElement.classList.toggle('idle', !awake); }, [awake]);
+    const label = full ? tr('יציאה ממסך מלא', 'Exit full screen') : tr('מסך מלא', 'Full screen');
+    const z = 1 / (window.__pageScale ? window.__pageScale() : 1);   // its own size on a phone, where the browser zooms the page out (index.html)
+    return h('button', { type: 'button', dir: EN() ? 'ltr' : 'rtl', title: label, onClick: toggleFullscreen, style: { position: 'fixed', left: 24 * z, bottom: 24 * z, transform: z > 1 ? `scale(${z})` : undefined, transformOrigin: 'left bottom', zIndex: 100, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px 10px 16px', borderRadius: 999, background: 'rgba(14,26,50,.88)', border: '1px solid rgba(150,190,240,.3)', boxShadow: '0 10px 30px rgba(0,0,0,.45)', color: '#e6f1ff', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 16, fontWeight: 500, cursor: 'pointer', opacity: awake ? 1 : 0, pointerEvents: awake ? 'auto' : 'none', transition: 'opacity .5s ease' } },
+      h('svg', { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: '#9fdcff', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+        h('path', { d: full ? 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6' : 'M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6' })),
+      label);
+  }
+
+  /** A render crash leaves a dark screen and reloads the page: after half a minute, then at most every five minutes. */
+  class Guard extends React.Component {
+    constructor(p) { super(p); this.state = { crashed: false }; }
+    static getDerivedStateFromError() { return { crashed: true }; }
+    componentDidCatch(e) { console.error('wall crashed', e); if (!this.retry) this.retry = setInterval(() => reloadPage(5 * 60e3), 30e3); }
+    componentWillUnmount() { clearInterval(this.retry); }
+    render() {
+      return this.state.crashed ? h('div', { style: { position: 'fixed', inset: 0, background: '#040914', color: MUTED, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Heebo,system-ui,sans-serif', fontSize: 22 } }, tr('הצג יחזור בעוד רגע', 'Back in a moment')) : this.props.children;
+    }
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(h(Guard, null, h(Wall), CFG.preview ? null : h(ScreenControls)));
+})();
