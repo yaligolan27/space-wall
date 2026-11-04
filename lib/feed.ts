@@ -310,6 +310,6 @@ export async function buildFeed() {
     directorate,
     occasions,
     people: peopleOut,
-    promoVideo: '/assets/promo.mp4',
+    promoVideo: '/assets/ceremony/promo-v9-1080.mp4',   // the promo video (since 2026-11-04 the final V9 cut, 4:15)
   };
 }

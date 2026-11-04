@@ -6,7 +6,7 @@
 //   15 s     the seal around the emblem counts 10…1
 //   25 s     a blade of light cuts the ribbon; the locks release and the doors part onto space: the sun rising over the
 //            Earth's limb, "a new era", and a dive toward Israel's lights into a white flash
-//   40.8 s   the promo video (the remote's choice, else /assets/promo.mp4), full screen, with its sound
+//   40.8 s   the promo video (the remote's choice, else /assets/ceremony/promo-v9-1080.mp4), full screen, with its sound
 //   its end  the Earth pulls back from over Israel, "welcome", and comes to rest where the wall's emblem globe is as the
 //            home wall assembles around it (wall.js: onWake, then onDone)
 // Made for the lobby's video wall (nine TVs fed one 1920×1080 picture): every word fits one TV's width.
@@ -289,7 +289,7 @@
   // ---- the video, fetched whole by the standby screen, so the ceremony plays it from memory (a slow or busy network
   // can't stall it mid-film). One at a time: { src, url (an object URL once all of it is here), ctl, taken }.
   let VID = null;
-  const vidSrc = (video) => video || '/assets/promo.mp4';
+  const vidSrc = (video) => video || '/assets/ceremony/promo-v9-1080.mp4';
   const dropVideo = () => { if (!VID) return; try { VID.ctl.abort(); } catch (e) {} if (VID.url) URL.revokeObjectURL(VID.url); VID = null; };
   function fetchVideo(video) {
     const src = vidSrc(video);
