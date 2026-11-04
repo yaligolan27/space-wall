@@ -72,3 +72,8 @@ a{color:#9fdcff;text-decoration:none}a:hover{color:#e6f1ff}
 /* occasions (overlays.js OccasionMoment): a holiday's glyphs float up; a day of space sends a craft across */
 @keyframes occFloat{0%{transform:translateY(0) rotate(0);opacity:0}10%{opacity:.55}85%{opacity:.4}100%{transform:translateY(-1300px) rotate(var(--r));opacity:0}}
 @keyframes occCross{from{transform:translate(0,0) rotate(-12deg)}to{transform:translate(2200px,-760px) rotate(-12deg)}}
+/* the ribbon-cutting opening (ceremony.js; its picture is 3D, ceremony3d.js): the standby screen */
+@keyframes cerIn{from{opacity:0}to{opacity:1}}
+@keyframes cerOut{to{opacity:0}}
+@keyframes cerRise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes cerFloat{from{transform:translateY(-6px)}to{transform:translateY(6px)}}

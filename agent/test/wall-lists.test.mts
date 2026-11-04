@@ -22,7 +22,9 @@ check('a birthday outside the horizon is none', nextYearly('05-01', today, 10) =
 
 // ---- a personal event's window
 const w0 = lifeWindow({ event_date: '2026-10-20' });
-check('default window: 10 days before to 3 after', w0.from === '2026-10-10' && w0.until === '2026-10-23', JSON.stringify(w0));
+check('default window: 10 days before to the end of its day', w0.from === '2026-10-10' && w0.until === '2026-10-20', JSON.stringify(w0));
+check('an older row with show_until 10 days after still goes at the end of its day', lifeWindow({ event_date: '2026-10-20', show_until: '2026-10-30' }).until === '2026-10-20');
+check('a moment added late (show_from after its day) stays to the end of that day', lifeWindow({ event_date: '2026-10-20', show_from: '2026-10-22' }).until === '2026-10-22');
 const w1 = lifeWindow({ event_date: '2027-03-15', show_from: '2026-10-01', show_until: '2027-03-25' });
 check('a start far ahead of the day is held to 60 days before it', w1.from === '2027-01-14', w1.from);
 check('greeted on the day and two days after', greetsToday({ celebrate: true, on: '2026-10-05' }, today) && !greetsToday({ celebrate: true, on: '2026-10-04' }, today)
@@ -38,7 +40,8 @@ const rows = [
   life('l2', dana, today),                                   // entered twice
   life('l3', avi, addDays(today, 3)),
   life('l4', gone, today), life('l5', off, today),           // left, or asked to stay off the wall
-  life('l6', null, addDays(today, -2), { name: 'אורחת' }),    // someone outside the list
+  life('l6', null, today, { name: 'אורחת' }),                 // someone outside the list
+  life('l9', avi, addDays(today, -1)),                       // yesterday's: gone at midnight
   life('l7', avi, addDays(today, 30)),                       // not yet in its window
   life('l8', person('p5', 'יוסי'), addDays(today, 1), { type: 'birthday', label: 'יום הולדת' }),
 ];
@@ -50,11 +53,14 @@ check('the same moment twice shows once', P.doubles.length === 1 && P.doubles[0]
 check('people who left or asked to stay off are not shown', !refs.includes('l4') && !refs.includes('l5'));
 check('a name outside the list is shown', refs.includes('l6'));
 check('a moment before its window is not shown', !refs.includes('l7'));
+check("yesterday's moment is gone", !refs.includes('l9') && !P.waiting.some(c => c.ref.kind === 'life' && c.ref.id === 'l9'));
+const Py = peopleTiles([], [{ id: 'p7', display_name: 'גל', rank: '', unit: '', photo_url: null, birthday: '1990-' + addDays(today, -1).slice(5) }], today, cfg);
+check("yesterday's birthday is gone", Py.shown.length === 0 && Py.waiting.length === 0);
 check("a birthday typed as a moment stands for the list's birthday", refs.includes('l8') && !refs.includes('b:p5'), refs.join(','));
 check("a birthday from the list is shown with its person", refs.includes('b:p6') && P.shown.find(c => c.ref.kind === 'bday')!.name === 'סרן שרה');
 check("today's come first", refs[0] === 'l1' || refs[0] === 'b:p6', refs.join(','));
-check('a tile stays until its window ends', P.shown.find(c => c.ref.kind === 'life' && c.ref.id === 'l3')!.until === addDays(today, 13));
-check("a birthday's tile stays three days after it", P.shown.find(c => c.ref.kind === 'bday')!.until === addDays(today, 3));
+check('a tile stays to the end of its day', P.shown.find(c => c.ref.kind === 'life' && c.ref.id === 'l3')!.until === addDays(today, 3));
+check("a birthday's tile stays to the end of its day", P.shown.find(c => c.ref.kind === 'bday')!.until === today);
 const many = Array.from({ length: PEOPLE_TILES + 2 }, (_, i) => life('m' + i, person('q' + i, 'אדם ' + i), addDays(today, i), { show_from: addDays(today, -1) }));
 const M = peopleTiles(many, [], today, cfg);
 check(`the panel shows ${PEOPLE_TILES}, the rest wait for room`, M.shown.length === PEOPLE_TILES && M.waiting.length === 2 && M.waiting.every(c => c.sort > M.shown[PEOPLE_TILES - 1].sort));
@@ -72,9 +78,12 @@ const evs = [
   ev('far', addDays(today, 9), '10:00', addDays(today, 9), '11:00'),
 ];
 const E = eventTiles(evs, now, today, cfg);
-check('an event that ended is gone', !E.shown.concat(E.waiting).some(e => e.id === 'over'));
+check('an event that ended today stays until midnight', E.shown.concat(E.waiting).some(e => e.id === 'over'));
+const yest = [ev('yest', addDays(today, -1), '20:00', addDays(today, -1), '22:00'), ev('allday', addDays(today, -1), '00:00', today, '00:00')];
+check("yesterday's events are gone at midnight", eventTiles(yest, now, today, cfg).shown.length === 0
+  && eventTiles(yest, Date.parse(ilToIso(today, '00:00')) - 60e3, addDays(today, -1), cfg).shown.length === 2);
 check('an event of several days shows while it runs', E.shown.some(e => e.id === 'days'));
-check(`the panel shows ${EVENT_ROWS}, the rest wait`, E.shown.length === EVENT_ROWS && E.waiting.map(e => e.id).join() === 'e3', E.waiting.map(e => e.id).join());
+check(`the panel shows ${EVENT_ROWS}, the rest wait`, E.shown.length === EVENT_ROWS && E.waiting.map(e => e.id).join() === 'e2,e3', E.waiting.map(e => e.id).join());
 check('beyond the week is not on the panel', !E.shown.concat(E.waiting).some(e => e.id === 'far'));
 
 // ---- an event's days and hours

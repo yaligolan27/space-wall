@@ -3,10 +3,11 @@
 //   newsletter part  (issue, summary, featured, news, catColor, catImage, ticker)
 //                    ← latest row in newsletter_issues; empty until the first import (the bundled sample lends only
 //                      the category colours and images, which are style, not content)
-//   directorate      ← directorate_events in the next 7 days that have not ended (the panel's first four); the year's
+//   directorate      ← directorate_events in the next 7 days, and today's that ended (until midnight; the panel's first four); the year's
 //                      occasions are among them (lib/occasions.ts), dressed by their kind (`occ`)
 //   occasions        ← the occasions the wall greets today: a card under the emblem and a full screen (app/src/wall.js)
-//   people           ← life_events in their window + birthdays computed from people, next 10 days (and 3 back);
+//   people           ← life_events in their window + birthdays computed from people, next 10 days; each one
+//                      stays to the end of its day and goes at midnight;
 //                      only people on the wall (on_wall) and birthdays they agreed to (show_birthday); a life event
 //                      can also name someone outside the people list. The panel's six nearest.
 //   ticker           ← newsletter ticker + industry_events, one item per event, by date, nothing that has ended
@@ -20,8 +21,8 @@ import { endDate } from './newsletter.js';
 import { occasionGreets, occasionLook } from './occasions.js';
 import sample from '../app/data/feed.json' with { type: 'json' };
 
-export type Settings = { peopleHorizonDays: number; peopleBackDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
-const DEFAULTS: Settings = { peopleHorizonDays: 10, peopleBackDays: 3, directorateDays: 7, eventsHorizonDays: 120, launchCount: 4 };
+export type Settings = { peopleHorizonDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
+const DEFAULTS: Settings = { peopleHorizonDays: 10, directorateDays: 7, eventsHorizonDays: 120, launchCount: 4 };
 /** Tiles in the wall's people panel and rows in its events panel. */
 export const PEOPLE_TILES = 6, EVENT_ROWS = 4;
 /** settings.feed over the defaults. Production's row calls the people horizon lifeEventsHorizonDays. */
@@ -68,11 +69,14 @@ export function lifeCard(e: any, p: any, today: string) {
 }
 /** How far ahead of its day a life event can start showing. */
 export const LIFE_LEAD_MAX = 60;
-/** A life event is on the wall from show_from (default 10 days before) until show_until (default 3 days after), and
- *  never more than LIFE_LEAD_MAX days ahead of its day (a show_from left from a date moved a year on). */
+/** A life event is on the wall from show_from (default 10 days before), never more than LIFE_LEAD_MAX days ahead of its
+ *  day (a show_from left from a date moved a year on), until the end of its day: it goes by itself at midnight (Israel
+ *  time). One whose show_from is after its day (added late) stays to the end of that day. A show_until can only end it
+ *  sooner; older rows carry a later one (3 or 10 days after), which no longer keeps them up. */
 export function lifeWindow(e: any): { from: string; until: string } {
-  const from = e.show_from || addDays(e.event_date, -10), lead = addDays(e.event_date, -LIFE_LEAD_MAX);
-  return { from: from < lead ? lead : from, until: e.show_until || addDays(e.event_date, 3) };
+  const from0 = e.show_from || addDays(e.event_date, -10), lead = addDays(e.event_date, -LIFE_LEAD_MAX), from = from0 < lead ? lead : from0;
+  const last = from > e.event_date ? from : e.event_date;
+  return { from, until: e.show_until && e.show_until < last ? e.show_until : last };
 }
 export function lifeShown(e: any, today: string): boolean {
   const w = lifeWindow(e);
@@ -82,8 +86,10 @@ export function birthdayCard(p: any, date: string, today: string) {
   const L = LIFE.birthday;
   return { type: L.type, color: L.color, name: displayName(p), line: L.line(p, whenWord(date, today), dayDiff(today, date)), date: shortDate(date), on: date, photo: p.photo_url || null, celebrate: true };
 }
-/** The wall greets a tile on the full screen (every half hour) from its day to two days after it (app/src/wall.js). */
-export const greetsToday = (c: { celebrate: boolean; on: string }, today: string) => c.celebrate && c.on <= today && today <= addDays(c.on, 2);
+/** The wall greets a tile on the full screen (every half hour) from its day while it is on the wall, at most two days
+ *  (app/src/wall.js). */
+export const greetsToday = (c: { celebrate: boolean; on: string; until?: string }, today: string) => c.celebrate && c.on <= today && today <= addDays(c.on, 2)
+  && (!c.until || today <= c.until);
 
 // ---- the people and events panels -------------------------------------------------------------------------
 type Db = ReturnType<typeof db>;
@@ -97,16 +103,18 @@ export const lifeQuery = (s: Db, today: string) => s.from('life_events').select(
 /** The people whose birthdays the wall celebrates. */
 export const rosterQuery = (s: Db) => s.from('people').select('id,display_name,rank,unit,photo_url,birthday')
   .eq('active', true).eq('on_wall', true).eq('show_birthday', true).not('birthday', 'is', null);
-/** Directorate events not over yet (one without an end time lasts an hour) that start in the next two months. */
+/** Directorate events that end today or later (one without an end time lasts an hour) and start in the next two months:
+ *  one that ended today stays on the wall until midnight (eventGone). */
 export const eventsQuery = (s: Db, now: Date, today: string) => s.from('directorate_events').select('*').eq('approved', true)
-  .or(`ends_at.gt.${now.toISOString()},and(ends_at.is.null,starts_at.gt.${new Date(now.getTime() - 3600e3).toISOString()})`)
+  .or(`ends_at.gt.${ilToIso(today, '00:00')},and(ends_at.is.null,starts_at.gt.${new Date(Date.parse(ilToIso(today, '00:00')) - 3600e3).toISOString()})`)
   .lt('starts_at', ilToIso(addDays(today, 61), '00:00')).order('starts_at');
 
 /** The people panel: life events in their window and birthdays from the list, nearest first (today's before
  *  tomorrow's). `shown` fill the panel's tiles and `waiting` are due too but don't fit; `doubles` are life events
  *  entered twice (same person, wording and day), which show once. */
 export function peopleTiles(life: any[], roster: any[], today: string, cfg: Settings) {
-  const from = addDays(today, -cfg.peopleBackDays), until = addDays(today, cfg.peopleHorizonDays);
+  // Nothing from before today: a moment or a birthday stays to the end of its day and goes at midnight.
+  const from = today, until = addDays(today, cfg.peopleHorizonDays);
   const all: PeopleTile[] = [], seen = new Set<string>(), doubles: string[] = [];
   for (const e of life) {
     // Someone outside the people list carries just a name (life_events.name): no rank or unit, a photo only if uploaded.
@@ -118,13 +126,13 @@ export function peopleTiles(life: any[], roster: any[], today: string, cfg: Sett
     const key = `${e.type}|${p.display_name}|${e.event_date}`, same = key + '|' + (e.label || '');
     if (seen.has(same)) { doubles.push(e.id); continue; }
     seen.add(key); seen.add(same);
-    all.push({ ...lifeCard(e, p, today), sort: e.event_date, until: windowed ? lifeWindow(e).until : addDays(e.event_date, cfg.peopleBackDays),
+    all.push({ ...lifeCard(e, p, today), sort: e.event_date, until: windowed ? lifeWindow(e).until : e.event_date,
       ref: { kind: 'life', id: e.id, personId: e.person_id || null } });
   }
   for (const p of roster) {
-    const next = nextYearly(p.birthday.slice(5), from, cfg.peopleHorizonDays + cfg.peopleBackDays);
+    const next = nextYearly(p.birthday.slice(5), from, cfg.peopleHorizonDays);
     if (!next || seen.has(`birthday|${p.display_name}|${next}`)) continue;
-    all.push({ ...birthdayCard(p, next, today), sort: next, until: addDays(next, cfg.peopleBackDays), ref: { kind: 'bday', personId: p.id } });
+    all.push({ ...birthdayCard(p, next, today), sort: next, until: next, ref: { kind: 'bday', personId: p.id } });
   }
   all.sort((a, b) => Math.abs(dayDiff(today, a.sort)) - Math.abs(dayDiff(today, b.sort)) || a.sort.localeCompare(b.sort));
   return { shown: all.slice(0, PEOPLE_TILES), waiting: all.slice(PEOPLE_TILES), doubles };
@@ -132,11 +140,14 @@ export function peopleTiles(life: any[], roster: any[], today: string, cfg: Sett
 
 /** When a directorate event ends: its end time, else an hour after it starts. */
 export const eventEnd = (e: any) => (e.ends_at ? Date.parse(e.ends_at) : Date.parse(e.starts_at) + 3600e3);
-/** The events panel: events of the next `directorateDays` days that haven't ended (within their own show_from and
- *  show_until, when set). `shown` are the panel's rows and `waiting` don't fit. */
+/** When an event leaves the wall: the midnight (Israel time) after the day it ends. An all-day one ends at midnight
+ *  already, so it goes then. */
+export const eventGone = (e: any) => Date.parse(ilToIso(addDays(isoDateIL(new Date(eventEnd(e) - 1)), 1), '00:00'));
+/** The events panel: events of the next `directorateDays` days, and the ones that ended today (until midnight, within
+ *  their own show_from and show_until, when set). `shown` are the panel's rows and `waiting` don't fit. */
 export function eventTiles(rows: any[], t: number, today: string, cfg: Settings) {
   const until = Date.parse(ilToIso(addDays(today, cfg.directorateDays + 1), '00:00'));
-  const due = rows.filter(e => eventEnd(e) > t && Date.parse(e.starts_at) < until && (!e.show_from || e.show_from <= today) && (!e.show_until || e.show_until >= today));
+  const due = rows.filter(e => eventGone(e) > t && Date.parse(e.starts_at) < until && (!e.show_from || e.show_from <= today) && (!e.show_until || e.show_until >= today));
   return { shown: due.slice(0, EVENT_ROWS), waiting: due.slice(EVENT_ROWS) };
 }
 
@@ -241,7 +252,7 @@ export async function buildFeed() {
   const directorate = eventTiles(dirRows, t, today, cfg).shown.map(e => {
     const d = new Date(e.starts_at), tm = timeIL(d), { iso, last } = days(e), occ = occasionLook(e);
     return { day: iso.slice(8, 10), dow: dowOf(iso), mon: MON[Number(iso.slice(5, 7)) - 1], time: tm !== '00:00' ? tm : last > iso ? range(iso, last) : '', name: e.title, place: e.place || '',
-      start: d.toISOString(), end: new Date(eventEnd(e)).toISOString(), img: e.photo_url || null, ...(occ ? { occ } : {}) };
+      start: d.toISOString(), end: new Date(eventEnd(e)).toISOString(), gone: new Date(eventGone(e)).toISOString(), img: e.photo_url || null, ...(occ ? { occ } : {}) };
   });
   // ---- today's occasions: the ones the office kept (edited or not), each on the days the wall greets it
   const occasions = dirRows.flatMap(e => {

@@ -162,6 +162,25 @@ export function momentsOf(design: Row | null | undefined): Moments {
 }
 const withMoments = <T extends Row>(design: T): T & { moments: Moments } => ({ ...design, moments: momentsOf(design) });
 
+// ---- the ribbon-cutting opening (app/src/ceremony.js, the remote's "טקס גזירת הסרט") --------------------------------
+/** design.ceremony: the remote's choices for it. video: a link to the video it plays (none: the promo video); secs: that
+ *  video's length, so the server knows how long the ceremony runs (the wall ends it by itself when the video ends);
+ *  texts: its words in Hebrew (a key left out: the default; an optional line left empty: not shown). */
+export const CER_TEXTS = ['eyebrow', 'title', 'line', 'honor', 'tag', 'tagLine', 'welcome', 'welcomeLine', 'soon'] as const;
+const CER_INTRO_S = 40.8, CER_CLOSE_S = 11.1, CER_PROMO_S = 107, CER_UNKNOWN_S = 15 * 60;
+const CER_STANDBY_MS = 8 * 3600e3;   // the standby screen waits for "start"; a forgotten one still ends
+const CER_LEAD_MS = 3000;            // "start" from the standby screen: every wall begins on the same second, this far ahead
+const CER_LEAD_COLD_MS = 10000;      // …and without it (walls ask every 8 s; one that sees it late joins it where it is)
+export const CeremonyPatch = z.object({
+  video: z.string().trim().url().max(800).refine(u => /^https:\/\//.test(u), 'קישור שמתחיל ב-https').nullable(),
+  secs: z.number().min(2).max(3600).nullable(),
+  texts: z.object(Object.fromEntries(CER_TEXTS.map(k => [k, z.string().trim().max(60, 'עד 60 תווים')])) as Record<typeof CER_TEXTS[number], z.ZodString>).partial().strict(),
+}).partial().strict();
+export function ceremonyOf(design: Row | null | undefined) {
+  const c: Row = design && typeof design.ceremony === 'object' && design.ceremony || {}, video = typeof c.video === 'string' ? c.video : '';
+  return { video, secs: Number(c.secs) > 0 ? Number(c.secs) : video ? 0 : CER_PROMO_S, texts: (c.texts && typeof c.texts === 'object' ? c.texts : {}) as Row };
+}
+
 // ---- state -----------------------------------------------------------------------------------------
 type Row = Record<string, any>;
 type UndoOp = { op: 'state'; patch: Row } | { op: 'del'; table: string; id: string } | { op: 'put'; table: string; row: Row };
@@ -582,7 +601,43 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const patch: Row = tk.auto ? { dismissed: withDismissed(st.dismissed, tk.id) }
       : tk.kind === 'welcome' && !tk.leaving ? { takeover: { ...tk, leaving: now.toISOString(), until: new Date(now.getTime() + WELCOME_LEAVE_MS).toISOString() } }
       : { takeover: null };
-    await record(who, tk.kind === 'welcome' || tk.kind === 'memorial' ? 'כניסה לצג הבית' : 'חזרה לתצוגה רגילה', [await patchState(patch, who)]);
+    await record(who, tk.kind === 'welcome' || tk.kind === 'memorial' ? 'כניסה לצג הבית' : tk.kind === 'ceremony' ? 'טקס גזירת הסרט: סיום' : 'חזרה לתצוגה רגילה', [await patchState(patch, who)]);
+  },
+  /** The ribbon-cutting opening (app/src/ceremony.js). standby: its waiting screen, up until "start" (a click on it lets
+   *  the lobby computer play sound); go: the sequence on every wall from the same second (`at`, a little ahead), which
+   *  ends on the home wall by itself; endTakeover takes a playing one straight to its closing. */
+  async ceremony(a, who) {
+    const { op } = z.object({ op: z.enum(['standby', 'go']) }).parse(a);
+    const now = Date.now(), st = await wallState(), c = ceremonyOf(st.design), base = { kind: 'ceremony', video: c.video || null, texts: c.texts };
+    const cur = st.takeover && Date.parse(st.takeover.until) > now && st.takeover.kind === 'ceremony' ? st.takeover : null;
+    if (op === 'standby') return record(who, 'טקס גזירת הסרט: מסך המתנה', [await patchState({ takeover: { ...base, id: 'rt:' + now, phase: 'standby',
+      since: new Date(now).toISOString(), until: new Date(now + CER_STANDBY_MS).toISOString() } }, who)]);
+    // From a standby screen every wall has seen (it asks every 1.5 s), a short lead; else long enough for an 8 s poll.
+    const waiting = cur && cur.phase === 'standby', warm = waiting && now - Date.parse(cur.since) > 10e3;
+    const at = now + (warm ? CER_LEAD_MS : CER_LEAD_COLD_MS), secs = c.secs || CER_UNKNOWN_S;
+    await record(who, 'טקס גזירת הסרט: התחלה', [await patchState({ takeover: { ...base, id: waiting ? cur.id : 'rt:' + now, phase: 'go', at: new Date(at).toISOString(),
+      until: new Date(at + (CER_INTRO_S + secs + CER_CLOSE_S + 30) * 1e3).toISOString() } }, who)]);
+    return { at: new Date(at).toISOString() };
+  },
+  /** The ceremony's settings (design.ceremony): only what is sent changes; the words are sent whole; video null: back to
+   *  the promo video. */
+  async ceremonySet(a, who) {
+    const { patch, label } = z.object({ patch: CeremonyPatch, label: z.string().trim().min(1).max(80) }).parse(a);
+    const cur = (await wallState()).design || {}, next: Row = { ...(cur.ceremony || {}) };
+    if (patch.video !== undefined) { if (patch.video) next.video = patch.video; else delete next.video; delete next.secs; }
+    if (patch.secs !== undefined) { if (patch.secs) next.secs = Math.round(patch.secs * 10) / 10; else delete next.secs; }
+    if (patch.texts) next.texts = patch.texts;
+    await record(who, 'טקס גזירת הסרט: ' + label, [await patchState({ design: { ...cur, ceremony: next } }, who)]);
+  },
+  /** Where the remote uploads a new ceremony video: straight to the storage (a video is too big to pass through here),
+   *  by a signed link; returns it and the video's public address. */
+  async ceremonyUpload(a) {
+    const { size, type } = z.object({ size: z.number().int().min(1).max(50 * 1024 * 1024, 'הקובץ גדול מ-50MB'), type: z.enum(['video/mp4', 'video/webm'], { message: 'קובץ וידאו MP4' }) }).parse(a);
+    void size;
+    const path = `videos/${randomUUID()}.${type === 'video/webm' ? 'webm' : 'mp4'}`;
+    const { data, error } = await db().storage.from('wall-photos').createSignedUploadUrl(path);
+    if (error || !data) throw new Error('לא הצלחתי להכין את ההעלאה: ' + (error?.message || ''));
+    return { upload: data.signedUrl, url: db().storage.from('wall-photos').getPublicUrl(path).data.publicUrl };
   },
   /** Yizkor on a memorial day: show: the full Yizkor screen now (and Yizkor back on, if it was ended); on: false ends
    *  Yizkor on the wall for the rest of the period (with the Yizkor screen, if it is up), on: true brings it back. */
@@ -612,10 +667,10 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     assertRealDate(f.date); if (f.showFrom) assertRealDate(f.showFrom);
     const { p, personId, name } = await lifeWho(f.personId, f.name, f.free), kind = classifyLife(f.type);
     if (f.photo === 'upload' && !f.photoSrc) throw new Error('בחרו תמונה להעלאה');
-    // On the wall from showFrom (at most LIFE_LEAD_MAX days ahead) for ten days past the day, or past showFrom when it
-    // starts after the day (a moment added late still shows).
+    // On the wall from showFrom (at most LIFE_LEAD_MAX days ahead) to the end of its day, or of showFrom's day when it
+    // starts after the day (a moment added late still shows); it goes by itself at midnight (lib/feed.ts lifeWindow).
     const lead = addDays(f.date, -LIFE_LEAD_MAX), from = !f.showFrom ? f.date : f.showFrom < lead ? lead : f.showFrom;
-    const row: Row = { person_id: personId, name, type: kind, label: f.type, event_date: f.date, show_from: from, show_until: addDays(from > f.date ? from : f.date, 10),
+    const row: Row = { person_id: personId, name, type: kind, label: f.type, event_date: f.date, show_from: from, show_until: from > f.date ? from : f.date,
       text_he: f.note || null, photo_mode: f.photo, photo_url: f.photo === 'upload' ? f.photoSrc : null };
     const undo: (UndoOp | null)[] = [];
     let saved: Row;
@@ -865,8 +920,8 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
   },
   async resetDesign(_a, who) {
     // The news items added from the remote and the schedules live in design too (design.news, design.moments), but they aren't the design.
-    const { news, moments, scenes, decor, shortcuts } = (await wallState()).design || {};
-    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: { ...(news?.length ? { news } : {}), ...(moments ? { moments } : {}),
+    const { news, moments, scenes, decor, shortcuts, ceremony } = (await wallState()).design || {};
+    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: { ...(news?.length ? { news } : {}), ...(moments ? { moments } : {}), ...(ceremony ? { ceremony } : {}),
       ...(scenes?.length ? { scenes } : {}), ...(decor ? { decor } : {}), ...(shortcuts?.length ? { shortcuts } : {}) } }, who)]);
   },
   /** A news item from the remote (the agent's suggestion, after the operator approved it): first in the newsletter

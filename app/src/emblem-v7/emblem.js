@@ -301,6 +301,7 @@ void main(){ vec3 n = normalize(vL); float lat = asin(clamp(n.y, -1.0, 1.0)), lo
       })() : null;
 
       // LEO traffic — thousands of objects on inertial orbits (Starlink-like 53°, sun-synchronous 97.5°, equatorial, random); glints, Earth shadow
+      let swarm = null;
       if (FULL) {
         const N = 4200, aO = new Float32Array(N * 4), aM = new Float32Array(N * 2);
         for (let i = 0; i < N; i++) {
@@ -312,7 +313,7 @@ void main(){ vec3 n = normalize(vL); float lat = asin(clamp(n.y, -1.0, 1.0)), lo
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
         g.setAttribute('aOrb', new THREE.BufferAttribute(aO, 4)); g.setAttribute('aMisc', new THREE.BufferAttribute(aM, 2));
-        const swarm = new THREE.Points(g, additive(new THREE.ShaderMaterial({ uniforms: { uT: U.time, uSize: U.size, uReveal: U.reveal, uSun: U.sun },
+        swarm = new THREE.Points(g, additive(new THREE.ShaderMaterial({ uniforms: { uT: U.time, uSize: U.size, uReveal: U.reveal, uSun: U.sun },
           vertexShader: `attribute vec4 aOrb; attribute vec2 aMisc; uniform float uT, uSize, uReveal; uniform vec3 uSun; varying float vBr;
 void main(){ float an = aOrb.w + uT * aMisc.x; vec3 p = vec3(cos(an), 0.0, sin(an)) * aOrb.x;
  float ci = cos(aOrb.y), si = sin(aOrb.y); p = vec3(p.x, -p.z * si, p.z * ci);
@@ -417,6 +418,7 @@ void main(){ float an = aOrb.w + uT * aMisc.x; vec3 p = vec3(cos(an), 0.0, sin(a
       const beamGeo = new THREE.BufferGeometry(); beamGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
       const beam = new THREE.Line(beamGeo, additive(new THREE.LineBasicMaterial({ color: hdr(0xa6e2ff, 1.6), opacity: 0 }))); scene.add(beam);
       const packet = new THREE.Sprite(additive(new THREE.SpriteMaterial({ map: glowTex, color: hdr(0xdff4ff, 3), opacity: 0 }))); packet.scale.setScalar(0.06); scene.add(packet);
+      const LINES = false; beam.visible = packet.visible = false;
       let link = null, linkOp = 0, linkLast = null, nextLink = 0; const stN = new V3(), gCW = new V3();
 
       // ---------- Rocket (logo coordinates, R = 1) ----------
@@ -608,7 +610,8 @@ void main(){ float an = aOrb.w + uT * aMisc.x; vec3 p = vec3(cos(an), 0.0, sin(a
         ticks.rotation.z = t * 0.03; arcs.rotation.z = -t * 0.06; radar.material.uniforms.uAng.value = t * 0.7;
         if (textRing) textRing.rotation.z = -t * 0.012;
         if (sun) { const k = 0.88 + 0.12 * Math.sin(t * 0.45); sun.core.material.color.copy(sun.c0).multiplyScalar(k); sun.haze.material.opacity = 0.45 + 0.12 * Math.sin(t * 0.45 + 0.6); }
-        // orbits
+        // orbits (traffic="off": the Earth on its own, no LEO swarm; the logo's rings keep their four satellites)
+        const earthOnly = this.getAttribute('traffic') === 'off'; if (swarm) swarm.visible = !earthOnly;
         for (const o of orbits) {
           o.pivot.scale.setScalar(0.88 + 0.12 * ringIn);
           for (const s of o.sats) {
@@ -626,7 +629,7 @@ void main(){ float an = aOrb.w + uT * aMisc.x; vec3 p = vec3(cos(an), 0.0, sin(a
             s.trail.rotation.z = dir > 0 ? a - ORB.trailArc : a;
           }
         }
-        for (const x of xlinks) {
+        for (const x of (LINES ? xlinks : [])) {
           x.a.g.getWorldPosition(tmpA); x.b.g.getWorldPosition(tmpB); const dd = tmpA.distanceTo(tmpB);
           const op = (1 - MU.smoothstep(dd, 0.35, 0.9)) * 0.6 * (0.6 + 0.4 * Math.sin(t * 13 + x.seed));
           x.ln.material.opacity = op; if (op > 0.01) { x.ln.geometry.attributes.position.array.set([tmpA.x, tmpA.y, tmpA.z, tmpB.x, tmpB.y, tmpB.z]); x.ln.geometry.attributes.position.needsUpdate = true; }
@@ -643,19 +646,21 @@ void main(){ float an = aOrb.w + uT * aMisc.x; vec3 p = vec3(cos(an), 0.0, sin(a
         }
         spinG.getWorldPosition(gCW); stN.copy(stW).sub(gCW).normalize();
         const valid = (s, m) => { s.g.getWorldPosition(tmpB); if (tmpB.z < 0.15) return false; tmpA.subVectors(tmpB, stW); const L = tmpA.length(); return L < 2.1 && tmpA.dot(stN) / L > m; };
+        if (LINES) {
         if (link && (!facing || !valid(link, 0.16))) { link = null; nextLink = t + 1.2; }
         if (!link && facing && linkOp < 0.02 && t > nextLink) { let best = 9; for (const s of allSats) if (valid(s, 0.3)) { const dd = tmpB.distanceTo(stW); if (dd < best) { best = dd; link = s; } } if (link) linkLast = link; else nextLink = t + 0.5; }
         linkOp += ((link ? 0.55 : 0) - linkOp) * Math.min(1, dt * (link ? 2.5 : 6));
         const showL = linkLast && linkOp > 0.004; beam.visible = packet.visible = !!showL;
         if (showL) { linkLast.g.getWorldPosition(tmpB); beamGeo.attributes.position.array.set([stW.x, stW.y, stW.z, tmpB.x, tmpB.y, tmpB.z]); beamGeo.attributes.position.needsUpdate = true; packet.position.lerpVectors(stW, tmpB, (t * 0.9) % 1); }
         beam.material.opacity = linkOp * (0.75 + 0.25 * Math.sin(t * 9)); packet.material.opacity = Math.min(1, linkOp * 1.6);
+        }
         // life
         rocket.position.y = YC * (1 - sR) + 0.014 * Math.sin(t * 0.8) - 0.12 * (1 - rocketIn);
         if (this._sway) { camera.position.x = 0.45 * Math.sin(t * 0.11); camera.position.y = YC + 0.14 * Math.sin(t * 0.083); }
         else { camera.position.x = 0; camera.position.y = YC; }
         camera.lookAt(0, YC, 0);
         if (TH) { try { TH.frame(dt, t); } catch (e) { if (!this._thErr) { this._thErr = 1; console.error('emblem theatre', e); } } }
-        post.render();
+        if (!this._skipRender) post.render();
         if (++frames === 1) { this.ready = true; this.dispatchEvent(new Event('emblem-ready')); }
         if (wasPaused || frames === 1) { wasPaused = false; this.dispatchEvent(new Event('emblem-frame')); }
         if (this._noSched) return; if (document.hidden) setTimeout(() => loop(performance.now()), 250); else requestAnimationFrame(loop);

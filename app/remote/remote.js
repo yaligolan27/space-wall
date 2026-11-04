@@ -33,6 +33,26 @@
   const pad = (n) => String(n).padStart(2, '0');
   const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const mmss = (sec) => pad(Math.floor(sec / 60)) + ':' + pad(Math.floor(sec % 60));
+  // The ribbon-cutting opening's words (app/src/ceremony3d.js DEF, in Hebrew): key, label here, default, and whether the
+  // line can be left empty (then the wall doesn't show it).
+  const CER_TX = [['eyebrow', 'שורה עליונה', 'טקס חנוכת המשרדים החדשים', 1], ['title', 'כותרת', 'מנהלת החלל', 0], ['line', 'שורה מתחת לכותרת', 'הבית החדש במידטאון', 1],
+    ['honor', 'אורח הכבוד (מתחת לסרט)', 'במעמד ראש מפא״ת', 1], ['tag', 'כותרת אחרי שהדלתות נפתחות', 'עידן חדש', 0], ['tagLine', 'שורה מתחתיה', 'לחלל הישראלי', 1],
+    ['welcome', 'כותרת הסיום', 'ברוכים הבאים', 0], ['welcomeLine', 'שורה מתחת לכותרת הסיום', 'לבית החדש של מנהלת החלל', 1], ['soon', 'מסך ההמתנה', 'הטקס יתחיל בקרוב', 0]];
+  const CER_PROMO_SECS = 107;
+  /** A video's length in seconds (read from its metadata), or 0. */
+  const videoSecs = (src) => new Promise((res) => {
+    const v = document.createElement('video'); let done = false;
+    const end = (x) => { if (done) return; done = true; res(x); v.removeAttribute('src'); try { v.load(); } catch (e) {} };
+    v.preload = 'metadata'; v.muted = true; v.onloadedmetadata = () => end(isFinite(v.duration) ? v.duration : 0); v.onerror = () => end(0);
+    setTimeout(() => end(0), 20000); v.src = src;
+  });
+  /** A file PUT to a storage signed link (as the storage's own client sends it), with its progress (0..1). */
+  const putFile = (url, file, onp) => new Promise((res, rej) => {
+    const x = new XMLHttpRequest(); x.open('PUT', url);
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onp(e.loaded / e.total); };
+    x.onload = () => (x.status < 300 ? res() : rej(new Error('HTTP ' + x.status))); x.onerror = () => rej(new Error('אין חיבור'));
+    const fd = new FormData(); fd.append('cacheControl', '3600'); fd.append('', file); x.send(fd);
+  });
   const iso = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   const parse = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
   const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -57,6 +77,8 @@
 
   const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he', vw: false,
     emblem: 'v7', traffic: true, rate: 'normal', sats: 24, stack: 8, quality: 'high' };
+  /** Which emblem the wall shows: 'v2' the previous one, 'earth' the new globe on its own, 'v7' the new globe with traffic. */
+  const emblemMode = (d) => (d.emblem === 'v2' ? 'v2' : d.traffic === false ? 'earth' : 'v7');
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
   // The schedules screen ("תזמונים"): what comes up on the whole wall by itself (design.moments, lib/remote-ops.ts MOMENTS0).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
@@ -67,12 +89,13 @@
   const SPEC = [
     { title: 'הדגמה', controls: [{ key: 'demo', label: 'הדגמת רגע (בתצוגה המקדימה בלבד)', kind: 'select', options: DEMO_OPTS }] },
     { title: 'לוגו', controls: [
-      { key: 'emblem', label: 'הלוגו במרכז הצג', kind: 'seg', options: [['v7', 'גלובוס עם שיגורים'], ['v2', 'הלוגו הקודם']] },
-      // the new globe's launches and satellites (app/src/emblem-v7/), shown only while it is the one on the wall
-      { key: 'traffic', label: 'שיגורים ולוויינים', kind: 'toggle', v7: true },
-      { key: 'rate', label: 'קצב שיגורים', kind: 'seg', options: [['off', 'בלי'], ['low', 'נמוך'], ['normal', 'רגיל'], ['high', 'גבוה']], v7: true },
-      { key: 'sats', label: 'מספר לוויינים מרבי במסלול', kind: 'slider', min: 4, max: 48, unit: '', v7: true },
-      { key: 'stack', label: 'לוויינים בכל שיגור', kind: 'slider', min: 2, max: 8, unit: '', v7: true },
+      // Three ways: the new globe with its launches and satellites (design emblem v7, traffic on), the same new globe on
+      // its own, no launch sites, launches or extra satellites; the logo's four stay (v7, traffic off), or the previous emblem (v2). See emblemMode.
+      { key: 'emblemMode', label: 'הלוגו במרכז הצג', kind: 'seg', options: [['v7', 'גלובוס עם שיגורים'], ['earth', 'כדור הארץ בלבד'], ['v2', 'הלוגו הקודם']] },
+      // the new globe's launches and satellites (app/src/emblem-v7/), shown only while they are on the wall
+      { key: 'rate', label: 'קצב שיגורים', kind: 'seg', options: [['off', 'בלי'], ['low', 'נמוך'], ['normal', 'רגיל'], ['high', 'גבוה']], v7: true, traffic: true },
+      { key: 'sats', label: 'מספר לוויינים מרבי במסלול', kind: 'slider', min: 4, max: 48, unit: '', v7: true, traffic: true },
+      { key: 'stack', label: 'לוויינים בכל שיגור', kind: 'slider', min: 2, max: 8, unit: '', v7: true, traffic: true },
       { key: 'quality', label: 'איכות הציור', kind: 'seg', options: [['high', 'רגילה'], ['ultra', 'גבוהה (כבד יותר)']], v7: true },
       { key: 'globe', label: 'זמן לסיבוב גלובוס', kind: 'slider', min: 20, max: 240, unit: 's' },
       { key: 'globeStyle', label: 'סגנון הגלובוס', kind: 'seg', options: [['holo', 'הולוגרפי'], ['real', 'ריאליסטי']] },
@@ -361,7 +384,7 @@
         messages: [], agentBusy: false, agentAt: 0,
         keyDraft: '', keyBusy: false, keyErr: '', keyOpen: false,
       };
-      this.fileRef = React.createRef(); this.photoRef = React.createRef(); this.scrollRef = React.createRef(); this.previewRef = React.createRef();
+      this.fileRef = React.createRef(); this.photoRef = React.createRef(); this.cerFileRef = React.createRef(); this.scrollRef = React.createRef(); this.previewRef = React.createRef();
       this.personPhotoRef = React.createRef(); this.importRef = React.createRef(); this.panelRef = React.createRef(); this.eventPhotoRef = React.createRef(); this.photosRef = React.createRef();
       this.timers = {};
     }
@@ -532,6 +555,7 @@
       if (tk.kind === 'stream') return 'שידור חי' + (tk.title ? ' · ' + tk.title : '');
       if (tk.kind === 'news') return 'חדשות החלל';
       if (tk.kind === 'scene') return 'מסך: ' + (tk.name || '');
+      if (tk.kind === 'ceremony') return 'טקס גזירת הסרט · ' + (tk.phase === 'go' ? 'הפתיחה רצה' : 'מסך המתנה');
       return tpl(tk.type || (tk.person && tk.person.type)).head + (tk.person ? ' · ' + tk.person.name : '');
     }
 
@@ -560,6 +584,43 @@
     memorial(a, label) { this.run('memorial', a, label).catch(() => {}); }
     showWelcome(guest) { this.run('welcome', { guest: guest || undefined }, 'מסך ברוכים הבאים על הצג').catch(() => {}); }
     showNews() { this.run('showNews', {}, 'חדשות החלל על כל המסך').catch(() => {}); }
+    // ---- the ribbon-cutting opening (lib/remote-ops.ts ceremony, ceremonySet, ceremonyUpload) ----
+    cer(op) { this.run('ceremony', { op }, op === 'go' ? 'הטקס מתחיל בצג בעוד כמה שניות' : 'מסך ההמתנה של הטקס עלה לצג').catch(() => {}); }
+    openCeremony() {
+      const t = (this.design().ceremony || {}).texts || {}, f = { cerLink: '', cerUp: null };
+      CER_TX.forEach(([k, , d]) => { f['tx_' + k] = typeof t[k] === 'string' ? t[k] : d; });
+      this.openSheet('ceremony', f);
+    }
+    /** The words: only what differs from the default is kept; an optional line left empty is kept empty (not shown). */
+    saveCerTexts(f, reset) {
+      const texts = {};
+      if (!reset) CER_TX.forEach(([k, , d, opt]) => { const v = (f['tx_' + k] || '').trim(); if (v !== d && (v || opt)) texts[k] = v; });
+      if (reset) { const o = {}; CER_TX.forEach(([k, , d]) => { o['tx_' + k] = d; }); this.setFV(o); }
+      this.run('ceremonySet', { patch: { texts }, label: reset ? 'הטקסטים חזרו לברירת המחדל' : 'הטקסטים עודכנו' }, reset ? 'הטקסטים של הטקס חזרו לברירת המחדל' : 'הטקסטים של הטקס נשמרו').catch(() => {});
+    }
+    /** A new video for the ceremony: its length read here, then straight to the storage by a signed link. */
+    async uploadCerVideo(file) {
+      if (!file) return;
+      if (!/^video\/(mp4|webm)$/.test(file.type)) return this.toast('צריך קובץ וידאו מסוג MP4');
+      if (file.size > 50 * 1024 * 1024) return this.toast('הקובץ גדול מ-50MB. אפשר לשלוח אותו ל-Claude שיעלה אותו, או להדביק קישור ישיר לסרטון');
+      const local = URL.createObjectURL(file), secs = await videoSecs(local); URL.revokeObjectURL(local);
+      this.setFV({ cerUp: 0 });
+      try {
+        const r = await api('POST', { action: 'ceremonyUpload', size: file.size, type: file.type });
+        await putFile(r.result.upload, file, (p) => this.setFV({ cerUp: p }));
+        await this.run('ceremonySet', { patch: { video: r.result.url, secs: secs || null }, label: 'סרטון חדש: ' + file.name.slice(0, 50) }, 'הסרטון החדש נשמר לטקס');
+      } catch (e) { this.toast('ההעלאה נכשלה: ' + (e.message || 'נסו שוב')); } finally { this.setFV({ cerUp: null }); }
+    }
+    async setCerLink(url) {
+      url = (url || '').trim();
+      if (!/^https:\/\//.test(url)) return this.toast('קישור שמתחיל ב-https');
+      this.setFV({ cerUp: 0 });
+      const secs = await videoSecs(url);
+      this.setFV({ cerUp: null });
+      if (!secs) return this.toast('הסרטון לא נפתח מהקישור. צריך קישור ישיר לקובץ וידאו (MP4), לא לדף של יוטיוב או של דרייב');
+      this.run('ceremonySet', { patch: { video: url, secs }, label: 'סרטון מקישור' }, 'הסרטון נשמר לטקס').catch(() => {});
+      this.setFV({ cerLink: '' });
+    }
     /** The launch broadcast on the wall: to the space news corner (small), or ended. */
     streamCtl(small) { const st = this.D && this.D.stream; if (st) this.run('stream', { key: st.key, small: !!small }, small ? 'שידור השיגור עבר לצד' : 'סיום שידור השיגור').catch(() => {}); }
     /** The schedules: shown at once, saved in the background (the wall picks them up within seconds). */
@@ -628,14 +689,15 @@
     }
     /** The days a personal event is on the wall, as the server saves them (lib/remote-ops.ts saveLife): its day; from when
      *  it shows, at most LIFE_LEAD days ahead (a date of birth moved to the anniversary keeps a start picked for that day);
-     *  until ten days after the day; on the full screen from the day to two days after it. */
+     *  until the end of the day (it goes at midnight), and on the full screen that day. */
     lifeDates(f) {
       const fix = this.bdayFix(f), date = fix || f.date; if (!date) return null;
       const lead = iso(addDays(parse(date), -LIFE_LEAD));
       let from = f.showFrom || date;
       if (fix && (from > fix || from < lead)) from = fix;
       if (from < lead) from = lead;
-      return { date, from, until: iso(addDays(parse(from > date ? from : date), 10)), greetUntil: iso(addDays(parse(date), 2)), fix };
+      const until = from > date ? from : date, g2 = iso(addDays(parse(date), 2));
+      return { date, from, until, greetUntil: g2 < until ? g2 : until, fix };
     }
     async saveEvent() {
       const sh = this.state.sheet, f = sh.f, last = f.lastDay && f.lastDay > f.date ? f.lastDay : null;
@@ -839,6 +901,12 @@
       } catch (e) { /* toasted */ }
       finally { this.setState({ nlBusy: false }); }
     }
+    /** The emblem in the middle: one press sets both design keys (emblem, traffic), undone as one. */
+    setEmblem(mode, label) {
+      const patch = mode === 'v2' ? { emblem: 'v2' } : { emblem: 'v7', traffic: mode !== 'earth' };
+      this.setState((s) => ({ design: Object.assign({}, s.design || {}, patch) }));
+      this.run('design', { patch, label: 'הלוגו במרכז הצג: ' + label }, 'הלוגו במרכז הצג: ' + label).catch(() => {}).finally(() => this.setState({ design: null }));
+    }
     setDesign(k, v, label) {
       if (k === 'lang') return this.setLang(v);
       this.setState((s) => ({ design: Object.assign({}, s.design || {}, { [k]: v }) }));
@@ -969,7 +1037,7 @@
       const dayWord = (d) => (d === ti ? 'היום' : d === iso(addDays(now, 1)) ? 'מחר' : d === iso(addDays(now, -1)) ? 'אתמול' : d === iso(addDays(now, -2)) ? 'שלשום' : dm(d));
       // The people panel, tile by tile: when it greets on the full screen, until when it stays, or that it waits for room.
       const wallPersonRows = wp.map((x) => {
-        const t = x.tile, greetUntil = iso(addDays(parse(t.on), 2));
+        const t = x.tile, g2 = iso(addDays(parse(t.on), 2)), greetUntil = t.until && t.until < g2 ? t.until : g2;
         const status = x.waiting ? 'מחכה למקום בצג (יש בו מקום ל-' + PEOPLE_TILES + ')'
           : t.quiet ? 'מוצג בשקט, עד ' + dm(t.until)
           : t.full ? (greetPaused ? 'הברכה על כל המסך מושהית היום' : !mo.celebrate.on ? 'ברכה על כל המסך רק מהשלט' : 'ברכה על כל המסך, ' + (greetUntil === ti ? 'היום בפעם האחרונה' : 'עד ' + dm(greetUntil)))
@@ -981,7 +1049,7 @@
           show: t.full ? () => this.showCeleb(x) : null, edit: canEdit(x) ? () => this.editTile(x) : null, del: canEdit(x) ? () => this.dropTile(x) : null,
           delLabel: x.life ? 'מחיקה: ' + x.baseType + ' · ' + dn(x.person) : 'הסתרת יום ההולדת של ' + dn(x.person) };
       });
-      const tk = this.takeover(), tkK = tk ? tk.kind : '';
+      const tk = this.takeover(), tkK = tk ? tk.kind : '', cerPh = tkK === 'ceremony' ? tk.phase : '';
       // On a phone or tablet the welcome's card stands in for the live wall: the welcome running inside the preview takes more
       // memory than a phone gives a page (the wall comes back in the preview once "enter" is pressed).
       const wlPhone = tkK === 'welcome' && touchOnly();
@@ -1077,6 +1145,8 @@
       ];
       const actGroups = [
         { title: 'להציג עכשיו על כל המסך', items: [...streamItems, ...memItems,
+          { label: 'טקס גזירת הסרט', sub: cerPh === 'go' ? 'הפתיחה רצה בצג עכשיו' : cerPh === 'standby' ? 'מסך ההמתנה בצג · כאן מתחילים את הפתיחה' : 'מסך המתנה, ספירה לאחור, גזירת הסרט, סרטון התדמית וכניסה לצג',
+            dot: '#ff6b6b', bg: cerPh ? 'rgba(255,107,107,.14)' : 'rgba(255,107,107,.08)', border: cerPh ? 'rgba(255,107,107,.7)' : 'rgba(255,107,107,.4)', go: () => this.openCeremony() },
           { label: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : 'ברוכים הבאים', sub: tkK === 'welcome' ? 'מסך הפתיחה מוצג · לחיצה מכניסה לצג באנימציה' : 'מסך פתיחה מרשים לביקור משלחת', dot: '#e6f1ff', bg: tkK === 'welcome' ? 'rgba(212,242,92,.16)' : 'rgba(230,241,255,.08)', border: tkK === 'welcome' ? 'rgba(212,242,92,.7)' : 'rgba(230,241,255,.35)', go: () => (tkK === 'welcome' ? this.endTk() : this.openSheet('welcome', { guest: '' })) },
           { label: tkK === 'news' ? 'חזרה מהחדשות' : 'חדשות החלל', sub: tkK === 'news' ? 'מוצג עכשיו' : 'הידיעה המרכזית הבאה מהניוזלטר' + (mo.news.on ? ' · עולה לבד כל ' + minLbl(mo.news.every) : ''), dot: '#6fd6ea', bg: 'rgba(111,214,234,.09)', border: 'rgba(111,214,234,.4)', go: () => (tkK === 'news' ? this.endTk() : this.showNews()) },
           { label: tkK === 'noon' ? 'עצירת הסרטון' : 'סרטון תדמית', sub: tkK === 'noon' ? 'מוצג עכשיו' : design.noon ? 'עולה לבד ב-' + mo.noon.at : 'האוטומציה כבויה', dot: LIME, bg: 'rgba(212,242,92,.09)', border: 'rgba(212,242,92,.4)', go: () => (tkK === 'noon' ? this.endTk() : this.showNoon()) },
@@ -1093,7 +1163,7 @@
           { label: 'תזמונים ואוטומציות', sub: 'מה עולה לבד על כל המסך, כל כמה זמן ולכמה זמן', dot: '#6fd6ea', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.openSheet('moments') },
           ...memMore,
           { label: 'הודעה דחופה', sub: urgent ? 'משודרת עכשיו' : 'פס אדום בראש הצג', dot: RED, bg: 'rgba(14,28,58,.55)', border: urgent ? 'rgba(255,122,107,.5)' : 'rgba(150,190,240,.16)', go: () => this.openSheet('urgent', { text: '' }) },
-          { label: 'עיצוב הצג', sub: (design.emblem === 'v2' ? 'הלוגו הקודם' : 'הלוגו, השיגורים והלוויינים') + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
+          { label: 'עיצוב הצג', sub: ({ v2: 'הלוגו הקודם', earth: 'כדור הארץ בלבד', v7: 'הלוגו, השיגורים והלוויינים' }[emblemMode(design)]) + ' · אפקטים ' + (design.fx ? 'פעילים' : 'כבויים'), dot: '#c9a7ff', bg: 'rgba(14,28,58,.55)', border: 'rgba(150,190,240,.16)', go: () => this.setState({ studio: true, sheet: null }) }] },
       ];
 
       const lfP = this.P(f.personId), lfT = tpl(f.type), q = (f.name || '').replace(/\s+/g, ' ').trim();
@@ -1128,8 +1198,10 @@
         opIni: (s.who || '?')[0], canUndo: !!last, lastLabel: last ? 'ביטול: ' + last.text : '', undoLast: () => last && this.restore(last.id),
         openHistory: () => this.openSheet('history'),
 
-        tkOn: !!tk, tkTitle: this.tkTitle(tk), tkRemain: tk && tkK !== 'welcome' ? 'נותרו ' + mmss(remain) : '', endTk: () => this.endTk(),
-        tkEndLabel: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : tkK === 'memorial' ? 'חזרה לצג הבית' : 'חזרה לתצוגה רגילה', tkWelcome: tkK === 'welcome', tkGuest: tkK === 'welcome' ? tk.guest || '' : '',
+        tkOn: !!tk, tkTitle: this.tkTitle(tk), endTk: () => this.endTk(),
+        tkRemain: !tk || tkK === 'welcome' ? '' : cerPh === 'standby' ? '' : cerPh === 'go' ? (now.getTime() < Date.parse(tk.at) ? 'מתחיל בעוד ' + Math.ceil((Date.parse(tk.at) - now.getTime()) / 1000) + ' שניות' : mmss((now.getTime() - Date.parse(tk.at)) / 1000)) : 'נותרו ' + mmss(remain),
+        tkEndLabel: tkK === 'welcome' ? 'כניסה לצג הבית ✦' : tkK === 'memorial' ? 'חזרה לצג הבית' : cerPh === 'go' ? 'סיום הטקס וכניסה לצג' : cerPh === 'standby' ? 'הורדת מסך ההמתנה' : 'חזרה לתצוגה רגילה',
+        tkCerStart: cerPh === 'standby' ? () => this.cer('go') : null, tkWelcome: tkK === 'welcome', tkGuest: tkK === 'welcome' ? tk.guest || '' : '',
         tkNoon: tkK === 'noon', tkCeleb: tkK === 'celebrate', tkEvent: tkK === 'event',
         tkPct: tk ? Math.max(0, Math.min(100, (now.getTime() - t0) / (Date.parse(tk.until) - t0) * 100)).toFixed(1) + '%' : '0%',
         tkAv: tkK === 'celebrate' ? { bg: tkP ? colorFor(tkP) : OFF, ini: initials(tkP ? tkP.name : tk.person.name), photoEl: tk.person.photo ? imgEl(tk.person.photo, COVER) : null } : { bg: OFF, ini: '', photoEl: null },
@@ -1141,7 +1213,7 @@
         clearUrClose: () => { this.run('urgent', { text: '' }, 'הוסרה ההודעה הדחופה').catch(() => {}); this.closeSheet(); },
 
         nowLabel: tk ? this.tkTitle(tk) : (s.studio ? 'תצוגה מקדימה חיה' : 'תצוגה רגילה'),
-        wallHref: '/' + (D && D.config && D.config.displayKey ? '?key=' + encodeURIComponent(D.config.displayKey) : ''), wallSrc: s.wallSrc, livePreview: !!s.wallSrc && (s.liveView || s.studio) && !wlPhone,
+        wallHref: '/?' + (D && D.config && D.config.displayKey ? 'key=' + encodeURIComponent(D.config.displayKey) : ''), wallSrc: s.wallSrc, livePreview: !!s.wallSrc && (s.liveView || s.studio) && !wlPhone,
         offerLive: !!s.wallSrc && !s.liveView && !s.studio && !wlPhone, showLive: () => this.setState({ liveView: true }),
         previewTransform: 'scale(' + ((s.pw || 560) / 1920).toFixed(4) + ')',
         previewFilter: brightness < 100 ? 'brightness(' + (brightness / 100).toFixed(2) + ')' : 'none',   // a filter, even a neutral one, redraws the whole preview each frame
@@ -1174,14 +1246,14 @@
         showActions: !s.studio, actGroups, studio: s.studio,
         closeStudio: () => this.setState({ studio: false, demo: 'off' }),
         resetDesign: () => this.run('resetDesign', {}, 'העיצוב אופס לברירת המחדל').catch(() => {}),
-        designSections: SPEC.map((sec) => ({ title: sec.title, controls: sec.controls.filter((c) => !c.v7 || design.emblem !== 'v2').map((c) => {
-          const v = c.key === 'demo' ? s.demo : design[c.key];
+        designSections: SPEC.map((sec) => ({ title: sec.title, controls: sec.controls.filter((c) => (!c.v7 || design.emblem !== 'v2') && (!c.traffic || design.traffic !== false)).map((c) => {
+          const v = c.key === 'demo' ? s.demo : c.key === 'emblemMode' ? emblemMode(design) : design[c.key];
           return Object.assign({ key: c.key, label: c.label, kind: c.kind }, sw(!!v), { value: v, min: c.min, max: c.max, display: v + (c.unit || ''),
             toggle: () => this.setDesign(c.key, !v, !v ? 'פעיל' : 'כבוי'),
             set: (e) => { const nv = e.target.value;
               if (c.kind === 'slider') this.slideDesign(c.key, +nv, c.unit);
               else if (c.key === 'demo') this.setState({ demo: nv }); },
-            options: (c.options || []).map(([ov, ol]) => Object.assign({ v: ov, label: ol }, seg(v === ov), { pick: () => v !== ov && this.setDesign(c.key, ov, ol) })) });
+            options: (c.options || []).map(([ov, ol]) => Object.assign({ v: ov, label: ol }, seg(v === ov), { pick: () => v !== ov && (c.key === 'emblemMode' ? this.setEmblem(ov, ol) : this.setDesign(c.key, ov, ol)) })) });
         }) })),
 
         narrow, showBottomBar: narrow && !s.chatOpen,
@@ -1223,9 +1295,9 @@
 
         sheetOn: !!sh, closeSheet: () => this.closeSheet(), sheetBackdrop: (e) => { if (e.target === e.currentTarget) this.closeSheet(); },
         sheetAlign: small ? 'flex-end' : 'center', sheetPad: small ? '0' : '24px', sheetRadius: small ? '20px 20px 0 0' : '20px', sheetMaxH: small ? '92vh' : '88vh',
-        sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', moments: 'תזמונים ואוטומציות', welcome: 'מסך ברוכים הבאים', history: 'היסטוריית שינויים',
+        sheetTitle: { celebrate: 'מודעה אישית על כל המסך', eventShow: 'מודעה מנהלת על כל המסך', life: sh && sh.mode === 'edit' ? 'עריכה באנשי המנהלת' : 'הוספה לאנשי המנהלת', event: sh && sh.mode === 'edit' ? 'עריכת אירוע' : 'אירוע חדש', newsletter: 'ניוזלטר השבוע', urgent: 'הודעה דחופה', moments: 'תזמונים ואוטומציות', welcome: 'מסך ברוכים הבאים', ceremony: 'טקס גזירת הסרט', history: 'היסטוריית שינויים',
           person: sh && sh.mode === 'edit' ? 'פרטי ' + [f.first, f.last].filter(Boolean).join(' ') : 'אדם חדש ברשימה', import: 'ייבוא אנשים מקובץ', photos: 'ייבוא תמונות של אנשים', ticker: sh && sh.mode === 'edit' ? 'עריכה ברצועת האירועים' : 'אירוע או הזדמנות לרצועה' }[kind] || '',
-        shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shWelcome: kind === 'welcome', shHistory: kind === 'history', shMoments: kind === 'moments',
+        shCeleb: kind === 'celebrate', shEvShow: kind === 'eventShow', shLife: kind === 'life', shEvent: kind === 'event', shNl: kind === 'newsletter', shUrgent: kind === 'urgent', shWelcome: kind === 'welcome', shCer: kind === 'ceremony', shHistory: kind === 'history', shMoments: kind === 'moments',
         // the schedules screen: one card per moment, each with on/off, how often and how long
         moCards: kind === 'moments' ? this.momentCards(mo, design, sw) : [], moFx: mo.fx, moFxSw: sw(mo.fx), toggleMoFx: () => this.setMoment('fx', null, !mo.fx, mo.fx ? 'אנימציות מעבר כבויות' : 'אנימציות מעבר פעילות'),
         shPerson: kind === 'person', shImport: kind === 'import', shTicker: kind === 'ticker', shPhotos: kind === 'photos',
@@ -1333,6 +1405,17 @@
 
         urInput: f.text || '', setUrInput: this.fv('text'),
         wlInput: f.guest || '', setWlInput: this.fv('guest'),
+        // the ribbon-cutting sheet
+        cerPh, cerStandby: () => this.cer('standby'), cerGo: () => this.cer('go'),
+        cerVideoLine: (() => { const c = design.ceremony || {}; return c.video ? 'סרטון שהועלה לטקס' + (c.secs ? ' · ' + mmss(c.secs) : '') : 'סרטון התדמית של הצג · ' + mmss(CER_PROMO_SECS); })(),
+        cerCustom: !!(design.ceremony && design.ceremony.video), cerVideoHref: (design.ceremony && design.ceremony.video) || '/assets/promo.mp4',
+        cerPromo: () => this.run('ceremonySet', { patch: { video: null }, label: 'חזרה לסרטון התדמית' }, 'הטקס יציג את סרטון התדמית של הצג').catch(() => {}),
+        cerPick: () => { if (this.cerFileRef.current) this.cerFileRef.current.click(); }, cerFile: (e) => { const fl = e.target.files && e.target.files[0]; e.target.value = ''; this.uploadCerVideo(fl); },
+        cerUp: f.cerUp == null ? '' : f.cerUp > 0 ? 'מעלה… ' + Math.round(f.cerUp * 100) + '%' : 'בודק את הסרטון…',
+        cerLink: f.cerLink || '', setCerLink: this.fv('cerLink'), saveCerLink: () => this.setCerLink(f.cerLink),
+        cerTx: kind === 'ceremony' ? CER_TX.map(([k, label, d, opt]) => ({ k, label, value: f['tx_' + k] == null ? d : f['tx_' + k], set: this.fv('tx_' + k), ph: opt ? 'ריק: השורה לא תוצג' : d })) : [],
+        saveCerTx: () => this.saveCerTexts(f), resetCerTx: () => this.saveCerTexts(f, true),
+        cerDemoHref: '/?demo=ceremony' + (D && D.config && D.config.displayKey ? '&key=' + encodeURIComponent(D.config.displayKey) : ''),
         sendWl: () => { this.showWelcome((f.guest || '').trim()); this.closeSheet(); },
         sendUr: () => { const t = (f.text || '').trim(); if (!t) return this.toast('כתבו את ההודעה'); this.run('urgent', { text: t }, 'שודרה הודעה דחופה').catch(() => {}); this.closeSheet(); },
 
@@ -1440,6 +1523,7 @@
           el('span', 'width:9px;height:9px;border-radius:50%;background:#d4f25c;flex:none'),
           el('span', 'font-size:15px;font-weight:600', null, 'על כל המסך: ' + v.tkTitle),
           el('span', "font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8b9dbd", null, v.tkRemain)),
+        v.tkCerStart ? el('button', 'flex:none;min-height:48px;padding:0 20px;border-radius:12px;border:none;background:#ff6b6b;color:#1a0406;font-size:16px;font-weight:800;cursor:pointer;white-space:nowrap;box-shadow:0 0 24px rgba(255,107,107,.35)', { onClick: v.tkCerStart }, 'התחלת הטקס ▶') : null,
         el('button', v.tkWelcome ? 'flex:none;min-height:48px;padding:0 20px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:800;cursor:pointer;white-space:nowrap;box-shadow:0 0 24px rgba(212,242,92,.35)'
           : 'flex:none;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid rgba(212,242,92,.6);background:transparent;color:#d4f25c;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap', { onClick: v.endTk }, v.tkEndLabel)) : null;
       const urBanner = v.urgentOn ? el('div', 'display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px 10px 16px;border-radius:14px;background:#3a0f14;border:1px solid #ff7a6b', null,
@@ -1738,6 +1822,39 @@
               el('input', 'min-height:48px;box-sizing:border-box;width:100%;padding:0 12px;border-radius:10px;border:1px solid rgba(150,190,240,.2);background:rgba(4,9,20,.6);color:#e6f1ff;font-size:15px;text-align:left', { value: v.nlInput, onChange: v.setNlInput, placeholder: 'https://…', dir: 'ltr', type: 'url' }),
               el('span', 'font-size:12px;color:#8b9dbd', null, 'הכתבות, האירועים וקודי ה-QR נשאבים מהדף. גיליון חדש מיובא גם לבד כל בוקר.')),
             el('button', 'min-height:48px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.importNl }, v.nlBtn)) : null,
+          v.shCer ? h(React.Fragment, null,
+            el('span', 'font-size:14px;color:#8b9dbd;line-height:1.55;text-wrap:pretty', null, 'פתיחה ארוכה לטקס, סרט בתלת־ממד: אולם נדלק עד לשערים ענקיים, סרט אדום, ספירה לאחור מ-10, הסרט נגזר והשערים נפתחים אל כדור הארץ. אחר כך סרטון התדמית עם סאונד, ובסופו כדור הארץ נוחת בלוגו של צג הבית. הכל עולה רק מכאן.'),
+            el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
+              v.cerPh === 'go' ? el('button', 'flex:1;min-width:160px;min-height:52px;border-radius:12px;border:1px solid rgba(255,107,107,.6);background:transparent;color:#ffb3ab;font-size:16px;font-weight:700;cursor:pointer', { onClick: v.endTk }, 'סיום הטקס וכניסה לצג')
+                : h(React.Fragment, null,
+                  el('button', 'flex:1;min-width:140px;min-height:52px;border-radius:12px;border:1px solid rgba(150,190,240,.3);background:' + (v.cerPh === 'standby' ? 'rgba(150,190,240,.12)' : 'transparent') + ';color:#e6f1ff;font-size:16px;font-weight:600;cursor:pointer', { onClick: v.cerStandby }, v.cerPh === 'standby' ? 'מסך ההמתנה בצג ✓' : '1. מסך המתנה'),
+                  el('button', 'flex:1;min-width:140px;min-height:52px;border-radius:12px;border:none;background:#ff6b6b;color:#1a0406;font-size:16px;font-weight:800;cursor:pointer', { onClick: v.cerGo }, (v.cerPh === 'standby' ? '' : '2. ') + 'התחלת הטקס ▶'))),
+            el('div', 'display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:14px;background:rgba(233,184,114,.08);border:1px solid rgba(233,184,114,.35);font-size:13.5px;line-height:1.55;color:#e9d7a8;text-wrap:pretty', null,
+              el('b', 'font-size:14px;color:#ffd9a0', null, 'הסאונד'),
+              'הסאונד יוצא מהמחשב שמפעיל את הצג בלובי. דפדפן משמיע סאונד רק אחרי שמישהו לחץ על הדף, ולכן: להעלות קודם את מסך ההמתנה וללחוץ פעם אחת עם העכבר על הצג בלובי. כשהמסך כותב "הסאונד מוכן" אפשר להתחיל. "התחלה" מתחילה את הפתיחה בעוד כמה שניות, בכל המסכים יחד.'),
+            el('div', 'display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
+              el('span', 'font-size:12px;color:#9fdcff;font-weight:600', null, 'הסרטון בטקס'),
+              el('div', 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap', null,
+                el('span', 'font-size:15px;font-weight:700', null, v.cerVideoLine),
+                el('a', 'font-size:13px;white-space:nowrap', { href: v.cerVideoHref, target: '_blank', rel: 'noopener' }, 'צפייה ↗')),
+              el('input', { display: 'none' }, { ref: this.cerFileRef, type: 'file', accept: 'video/mp4,video/webm', onChange: v.cerFile }),
+              el('div', 'display:flex;gap:8px;flex-wrap:wrap;align-items:center', null,
+                smallBtn(v.cerUp || 'העלאת סרטון חדש', v.cerUp ? () => {} : v.cerPick, ';min-height:44px'),
+                v.cerCustom ? smallBtn('חזרה לסרטון התדמית', v.cerPromo, ';min-height:44px') : null),
+              el('div', 'display:flex;gap:8px', null,
+                el('input', field + ';text-align:left', { value: v.cerLink, onChange: v.setCerLink, placeholder: 'או קישור ישיר לקובץ MP4', dir: 'ltr', type: 'url' }),
+                smallBtn('שמירה', v.saveCerLink, ';min-height:44px')),
+              el('span', 'font-size:12px;color:#8b9dbd;line-height:1.5', null, 'קובץ MP4 עד 50MB. הסרטון מתחיל עם הסאונד שלו, ובסופו הצג נכנס לבד לצג הבית.')),
+            el('div', 'display:flex;flex-direction:column;gap:10px;padding:12px 14px;border-radius:14px;background:rgba(4,9,20,.5);border:1px solid rgba(150,190,240,.12)', null,
+              el('span', 'font-size:12px;color:#9fdcff;font-weight:600', null, 'הכיתוב בפתיחה'),
+              el('div', 'display:flex;gap:10px;flex-wrap:wrap', null,
+                v.cerTx.map((x) => el('label', 'flex:1 1 220px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#8b9dbd', { key: x.k }, x.label,
+                  el('input', field, { value: x.value, onChange: x.set, maxLength: 60, placeholder: x.ph, dir: 'auto' })))),
+              el('span', 'font-size:12px;color:#8b9dbd;line-height:1.5', null, 'שורה משנית שמשאירים ריקה לא מוצגת. בצג באנגלית מופיע נוסח קבוע באנגלית.'),
+              el('div', 'display:flex;gap:8px;flex-wrap:wrap', null,
+                el('button', 'flex:1;min-height:46px;border-radius:12px;border:none;background:#d4f25c;color:#0b1400;font-size:15px;font-weight:700;cursor:pointer', { onClick: v.saveCerTx }, 'שמירת הכיתוב'),
+                smallBtn('חזרה לברירת המחדל', v.resetCerTx, ';min-height:46px'))),
+            el('a', 'font-size:14px;align-self:flex-start', { href: v.cerDemoHref, target: '_blank', rel: 'noopener' }, 'צפייה בפתיחה כאן, בלי להעלות לצג ↗')) : null,
           v.shWelcome ? h(React.Fragment, null,
             el('span', 'font-size:14px;color:#8b9dbd;line-height:1.5', null, 'הצג יציג בגדול "WELCOME TO THE SPACE PROGRAM OFFICE" עם אנימציות, עד שלוחצים כאן בשלט "כניסה לצג הבית". אז הלוגו נכנס והצג הרגיל עולה באנימציה.'),
             el('div', 'display:flex;flex-direction:column;gap:6px', null,

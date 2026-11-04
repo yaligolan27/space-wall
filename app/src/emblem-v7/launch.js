@@ -250,7 +250,7 @@ void main(){ float y = vUv.y;
         const wl = b.w.length(); if (wl > 1e-6) { _q.setFromAxisAngle(tA.copy(b.w).divideScalar(wl), wl * dt); b.q.premultiply(_q); }
         if (b.vent && b.age < b.vent && Math.random() < 0.6) SMOKE.emit(b.p, rndDir(rv, 0.004), 0.9, 0.003, 0.012, 0.95, 0.97, 1, 0.3, 1);
         if (b.p.length() < 1.004 || b.age > b.life) { if (b.p.length() < 1.006) { toW(T1.copy(b.p)); if (T1.z > 0) SMOKE.emit(b.p, null, 2.2, 0.004, 0.02, 0.92, 0.94, 0.97, 0.35, 0.5); } b.fl.hide(b.i); BODIES.splice(i, 1); continue; }
-        b.fl.placeQ(b.i, b.p, b.q, b.s);
+        b.fl.placeQ(b.i, b.p, b.q, b.s * (1 - ss(b.age, b.life - 1.6, b.life)));
       }
     };
 
@@ -269,7 +269,7 @@ void main(){ float y = vUv.y;
       const tx = new THREE.CanvasTexture(cv); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4;
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, transparent: true, depthTest: false, depthWrite: false, opacity: 0 })); sp.renderOrder = 998; sp.center.set(0.5, 0); scene.add(sp); return sp;
     };
-    const tagUpdate = (sat, pL) => { const sp = sat.tag; toW(T3.copy(pL)); const wpc = (7 / 26) / (c.cssH() / (2 * c.half())); sp.scale.set(512 * wpc, 64 * wpc, 1); sp.position.set(T3.x, T3.y + 0.025, T3.z + 0.2); const RX = T3.y < -0.45 ? 0.68 : 0.32, overR = Math.abs(T3.x) < RX && T3.y < 1.35 && T3.y > -1.3; sp.material.opacity = (overR || occl(pL)) ? Math.max(0, sp.material.opacity - 0.08) : Math.min(0.9, sp.material.opacity + 0.06); };
+    const tagUpdate = (sat, pL) => { const sp = sat.tag; toW(T3.copy(pL)); const wpc = (7 / 26) / (c.cssH() / (2 * c.half())); sp.scale.set(512 * wpc, 64 * wpc, 1); sp.position.set(T3.x, T3.y + 0.025, T3.z + 0.2); const RX = T3.y < -0.45 ? 0.68 : 0.32, overR = Math.abs(T3.x) < RX && T3.y < 1.35 && T3.y > -1.3 || LBL.some((L) => L.op > 0.1 && L.px != null && Math.abs(L.py - T3.y) < 0.14 && (L.side > 0 ? T3.x > L.px - 0.12 && T3.x < L.px + (L.wpx || 700) * wpc * 26 / 46 : T3.x < L.px + 0.12 && T3.x > L.px - (L.wpx || 700) * wpc * 26 / 46)); sp.material.opacity = (overR || occl(pL)) ? Math.max(0, sp.material.opacity - 0.08) : Math.min(0.9, sp.material.opacity + 0.06); };
     const satsUpdate = (dt) => {
       const fNH = SATS.findIndex((x) => !x.hero), nNH = SATS.reduce((a, x) => a + (x.hero ? 0 : 1), 0);
       for (let i = SATS.length - 1; i >= 0; i--) {
@@ -287,7 +287,7 @@ void main(){ float y = vUv.y;
     const trailsUpdate = () => {
       for (const T of TRL) {
         const sat = T.sat; if (!sat || (sat._ship ? !FLIGHTS.includes(sat.F) : !SATS.includes(sat))) { T.sat = null; T.m.visible = false; continue; } if (sat._ship) { sat.d = sat.F.ob.th; }
-        const age = t - T.t0, op = (T.hero ? 0.55 : 0.3) * ss(age, 0, 1.5) * (1 - (T.hero ? ss(age, 40, 60) : ss(age, 14, 26))); if (op <= 0.002) { T.m.visible = false; if (age > (T.hero ? 60 : 26)) { T.sat = null; T.hero = 0; } continue; }
+        const age = t - T.t0, op = (T.hero ? 0.4 : 0.26) * ss(age, 0, 1.5) * (1 - (T.hero ? ss(age, 18, 28) : ss(age, 12, 22))); if (op <= 0.002) { T.m.visible = false; if (age > (T.hero ? 28 : 22)) { T.sat = null; T.hero = 0; } continue; }
         const F = sat.F, al = F.th - (spinG.rotation.y - F.phi0), a = T.g.attributes.position.array;
         const o = sat.ob; for (let i = 0; i < 96; i++) { const th = o.th - i / 95 * 1.3; gc(F.n, F.h, th, T1).multiplyScalar(orbR(o, th)).addScaledVector(F.N, sat.dz || 0); rotY(T1, al, T2); a[i * 3] = T2.x; a[i * 3 + 1] = T2.y; a[i * 3 + 2] = T2.z; }
         T.g.attributes.position.needsUpdate = true; T.m.material.uniforms.uOp.value = op; T.m.material.uniforms.uC.value.set(T.hero ? 0xa8d8ff : 0x8fd0ff).multiplyScalar(T.hero ? 1.3 : 1); T.m.visible = true;
@@ -450,7 +450,9 @@ void main(){ float y = vUv.y;
           if (!E.lc && t > E.dep + 3.4) { E.lc = 1; L && L.close(); }
           if (t > E.dep + 2 && t < E.dep + 4 && Math.random() < 0.5) SMOKE.emit(tq.copy(F.stP), rndDir(rv, 0.006), 1.2, 0.002, 0.012, 0.95, 0.97, 1, 0.3, 1);
           if (V.ship && !E.trl) { E.trl = 1; trailAdd({ F, ob: F.ob, d: F.ob.th, dz: 0, _ship: 1 }); }
-          if (!F.stDone && t > E.dep + 6 && (occl(base) || t > E.dep + (V.ship ? 90 : 60))) { FL[V.st].hide(R.st); F.stDone = true; }
+          if (!F.stDone && t > E.dep + 6 && occl(base)) { FL[V.st].hide(R.st); F.stDone = true; }
+          else if (!F.stDone && !F.stGo && t > E.dep + (V.ship ? 90 : 60)) F.stGo = t;
+          if (!F.stDone && F.stGo && t > F.stGo + 1.6) { FL[V.st].hide(R.st); F.stDone = true; }
         }
         if (V.pez && !F.hi && E.dep && (E.pezN || 0) < Math.min(V.nPay, CFG().stack) && t > E.dep + (E.pezN || 0) * 0.45) { const j = E.pezN = (E.pezN || 0) + 1, sat = satSpawn('slk', F, circ(dB + (X.st + 0.27) * s / F.Ro, F.Ro + 0.001, F.wo + 0.004 - 0.0016 * j), 0.012 + j * 0.0035, 1.6, 2); if (j === Math.min(V.nPay, CFG().stack)) trailAdd(sat); }
         if (E.dep && !E.deo && !F.hi && t > E.dep + (V.pez ? 4.4 : 3.2)) { E.deo = t; F.deoT = t + 1.8; F.deoDur = V.ship ? 13 : 10; }
@@ -463,7 +465,7 @@ void main(){ float y = vUv.y;
         }
         const Cc = tq.copy(base).addScaledVector(Tg, (X.st + V.Ls / 2) * s); F.stP.copy(Cc).addScaledVector(sf, -V.Ls / 2 * s);
         if (!F.stDone) {
-          FL[V.st].place(R.st, F.stP, sf, su, s);
+          FL[V.st].place(R.st, F.stP, sf, su, F.stGo ? s * (1 - ss(t, F.stGo, F.stGo + 1.6)) : s);
           if (E.deo && t > E.deo + 1.2 && t < E.deo + 2.6) eng(F.stP, sf, V.es, s, 0.9);
           if (rr < 1.09) plasma(Cc, Tg, 0.012 * kS, 1 - ss(rr, 1.03, 1.09));
           if (V.ship) { if (rr < 1.03 && rr > 1.006) eng(F.stP, sf, V.esl, s, 1, 1.6); if (rr <= 1.006) { groundCloud(F.stP, T1, 0.6 * kS, 18); FL[V.st].hide(R.st); F.stDone = true; } }
@@ -521,7 +523,7 @@ void main(){ float y = vUv.y;
     const imgStart = (pk) => { const idx = SATM.indexOf(pk.s) + 1, cc = { s: pk.s, o: pk.o, a: pk.a, T0: t, dur: 7 }; cc.sar = !!(pk.o && /SAR/.test(pk.o.nm)); cc.lab = (!pk.o || LBL.filter((l) => l.on).length > 1) ? null : label((v) => v.copy(cc.a.n).multiplyScalar(1.004), pk.o ? 'il' : 'orbit', pk.o ? pk.o.nm : 'EO IMAGING · SAT-' + idx, pk.o ? 'PASS OVER AOI' : 'SLEW TO AOI'); IM.cur = cc; };
     const imgUpdate = () => {
       const cc = IM.cur;
-      if (!cc) { fp.visible = frus.visible = brk.visible = false; if (FULL && t > IM.next) { const pk = imgPick(); if (pk) imgStart(pk); IM.next = t + (pk ? rnd(3.5, 8) : 1.2); } return; }
+      if (!cc) { fp.visible = frus.visible = brk.visible = false; if (FULL && t > IM.next) { const pk = imgPick(); if (pk) imgStart(pk); IM.next = t + (pk ? rnd(6, 12) : 1.2); } return; }
       const lt = t - cc.T0, s = cc.s, a = cc.a;
       toW(tA.copy(a.n).multiplyScalar(1.004));
       if (s) { s.g.getWorldQuaternion(qW).invert(); T1.subVectors(tA, s.w).applyQuaternion(qW).normalize(); qT.setFromUnitVectors(NZ, T1); s.inner.quaternion.slerpQuaternions(QI, qT, ss(lt, 0.1, 1.2) * (1 - ss(lt, cc.dur - 1.2, cc.dur - 0.1))); }
@@ -531,11 +533,9 @@ void main(){ float y = vUv.y;
       if (v > 0.002) {
         const n = T2.copy(a.n).normalize(); east(n, T3); tq.crossVectors(n, T3);
         fp.visible = true; fp.position.copy(n).multiplyScalar(1.0065); mB.makeBasis(T3, tq, n); fp.quaternion.setFromRotationMatrix(mB); fp.scale.set(0.15, 0.11, 1);
-        fpMat.uniforms.uK.value = v; fpMat.uniforms.uSar.value = cc.sar ? 1 : 0; fpMat.uniforms.uScan.value = MU.clamp((lt - 1.4) / 2.6, 0, 1.2);
-        for (let i = 0; i < 4; i++) { const sx = i === 0 || i === 3 ? -1 : 1, sy = i < 2 ? -1 : 1; corners[i].copy(n).addScaledVector(T3, sx * 0.075).addScaledVector(tq, sy * 0.055).normalize().multiplyScalar(1.0065); toW(corners[i]); }
-        const P = frG.attributes.position.array; for (let i = 0; i < 4; i++) { const b = corners[i], c2 = corners[(i + 1) % 4]; P.set([camW.x, camW.y, camW.z, b.x, b.y, b.z], i * 6); P.set([b.x, b.y, b.z, c2.x, c2.y, c2.z], 24 + i * 6); }
-        frG.attributes.position.needsUpdate = true; frus.material.opacity = 0.65 * v; frus.visible = true;
-        for (const ts of [1.8, 2.7, 3.6]) if (lt > ts && lt < ts + 0.07) FIRE.glow(tB.copy(camW).applyMatrix4(invSpin), 0.022, 2.6, 3, 3.4);
+        fpMat.uniforms.uK.value = v * 0.6; fpMat.uniforms.uSar.value = cc.sar ? 1 : 0; fpMat.uniforms.uScan.value = MU.clamp((lt - 1.4) / 2.6, 0, 1.2);
+        frus.visible = false;
+        for (const ts of [1.8, 2.7, 3.6]) if (lt > ts && lt < ts + 0.07) FIRE.glow(tB.copy(camW).applyMatrix4(invSpin), 0.016, 1.4, 1.7, 2);
       } else { fp.visible = frus.visible = false; }
       const tv = ss(lt, 2.3, 2.6) * (1 - ss(lt, cc.dur - 1.5, cc.dur - 1.15));
       if (tv > 0.01) { const n = T2.copy(a.n).normalize(); brk.visible = true; brk.position.copy(n).multiplyScalar(1.0072); brk.quaternion.setFromUnitVectors(Z_AXIS, n); brk.scale.setScalar(0.85 * (1 + 0.6 * (1 - ss(lt, 2.3, 2.7)))); brM.material.opacity = tv * (lt < 3 ? (Math.sin(lt * 38) > 0 ? 1 : 0.35) : 0.85); } else brk.visible = false;
@@ -594,7 +594,7 @@ void main(){ float y = vUv.y;
       t = tt; if ((++stnN % 30) === 0) stencilize(); scene.updateMatrixWorld(); invSpin.copy(spinG.matrixWorld).invert(); plN = 0;
       schedule();
       for (let i = FLIGHTS.length - 1; i >= 0; i--) { const F = FLIGHTS[i]; let ok = false; try { ok = step(F, dt); } catch (e) { console.warn('launch flight', F.S.id, e); } if (!ok) { F.lab && F.lab.close(); F.blab && F.blab.close(); F.S.state = 'spent'; FLIGHTS.splice(i, 1); } }
-      bodiesUpdate(dt); satsUpdate(dt); deepUpdate(); linksUpdate(); trailsUpdate(); poUpdate(); trkUpdate(); try { imgUpdate(); } catch (e) { if (!IM.err) { IM.err = 1; console.warn('imaging', e); } IM.cur = null; } lblUpdate(dt);
+      bodiesUpdate(dt); satsUpdate(dt); deepUpdate(); trailsUpdate(); poUpdate(); trkUpdate(); try { imgUpdate(); } catch (e) { if (!IM.err) { IM.err = 1; console.warn('imaging', e); } IM.cur = null; } lblUpdate(dt);
       for (let i = plN; i < PLM.length; i++) PLM[i].visible = false;
       for (const k in FL) if (FL[k].dirty) { FL[k].im.instanceMatrix.needsUpdate = true; FL[k].dirty = false; }
       FIRE.update(dt); SMOKE.update(dt);
