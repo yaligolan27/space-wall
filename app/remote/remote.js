@@ -29,7 +29,7 @@
   const MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
   const BDAY_DAYS = 30;   // birthdays in the upcoming list
   const LIFE_LEAD = 60;   // a personal event shows at most this many days ahead of its day (lib/feed.ts LIFE_LEAD_MAX)
-  const PEOPLE_TILES = 6, EVENT_ROWS = 4;   // the wall's people and events panels (lib/feed.ts)
+  const PEOPLE_TILES = 6, EVENT_ROWS = 5;   // the wall's people and events panels (lib/feed.ts)
   const pad = (n) => String(n).padStart(2, '0');
   const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const mmss = (sec) => pad(Math.floor(sec / 60)) + ':' + pad(Math.floor(sec % 60));
@@ -1577,7 +1577,7 @@
             v.wallPersonRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:8px 0;text-wrap:pretty', null, 'אין עכשיו אנשים בצג',
               v.hasPeople ? null : h(React.Fragment, null, ' · רשימת האנשים עדיין ריקה: ', linkBtn('להוספת אנשים', v.toPeople)))),
           el('div', 'display:flex;flex-direction:column', null,
-            listHead('אירועים בצג', 'מה שמוצג עכשיו בפאנל האירועים (השבוע הקרוב)', v.addEventNew),
+            listHead('אירועים בצג', 'מה שמוצג עכשיו בפאנל האירועים (5 האירועים הקרובים)', v.addEventNew),
             v.wallEvRows.map((r) => datedRow(r, 'border-top')),
             v.wallEvRows.length ? null : el('span', 'font-size:14px;color:#8b9dbd;padding:8px 0', null, 'אין אירועים בצג בשבוע הקרוב')),
           el('div', 'display:flex;flex-direction:column', null,
@@ -1594,7 +1594,7 @@
           v.soonRows.map((r) => h(React.Fragment, { key: r.key },
             r.head ? el('span', 'padding:14px 0 2px;font-size:13px;font-weight:700;color:#9fdcff', null, r.head) : null,
             datedRow(Object.assign({}, r, { key: 'r' }), 'border-bottom'))),
-          el('span', 'padding-top:12px;font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'ימי ההולדת מחושבים לבד מתאריכי הלידה ברשימת האנשים, 30 יום קדימה. ברצועת האירועים בצג מופיעים גם האירועים מהניוזלטר השבועי. ',
+          el('span', 'padding-top:12px;font-size:12px;color:#8b9dbd;text-wrap:pretty', null, 'ימי ההולדת מחושבים לבד מתאריכי הלידה ברשימת האנשים: 3 הקרובים תמיד בצג. ברצועת האירועים בצג מופיעים גם האירועים מהניוזלטר השבועי. ',
             linkBtn('לרשימת האנשים', v.toPeople))) : null,
         v.tabPeople ? el('div', 'display:flex;flex-direction:column;gap:10px', null,
           el('div', 'display:flex;gap:6px;flex-wrap:wrap', null,
