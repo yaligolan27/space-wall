@@ -36,11 +36,11 @@
     ambientFx: bool('fx', true),
     videoWall: bool('vw', false),                  // the lobby's 3×3 wall of TVs: bigger, bolder text (the remote's switch)
     // Quiet background music made in the browser (app/src/music.js): on/off, a style, volume 5–100, and in which hours
-    // (work 08–18, day 07–20, all). Silent in the remote's preview, under a moment with its own sound and on a memorial day.
+    // (all: always, the default; work 08–18; day 07–20). Silent in the remote's preview, under a moment with its own sound and on a memorial day.
     music: bool('music', true),
     musicStyle: ['drift', 'stars', 'piano'].includes(q.get('musicStyle')) ? q.get('musicStyle') : 'stars',
     musicVol: Math.min(100, Math.max(5, num('musicVol', 30))),
-    musicHours: ['work', 'day', 'all'].includes(q.get('musicHours')) ? q.get('musicHours') : 'work',
+    musicHours: ['work', 'day', 'all'].includes(q.get('musicHours')) ? q.get('musicHours') : 'all',
     globeSpeed: Math.min(240, Math.max(20, num('globe', 90))),
     globeStyle: q.get('globeStyle') === 'real' ? 'real' : 'holo',
     cameraSway: bool('sway', true),
@@ -804,7 +804,7 @@
     musicSync() {
       if (CFG.preview || !window.SpaceMusic) return;
       const mus = this._music || (this._music = window.SpaceMusic.create());
-      const ov = this.state.ov, L = this.state.live, D = this.D, T = this.ilParts(serverNow()), [a, b] = MUSIC_HOURS[CFG.musicHours] || MUSIC_HOURS.work;
+      const ov = this.state.ov, L = this.state.live, D = this.D, T = this.ilParts(serverNow()), [a, b] = MUSIC_HOURS[CFG.musicHours] || MUSIC_HOURS.all;
       const loud = !!ov && (ov.kind === 'noon' || ov.kind === 'stream' || isCeremony(ov) || isMemorial(ov))
         || Array.from(document.querySelectorAll('video,audio')).some((v) => !v.paused && !v.muted && v.volume > 0);
       const mourning = !!(L && L.memorial) || ((D && D.occasions) || []).some((o) => o.kind === 'memorial' || o.kind === 'remember');

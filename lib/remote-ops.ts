@@ -25,7 +25,7 @@ export const DESIGN_DEFAULTS = { noon: true, qr: true, feature: 12, list: 4, fx:
   // the emblem in the middle (app/src/wall.js CFG.emblem): v7 the 3D globe with launches and satellites, v2 the previous one
   emblem: 'v7' as 'v7' | 'v2', traffic: true, rate: 'normal' as 'off' | 'low' | 'normal' | 'high', sats: 24, stack: 8, quality: 'high' as 'high' | 'ultra',
   // quiet background music made on the wall (app/src/music.js)
-  music: true, musicStyle: 'stars' as 'drift' | 'stars' | 'piano', musicVol: 30, musicHours: 'work' as 'work' | 'day' | 'all',
+  music: true, musicStyle: 'stars' as 'drift' | 'stars' | 'piano', musicVol: 30, musicHours: 'all' as 'work' | 'day' | 'all',
   css: '', headline: '', headlineEn: '', hide: [] as string[], news: [] as Row[],
   scenes: [] as Row[], decor: null as Row | null, shortcuts: [] as Row[] };
 
@@ -53,7 +53,7 @@ export const DesignPatch = z.object({
   music: z.boolean().describe('מוזיקת רקע שקטה בצג (נשתקת לבד בזמן סרטון התדמית, הטקס, שידור שיגור ויום זיכרון)'),
   musicStyle: z.enum(['drift', 'stars', 'piano']).describe('סגנון מוזיקת הרקע: drift מרחב (צלילים ארוכים ורכים), stars כוכבים (עם צלצולים עדינים), piano פסנתר רך'),
   musicVol: z.number().int().min(5).max(100).describe('עוצמת מוזיקת הרקע באחוזים (5–100)'),
-  musicHours: z.enum(['work', 'day', 'all']).describe('מתי מוזיקת הרקע מתנגנת: work 08:00–18:00, day 07:00–20:00, all כל היום'),
+  musicHours: z.enum(['work', 'day', 'all']).describe('מתי מוזיקת הרקע מתנגנת: all תמיד (ברירת המחדל), work 08:00–18:00, day 07:00–20:00'),
   css: z.string().max(6000).superRefine((v, c) => { const e = cssProblem(v); if (e) c.addIssue({ code: 'custom', message: e }); }),
   headline: z.string().trim().max(80), headlineEn: z.string().trim().max(80),
   hide: z.array(z.enum(PANELS)).max(PANELS.length),

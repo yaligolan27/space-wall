@@ -76,10 +76,10 @@
   const hash = (s) => { let x = 0; for (const c of String(s)) x = (x * 31 + c.charCodeAt(0)) | 0; return Math.abs(x); };
 
   const DESIGN0 = { noon: true, qr: true, feature: 12, list: 4, fx: true, globe: 90, globeStyle: 'holo', sway: true, lang: 'he', vw: false,
-    emblem: 'v7', traffic: true, rate: 'normal', sats: 24, stack: 8, quality: 'high', music: true, musicStyle: 'stars', musicVol: 30, musicHours: 'work' };
+    emblem: 'v7', traffic: true, rate: 'normal', sats: 24, stack: 8, quality: 'high', music: true, musicStyle: 'stars', musicVol: 30, musicHours: 'all' };
   // Background music on the wall (app/src/music.js, made in the browser): styles and hours as the server takes them.
   const MUSIC_STYLES = [['drift', 'מרחב'], ['stars', 'כוכבים'], ['piano', 'פסנתר רך']];
-  const MUSIC_HOURS = [['work', '08:00 עד 18:00'], ['day', '07:00 עד 20:00'], ['all', 'כל היום']];
+  const MUSIC_HOURS = [['all', 'תמיד'], ['work', '08:00 עד 18:00'], ['day', '07:00 עד 20:00']];
   /** Which emblem the wall shows: 'v2' the previous one, 'earth' the new globe on its own, 'v7' the new globe with traffic. */
   const emblemMode = (d) => (d.emblem === 'v2' ? 'v2' : d.traffic === false ? 'earth' : 'v7');
   const DEMO_OPTS = [['off', 'כבוי'], ['greeting', 'מודעה אישית'], ['news', 'חדשות החלל'], ['noon', 'סרטון תדמית'], ['launch', 'שיגור']];
@@ -670,7 +670,7 @@
             pick('על כל המסך אחרי ההמראה', 'stream', 'full', mo.stream.full, [5, 10, 15, 30, 60], minLbl, (t) => 'שידור שיגור על כל המסך ' + t + ' אחרי'),
             { label: 'אחר כך', value: mo.stream.small ? '1' : '0', options: [['1', 'עובר לפינה'], ['0', 'נגמר']], set: (e) => this.setMoment('stream', 'small', e.target.value === '1', e.target.value === '1' ? 'שידור ממשיך בפינה' : 'שידור נגמר אחרי המסך המלא') }] : [] }, onOff('stream', 'שידור חי של שיגורים')),
         // Background music: its settings live in the design (setDesign), and "listen here" plays the same music on this phone.
-        { key: 'music', title: 'מוזיקת רקע', sub: design.music ? 'מוזיקה שקטה מתנגנת ברקע בשעות שנבחרו. היא נשתקת לבד בזמן סרטון התדמית, הטקס, שידור שיגור ויום זיכרון, וחוזרת אחריהם' : 'כבוי: הצג שקט',
+        { key: 'music', title: 'מוזיקת רקע', sub: design.music ? (design.musicHours === 'all' ? 'מוזיקה שקטה מתנגנת ברקע כל הזמן.' : 'מוזיקה שקטה מתנגנת ברקע בשעות שנבחרו.') + ' היא נשתקת לבד בזמן סרטון התדמית, הטקס, שידור שיגור ויום זיכרון, וחוזרת אחריהם' : 'כבוי: הצג שקט',
           sw: sw(design.music), toggle: () => this.setDesign('music', !design.music, !design.music ? 'פעיל' : 'כבוי'),
           selects: design.music ? [
             { label: 'סגנון', value: design.musicStyle, options: MUSIC_STYLES, set: (e) => this.setDesign('musicStyle', e.target.value, MUSIC_STYLES.find((x) => x[0] === e.target.value)[1]) },
