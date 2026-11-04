@@ -272,12 +272,9 @@ void main(){ vec2 d = vUv - 0.5; vec4 sc = texture2D(tScene, vUv); if (isnan(sc.
       const top = new THREE.Mesh(new THREE.BoxGeometry(2 * HW - 3.6, 0.07, 0.16), lm); top.position.set(0, HH - 0.82, 0); g.add(top);
       ribs.push({ z, mat: lm, on: K.LIGHTS + (40 - z) / 36 * 2.3, seed: i });
     }
-    // floor guide lines toward the doors, and the ceiling's long light
-    const guideMat = emis(0x000000);
-    [-3.2, 3.2].forEach((x) => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.012, HL - 1.5), guideMat); m.position.set(x, 0.006, HL / 2 + 0.9); hall.add(m); });
-    for (let z = 1.5; z < HL; z += 1.6) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.7), guideMat); m.position.set(0, 0.006, z); hall.add(m); }
-    const ceilLineMat = emis(0x000000);
-    { const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, HL), ceilLineMat); m.position.set(0, HH - 0.03, HL / 2); hall.add(m); }
+    // (no thin light lines along the floor or the ceiling toward the doors: far off they broke up into a scatter of white
+    // lines round the doorway; the materials stay, unused, so the frame code is unchanged)
+    const guideMat = emis(0x000000), ceilLineMat = emis(0x000000);
     // the threshold stripes
     { const c = canvas(1024, 64, (g, w, h) => { g.fillStyle = '#16120a'; g.fillRect(0, 0, w, h); g.fillStyle = '#b38a1c'; for (let x = -64; x < w + 64; x += 64) { g.beginPath(); g.moveTo(x, h); g.lineTo(x + 32, 0); g.lineTo(x + 64, 0); g.lineTo(x + 32, h); g.fill(); } });
       const m = new THREE.Mesh(new THREE.PlaneGeometry(2 * DW + 2 * FT, 0.6), std({ map: ctex(c, true), roughness: 0.7, metalness: 0.2, envMapIntensity: 0 })); m.rotation.x = -Math.PI / 2; m.position.set(0, 0.008, 1.0); m.receiveShadow = true; hall.add(m); }
