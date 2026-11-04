@@ -492,7 +492,7 @@ void main(){ float m = texture2D(tMap, vUv).r; float scan = 0.82 + 0.18 * sin(vU
     const bladeCore = new THREE.Mesh(new THREE.PlaneGeometry(0.012, 3.2), additive(new THREE.MeshBasicMaterial({ color: 0x000000 }))); bladeCore.position.copy(blade.position); scene.add(bladeCore);
     const burst = sprite(glowTex, hdr(0xffffff, 1), 1, 0); burst.position.set(0, RIB.y, RIB.z + 0.15); scene.add(burst);
     const shockMat = new THREE.ShaderMaterial({ uniforms: { uA: { value: 0 } }, vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: 'uniform float uA; varying vec2 vUv; void main(){ float r = length(vUv - 0.5) * 2.0; float ring = exp(-pow((r - 0.9) * 34.0, 2.0)); gl_FragColor = vec4(vec3(1.0, 0.92, 0.8) * ring * uA * 3.0, 1.0); }',
+      fragmentShader: 'uniform float uA; varying vec2 vUv; void main(){ float r = length(vUv - 0.5) * 2.0; float q = (r - 0.9) * 34.0; float ring = exp(-q * q); gl_FragColor = vec4(vec3(1.0, 0.92, 0.8) * ring * uA * 3.0, 1.0); }',
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
     const shock = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), shockMat); shock.position.copy(burst.position); scene.add(shock);
     const cutLight = new THREE.PointLight(0xffe2c0, 0, 14, 2); cutLight.position.set(0, RIB.y + 0.2, RIB.z + 0.6); scene.add(cutLight);
@@ -535,7 +535,7 @@ void main(){ float tt = uT - info.z; float life = info.x; vA = 0.0; vQ = positio
     // shafts of light under the spots: soft cones, and dust in the air
     const shaftMat = (col) => new THREE.ShaderMaterial({ uniforms: { uA: { value: 0 }, uCol: { value: new THREE.Color(col) } },
       vertexShader: 'varying float vY; varying vec3 vN; varying vec3 vV; void main(){ vY = uv.y; vec4 w = modelMatrix * vec4(position, 1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }',
-      fragmentShader: 'uniform float uA; uniform vec3 uCol; varying float vY; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 2.0); gl_FragColor = vec4(uCol * f * pow(vY, 1.6) * uA, 1.0); }',
+      fragmentShader: 'uniform float uA; uniform vec3 uCol; varying float vY; varying vec3 vN; varying vec3 vV; void main(){ float f = pow(abs(dot(normalize(vN), normalize(vV))), 2.0); gl_FragColor = vec4(uCol * f * pow(clamp(vY, 0.0, 1.0), 1.6) * uA, 1.0); }',
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false });
     const shafts = spots.map((s, i) => {
       const len = s.position.distanceTo(s.target.position), geo = new THREE.ConeGeometry(Math.tan(s.angle) * len * 0.9, len, 48, 1, true);
