@@ -10,7 +10,7 @@ function check(name: string, ok: boolean, detail = '') {
 
 delete process.env.SUPABASE_URL;
 const { addDays, ilToIso, nextYearly } = await import('../../lib/dates.js');
-const { PEOPLE_TILES, EVENT_ROWS, eventTiles, feedSettings, greetsToday, lifeWindow, peopleTiles } = await import('../../lib/feed.js');
+const { BIRTHDAYS_SHOWN, PEOPLE_TILES, EVENT_ROWS, eventTiles, feedSettings, greetsToday, lifeWindow, peopleTiles } = await import('../../lib/feed.js');
 const { eventSpan, spanText } = await import('../../lib/remote-ops.js');
 
 const today = '2026-10-07', cfg = feedSettings(null);
@@ -55,12 +55,15 @@ check('a name outside the list is shown', refs.includes('l6'));
 check('a moment before its window is not shown', !refs.includes('l7'));
 check("yesterday's moment is gone", !refs.includes('l9') && !P.waiting.some(c => c.ref.kind === 'life' && c.ref.id === 'l9'));
 const Py = peopleTiles([], [{ id: 'p7', display_name: 'גל', rank: '', unit: '', photo_url: null, birthday: '1990-' + addDays(today, -1).slice(5) }], today, cfg);
-check("yesterday's birthday is gone", Py.shown.length === 0 && Py.waiting.length === 0);
+check("yesterday's birthday is gone (only next year's is left)", Py.shown.length === 1 && Py.shown[0].on > today, JSON.stringify(Py.shown.map(c => c.on)));
 check("a birthday typed as a moment stands for the list's birthday", refs.includes('l8') && !refs.includes('b:p5'), refs.join(','));
 check("a birthday from the list is shown with its person", refs.includes('b:p6') && P.shown.find(c => c.ref.kind === 'bday')!.name === 'סרן שרה');
 check("today's come first", refs[0] === 'l1' || refs[0] === 'b:p6', refs.join(','));
 check('a tile stays to the end of its day', P.shown.find(c => c.ref.kind === 'life' && c.ref.id === 'l3')!.until === addDays(today, 3));
 check("a birthday's tile stays to the end of its day", P.shown.find(c => c.ref.kind === 'bday')!.until === today);
+const far = (id: string, d: number) => ({ id, display_name: id, rank: '', unit: '', photo_url: null, birthday: '1990-' + addDays(today, d).slice(5) });
+const B = peopleTiles([], [far('b200', 200), far('b40', 40), far('b90', 90), far('b300', 300)], today, cfg);
+check(`the next ${BIRTHDAYS_SHOWN} birthdays are shown however far off`, B.shown.map(c => c.name).join() === 'b40,b90,b200', B.shown.map(c => c.name).join());
 const many = Array.from({ length: PEOPLE_TILES + 2 }, (_, i) => life('m' + i, person('q' + i, 'אדם ' + i), addDays(today, i), { show_from: addDays(today, -1) }));
 const M = peopleTiles(many, [], today, cfg);
 check(`the panel shows ${PEOPLE_TILES}, the rest wait for room`, M.shown.length === PEOPLE_TILES && M.waiting.length === 2 && M.waiting.every(c => c.sort > M.shown[PEOPLE_TILES - 1].sort));
@@ -83,8 +86,9 @@ const yest = [ev('yest', addDays(today, -1), '20:00', addDays(today, -1), '22:00
 check("yesterday's events are gone at midnight", eventTiles(yest, now, today, cfg).shown.length === 0
   && eventTiles(yest, Date.parse(ilToIso(today, '00:00')) - 60e3, addDays(today, -1), cfg).shown.length === 2);
 check('an event of several days shows while it runs', E.shown.some(e => e.id === 'days'));
-check(`the panel shows ${EVENT_ROWS}, the rest wait`, E.shown.length === EVENT_ROWS && E.waiting.map(e => e.id).join() === 'e2,e3', E.waiting.map(e => e.id).join());
-check('beyond the week is not on the panel', !E.shown.concat(E.waiting).some(e => e.id === 'far'));
+check(`the panel shows the next ${EVENT_ROWS}, the rest wait`, E.shown.length === EVENT_ROWS && E.waiting.map(e => e.id).join() === 'e3,far', E.waiting.map(e => e.id).join());
+const F = eventTiles([ev('a', addDays(today, 1), '10:00', addDays(today, 1), '11:00'), ev('b', addDays(today, 20), '10:00', addDays(today, 20), '11:00'), ev('c', addDays(today, 45), '10:00', addDays(today, 45), '11:00')], now, today, cfg);
+check('events beyond the week fill the panel', F.shown.map(e => e.id).join() === 'a,b,c', F.shown.map(e => e.id).join());
 
 // ---- an event's days and hours
 const one = eventSpan(ev('x', '2026-10-21', '10:00', '2026-10-21', '11:30'));
