@@ -17,8 +17,13 @@ and the connector's `MCP_TOKEN` were Vercel variables and are not set on Supabas
 
 1. `node scripts/build-edge.mjs` and commit `dist/edge/` with the change; merge to `main`.
 2. Redeploy the function `api` (verify_jwt off) with `supabase/functions/api/index.ts`, `COMMIT` replaced by the merged
-   commit's SHA. Supabase fetches `dist/edge/api.js` from jsDelivr at that commit and bundles it. A thread can do
-   this with the Supabase connector (deploy_edge_function); no keys are needed.
+   commit's SHA. Supabase fetches `dist/edge/api.js` from raw.githubusercontent.com at that commit and bundles it.
+   A thread can do this with the Supabase connector (deploy_edge_function); no keys are needed. (Not jsDelivr: it
+   refuses a repo over 50 MB, and the ceremony's promo video, `app/assets/ceremony/`, puts this one over it. A
+   failed deploy leaves the previous version serving.)
+3. The wall and the remote reload themselves when `/api/live`'s `build` changes. That stamp is baked into
+   `dist/edge` by the build, so a front-end-only change that the lobby must pick up right away also needs step 1
+   and 2; otherwise it waits for the next reload (or F5 on the lobby PC).
 
 The front end calls the server cross-origin (CORS is open; each route checks its own key). The wall polls
 `/api/live` every 8 s (was 5 s) to stay inside the free plan's 500k function calls a month.
