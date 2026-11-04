@@ -701,7 +701,7 @@
       // the standby screen and ends on the home wall by itself; keyed per ceremony, so "end" reaches the one playing.
       if (isCeremony(ov)) {
         const Cer = this._Cer || (this._Cer = window.makeCeremony && window.makeCeremony(React)), [pre, under] = this.cerStage(ov);
-        const sb = Cer && (pre || under) ? h(O.Moment, { key: 'mv-sb' + ov.id, out: !!ov.out, fx: M().fx }, h(Cer.Standby, { key: 'sb', texts: ov.texts, preview: CFG.preview })) : null;
+        const sb = Cer && (pre || under) ? h(O.Moment, { key: 'mv-sb' + ov.id, out: !!ov.out, fx: M().fx }, h(Cer.Standby, { key: 'sb', texts: ov.texts, video: ov.video, preview: CFG.preview })) : null;
         el = !Cer ? null : h(React.Fragment, { key: 'cer' + ov.id }, sb, pre ? null :
           h(Cer.Ceremony, { key: 'cer', start: ov.start, video: ov.video, texts: ov.texts, preview: CFG.preview, end: ov.end || 0, onWake: () => this.onCerWake(ov.id), onDone: () => this.onCerDone(ov.id) }));
       }
