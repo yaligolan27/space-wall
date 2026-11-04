@@ -19,7 +19,7 @@ const TEXT = new Set(['.html', '.js', '.css', '.webmanifest', '.json']);
 function walk(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) { if (name !== 'vendor') walk(p); continue; }
+    if (statSync(p).isDirectory()) { if (name !== 'vendor' && name !== 'rakia-weekly') walk(p); continue; }   // the newsletter's pages are served as sent
     if (!TEXT.has(extname(name))) continue;
     const before = readFileSync(p, 'utf8');
     const after = before
