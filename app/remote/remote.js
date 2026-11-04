@@ -896,7 +896,7 @@
       this.setState({ nlBusy: true });
       try {
         const r = await this.run('newsletter', { url }, (x) => (x && x.handoff ? null : 'יובא גיליון הניוזלטר'));
-        if (r && r.handoff) this.toast('אפשר לייבא רק גיליון מאתר הניוזלטר של רקיע (rakia-weekly.vercel.app). גיליון חדש נטען לבד בכל בוקר.');
+        if (r && r.handoff) this.toast('אפשר לייבא רק גיליון מאתר הניוזלטר של רקיע (yaligolan27.github.io/space-wall/rakia-weekly). גיליון חדש נטען לבד בכל בוקר.');
         else this.closeSheet();
       } catch (e) { /* toasted */ }
       finally { this.setState({ nlBusy: false }); }

@@ -43,7 +43,7 @@ project/, chats/  the original Claude Design handoff bundle
    the answer reports each one and is `ok: false` (HTTP 500) when any failed, and every run is a row in
    `agent_runs`. Space weather is collected (`space_weather`) but the current wall doesn't show it.
 4. **The weekly newsletter** is imported automatically: the daily cron checks the archive page of
-   https://rakia-weekly.vercel.app, and when a new issue is listed it parses that issue's page
+   https://yaligolan27.github.io/space-wall/rakia-weekly (app/rakia-weekly/, since 2026-11-04), and when a new issue is listed it parses that issue's page
    (`lib/newsletter.ts`) into `newsletter_issues`: news, featured stories, and upcoming events and
    opportunities for the ticker, each with its last day (`end`) so it leaves the ticker once it has passed.
    Nothing to upload by hand. The remote's "ניוזלטר השבוע" button imports a pasted issue link right away.

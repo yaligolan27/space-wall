@@ -587,11 +587,11 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'import_newsletter',
-    description: 'ייבוא גיליון של ניוזלטר רקיע לצג מקישור לאתר הניוזלטר (rakia-weekly.vercel.app); קישור לדף הראשי מביא את הגיליון האחרון. גיליון חדש נטען גם לבד בכל בוקר.',
+    description: 'ייבוא גיליון של ניוזלטר רקיע לצג מקישור לאתר הניוזלטר (yaligolan27.github.io/space-wall/rakia-weekly); קישור לדף הראשי מביא את הגיליון האחרון. גיליון חדש נטען גם לבד בכל בוקר.',
     input_schema: obj({ url: str('הקישור לגיליון', 500) }, ['url']),
     async run(a, ctx) {
       const r = await ACTIONS.newsletter({ url: a.url }, ctx.who) as Row;
-      if (r?.handoff) throw new Error('אפשר לייבא רק גיליון מאתר הניוזלטר של רקיע (rakia-weekly.vercel.app). גיליון חדש נטען לבד בכל בוקר.');
+      if (r?.handoff) throw new Error('אפשר לייבא רק גיליון מאתר הניוזלטר של רקיע (yaligolan27.github.io/space-wall/rakia-weekly). גיליון חדש נטען לבד בכל בוקר.');
       return ok({ range: r.range, items: r.count });
     },
   },

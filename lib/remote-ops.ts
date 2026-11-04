@@ -874,7 +874,7 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     let content: z.infer<typeof NewsletterContent> | null = null, issueDate = isoDateIL(), sourceUrl = url;
     const u = new URL(url), site = new URL(NEWSLETTER_SITE);
     if (u.hostname === site.hostname) {
-      let page = u.pathname.match(/^\/(\d{4}-\d{2}-\d{2})\/?/)?.[1];
+      let page = u.pathname.match(/\/(\d{4}-\d{2}-\d{2})\/?(index\.html)?$/)?.[1];
       if (!page) {
         page = latestFromArchive(await fetchText(`${NEWSLETTER_SITE}/archive/`)) || undefined;
         if (!page) throw new Error('לא נמצא גיליון באתר הניוזלטר');
