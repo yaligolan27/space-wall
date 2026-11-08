@@ -101,6 +101,39 @@ window.makeWallOverlays = (React) => {
     ]);
   };
 
+  // ---------- the board of upcoming birthdays ----------
+  // people: [{ name, photo, on (YYYY-MM-DD), date ("12.11"), color }], nearest first (lib/feed.ts birthdayBoard). Up to
+  // three in a row, two rows; today's has a glowing ring and "היום!". Confetti only when someone's day is today.
+  const BirthdayBoard = ({ people, today }) => {
+    const list = (people || []).slice(0, 6), n = list.length, perRow = n <= 3 ? n : Math.ceil(n / 2), big = n <= 2 ? 300 : n <= 3 ? 260 : 200;
+    const diff = (iso) => Math.round((Date.parse(iso + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 864e5);
+    const DOWS = EN() ? ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] : ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    const when = (iso) => { const d = diff(iso); return d === 0 ? tr('היום!', 'Today!') : d === 1 ? tr('מחר', 'Tomorrow') : d < 7 ? tr('ביום ', 'On ') + DOWS[new Date(iso + 'T00:00:00Z').getUTCDay()] : tr('בעוד ' + d + ' ימים', 'In ' + d + ' days'); };
+    const anyToday = list.some((p) => diff(p.on) === 0);
+    const rows = []; for (let i = 0; i < n; i += perRow) rows.push(list.slice(i, i + perRow));
+    return shell([
+      h('div', { key: 'bg', style: { position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 1100px 760px at 50% 45%, rgba(40,32,70,.92), rgba(4,9,20,.97))', backdropFilter: 'blur(10px)' } }),
+      anyToday ? h(Party, { key: 'party' }) : null,
+      h('div', { key: 'c', style: { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: n > 3 ? 34 : 50 } },
+        h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, animation: 'rise .8s ease .1s both' } },
+          h('div', { style: { fontSize: 26, fontWeight: 700, color: '#0a1224', background: '#e9b872', padding: '6px 26px', borderRadius: 999 } }, tr('ימי הולדת', 'Birthdays')),
+          h('div', { style: { fontSize: n > 3 ? 84 : 100, fontWeight: 800, lineHeight: 1, letterSpacing: '-0.02em', textShadow: '0 0 60px rgba(233,184,114,.4)' } }, anyToday && n === 1 ? tr('יום הולדת שמח!', 'Happy Birthday!') : tr('ימי הולדת קרובים', 'Upcoming birthdays'))),
+        rows.map((row, r) => h('div', { key: r, style: { display: 'flex', gap: n > 3 ? 70 : 90, justifyContent: 'center' } }, row.map((p, i) => {
+          const isToday = diff(p.on) === 0, k = r * perRow + i;
+          return h('div', { key: k, style: { width: big + 120, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, animation: `rise .9s ease ${0.4 + k * 0.15}s both` } },
+            h('div', { style: { position: 'relative', width: big, height: big } },
+              isToday ? h('div', { style: { position: 'absolute', inset: -12, borderRadius: '50%', background: 'conic-gradient(#e9b872, #6fd6ea, #d4f25c, #e9b872)', animation: 'spin 5s linear infinite' } }) : null,
+              isToday ? h('div', { style: { position: 'absolute', inset: -34, borderRadius: '50%', border: '2px solid #e9b872', animation: 'ping 2.4s ease-out infinite' } }) : null,
+              h('img', { src: window.wallAvatar(400, p.photo, p.name), alt: p.name, style: { position: 'absolute', inset: 0, width: big, height: big, borderRadius: '50%', objectFit: 'cover', border: isToday ? '6px solid #0a1428' : '3px solid rgba(233,184,114,.55)' } })),
+            h('div', { style: { fontSize: n > 3 ? 40 : 50, fontWeight: 700, lineHeight: 1.1, textAlign: 'center' } }, p.name),
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, fontSize: n > 3 ? 26 : 30 } },
+              h('span', { style: { color: isToday ? '#0a1224' : '#e9b872', background: isToday ? '#e9b872' : 'transparent', border: '1px solid #e9b872', borderRadius: 999, padding: '2px 16px', fontWeight: 700 } }, when(p.on)),
+              h('span', { dir: 'ltr', style: { fontFamily: LEX, color: '#b3c2dc' } }, p.date)));
+        }))),
+        h('div', { style: { fontSize: 28, color: '#b3c2dc', fontWeight: 300, animation: 'rise .9s ease 1.4s both' } }, tr('כל המנהלת מאחלת מזל טוב', 'Warm wishes from all of us at the Space Program Office')))
+    ]);
+  };
+
   // ---------- Launch mode ----------
   const LaunchMode = ({ launch }) => {
     const now = useNow(100), at = Date.parse(launch.at), d = at - now, live = d <= 0;
@@ -841,5 +874,5 @@ window.makeWallOverlays = (React) => {
       out ? null : h('div', { key: 'edge', style: { position: 'absolute', inset: 14, zIndex: 2, borderRadius: 30, border: '1px solid rgba(212,242,92,.7)', pointerEvents: 'none', animation: 'wlEdge 1200ms ease 700ms both' } }));
   };
 
-  return { Celebration, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, CustomScene, NewsMoment, Moment, Memorial, Candle, MM_TEXT, OccasionMoment, Glyph };
+  return { Celebration, BirthdayBoard, LaunchMode, NoonShow, EventTakeover, Welcome, Toast, ImageMoment, LiveStream, CustomScene, NewsMoment, Moment, Memorial, Candle, MM_TEXT, OccasionMoment, Glyph };
 };

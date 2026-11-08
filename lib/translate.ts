@@ -147,6 +147,7 @@ export async function feedInEnglish(feed: Row, budgetMs: number): Promise<Row & 
   for (const d of feed.directorate || []) add(d.occ?.en ? '' : d.name, d.place, d.dow, d.mon);
   for (const o of feed.occasions || []) add(o.en ? '' : o.title);
   for (const p of feed.people || []) add(p.type, p.name, p.line);
+  for (const b of feed.birthdays || []) add(b.name);
   const T = await translateAll(texts, budgetMs), t = T.get;
 
   const recolor = (m: Row = {}) => Object.fromEntries(Object.entries(m).map(([k, v]) => [t(k), v]));
@@ -163,17 +164,19 @@ export async function feedInEnglish(feed: Row, budgetMs: number): Promise<Row & 
     directorate: (feed.directorate || []).map((d: Row) => ({ ...d, name: d.occ?.en || t(d.name), place: t(d.place), dow: t(d.dow), mon: t(d.mon) })),
     occasions: (feed.occasions || []).map((o: Row) => ({ ...o, title: o.en || t(o.title), greet: o.greetEn })),
     people: (feed.people || []).map((p: Row) => ({ ...p, type: t(p.type), name: t(p.name), line: t(p.line) })),
+    birthdays: (feed.birthdays || []).map((b: Row) => ({ ...b, name: t(b.name) })),
     translated: { missing: T.missing, error: T.error },
   };
 }
 
 /** The live state (lib/remote-ops.ts live) in English: the urgent banner and the full-screen moment's text. */
 export async function liveInEnglish(L: Row, budgetMs: number): Promise<Row> {
-  const tk = L.takeover, p = tk?.person;
-  const T = await translateAll([L.urgent, tk?.title, tk?.place, p?.type, p?.name, p?.line].filter(hasHebrew), budgetMs), t = T.get;
+  const tk = L.takeover, p = tk?.person, board: Row[] = Array.isArray(tk?.people) ? tk.people : [];
+  const T = await translateAll([L.urgent, tk?.title, tk?.place, p?.type, p?.name, p?.line, ...board.map(b => b.name)].filter(hasHebrew), budgetMs), t = T.get;
   return {
     ...L, lang: 'en', urgent: L.urgent ? t(L.urgent) : L.urgent,
     takeover: !tk ? tk : { ...tk, ...(tk.title ? { title: t(tk.title) } : {}), ...(tk.place ? { place: t(tk.place) } : {}),
-      ...(p ? { person: { ...p, type: t(p.type), name: t(p.name), line: t(p.line) } } : {}) },
+      ...(p ? { person: { ...p, type: t(p.type), name: t(p.name), line: t(p.line) } } : {}),
+      ...(board.length ? { people: board.map(b => ({ ...b, name: t(b.name) })) } : {}) },
   };
 }

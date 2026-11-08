@@ -393,11 +393,11 @@ export const TOOLS: Tool[] = [
   },
   {
     name: 'show_fullscreen',
-    description: 'הצגה עכשיו על כל המסך. welcome: מסך "WELCOME TO THE SPACE PROGRAM OFFICE" לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה (guest: שורה אופציונלית מתחת לכותרת, למשל "Delegation of Japan"). noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. news: חדשות החלל, הידיעה המרכזית הבאה מהניוזלטר. memorial: מסך יזכור (רק ביום זיכרון, למשל 7-8 באוקטובר 2026), ל-15 דקות. end: חזרה לתצוגה הרגילה.',
+    description: 'הצגה עכשיו על כל המסך. welcome: מסך "WELCOME TO THE SPACE PROGRAM OFFICE" לביקור משלחת, עד ש-end מכניס לצג הבית באנימציה (guest: שורה אופציונלית מתחת לכותרת, למשל "Delegation of Japan"). noon: סרטון התדמית. celebration: מודעה אישית לדקה, לשמחה (life_event_id) או ליום הולדת של אדם מהרשימה (person_id). event: מודעה מנהלת, אירוע מלוח האירועים (event_id), עד סופו; אירוע שמתחיל בעוד יותר מחצי שעה מוצג כהצצה ל-10 דקות. news: חדשות החלל, הידיעה המרכזית הבאה מהניוזלטר. birthdays: מסך ימי הולדת קרובים, כמה אנשים יחד בגדול (person_ids: עד 6 אנשים מהרשימה; בלי: ימי ההולדת של החודש הקרוב). memorial: מסך יזכור (רק ביום זיכרון, למשל 7-8 באוקטובר 2026), ל-15 דקות. end: חזרה לתצוגה הרגילה.',
     input_schema: obj({
-      what: { type: 'string', enum: ['welcome', 'noon', 'celebration', 'event', 'news', 'memorial', 'end'] },
+      what: { type: 'string', enum: ['welcome', 'noon', 'celebration', 'event', 'news', 'birthdays', 'memorial', 'end'] },
       guest: { type: 'string', description: 'למסך ברוכים הבאים: למי (לא חובה)' },
-      person_id: id('למודעת יום הולדת'), life_event_id: id('למודעה על שמחה'), event_id: id('לאירוע מלוח האירועים'),
+      person_id: id('למודעת יום הולדת'), person_ids: { type: 'array', items: { type: 'string' }, description: 'למסך ימי ההולדת: מי יופיע (לא חובה)' }, life_event_id: id('למודעה על שמחה'), event_id: id('לאירוע מלוח האירועים'),
     }, ['what']),
     async run(a, ctx) {
       if (a.what === 'welcome') await ACTIONS.welcome({ guest: a.guest || undefined }, ctx.who);
@@ -406,19 +406,21 @@ export const TOOLS: Tool[] = [
       else if (a.what === 'event') await ACTIONS.showEvent({ eventId: a.event_id }, ctx.who);
       else if (a.what === 'celebration') await ACTIONS.celebrate({ personId: a.person_id, lifeId: a.life_event_id }, ctx.who);
       else if (a.what === 'news') await ACTIONS.showNews({}, ctx.who);
+      else if (a.what === 'birthdays') await ACTIONS.showBirthdays({ personIds: Array.isArray(a.person_ids) && a.person_ids.length ? a.person_ids : undefined }, ctx.who);
       else if (a.what === 'memorial') await ACTIONS.memorial({ show: true }, ctx.who);
-      else throw new Error('what: welcome, noon, celebration, event, news, memorial או end');
+      else throw new Error('what: welcome, noon, celebration, event, news, birthdays, memorial או end');
       return ok();
     },
   },
   {
     name: 'set_schedules',
-    description: 'התזמונים של מה שעולה לבד על כל המסך (design.moments; רק מה שנשלח משתנה). news: חדשות החלל, כל every דקות ל-secs שניות. celebrate: מודעות אישיות (ימי הולדת ושמחות) כל every דקות ל-secs שניות; manual: כמה שניות מודעה אישית שמפעילים מהשלט נשארת. event: מודעה מנהלת בזמן האירוע: every 0 = כל זמן האירוע, אחרת כל every דקות ל-secs שניות. noon.at: שעת סרטון התדמית (ההפעלה עצמה ב-set_wall_design noon). launch: מצב שיגור lead דקות לפני שיגור. welcome.auto: אחרי כמה דקות ברוכים הבאים נכנס לצג לבד (0 = מחכה ללחיצה). stream: השידור הרשמי של שיגור (YouTube) עולה לבד על כל המסך before דקות לפני ההמראה ועד full דקות אחריה, ואז (small) בפינת חדשות החלל עד סוף השידור; which: all לכל השיגורים או big רק לגדולים. fx: אנימציית הכניסה והיציאה המשותפת. on: false מכבה את האוטומציה.',
+    description: 'התזמונים של מה שעולה לבד על כל המסך (design.moments; רק מה שנשלח משתנה). news: חדשות החלל, כל every דקות ל-secs שניות. celebrate: מודעות אישיות (ימי הולדת ושמחות) כל every דקות ל-secs שניות; manual: כמה שניות מודעה אישית שמפעילים מהשלט נשארת. bdays: מסך ימי הולדת קרובים, כל every דקות (עשר דקות אחרי השעה העגולה) ל-secs שניות; manual: כשמפעילים מהשלט. event: מודעה מנהלת בזמן האירוע: every 0 = כל זמן האירוע, אחרת כל every דקות ל-secs שניות. noon.at: שעת סרטון התדמית (ההפעלה עצמה ב-set_wall_design noon). launch: מצב שיגור lead דקות לפני שיגור. welcome.auto: אחרי כמה דקות ברוכים הבאים נכנס לצג לבד (0 = מחכה ללחיצה). stream: השידור הרשמי של שיגור (YouTube) עולה לבד על כל המסך before דקות לפני ההמראה ועד full דקות אחריה, ואז (small) בפינת חדשות החלל עד סוף השידור; which: all לכל השיגורים או big רק לגדולים. fx: אנימציית הכניסה והיציאה המשותפת. on: false מכבה את האוטומציה.',
     input_schema: obj({
       changes: obj({
         fx: { type: 'boolean' },
         news: obj({ on: { type: 'boolean' }, every: { type: 'integer', minimum: 5, maximum: 240 }, secs: { type: 'integer', minimum: 10, maximum: 300 } }),
         celebrate: obj({ on: { type: 'boolean' }, every: { type: 'integer', minimum: 5, maximum: 240 }, secs: { type: 'integer', minimum: 8, maximum: 300 }, manual: { type: 'integer', minimum: 10, maximum: 600 } }),
+        bdays: obj({ on: { type: 'boolean' }, every: { type: 'integer', minimum: 15, maximum: 480 }, secs: { type: 'integer', minimum: 10, maximum: 300 }, manual: { type: 'integer', minimum: 10, maximum: 600 } }),
         event: obj({ on: { type: 'boolean' }, every: { type: 'integer', minimum: 0, maximum: 240 }, secs: { type: 'integer', minimum: 15, maximum: 1800 } }),
         noon: obj({ at: time('שעת סרטון התדמית') }),
         launch: obj({ on: { type: 'boolean' }, lead: { type: 'integer', minimum: 2, maximum: 30 } }),

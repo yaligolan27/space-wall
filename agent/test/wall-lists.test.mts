@@ -10,7 +10,7 @@ function check(name: string, ok: boolean, detail = '') {
 
 delete process.env.SUPABASE_URL;
 const { addDays, ilToIso, nextYearly } = await import('../../lib/dates.js');
-const { BIRTHDAYS_SHOWN, PEOPLE_TILES, EVENT_ROWS, eventTiles, feedSettings, greetsToday, lifeWindow, peopleTiles } = await import('../../lib/feed.js');
+const { BIRTHDAYS_SHOWN, BOARD_MAX, PEOPLE_TILES, birthdayBoard, EVENT_ROWS, eventTiles, feedSettings, greetsToday, lifeWindow, peopleTiles } = await import('../../lib/feed.js');
 const { eventSpan, spanText } = await import('../../lib/remote-ops.js');
 
 const today = '2026-10-07', cfg = feedSettings(null);
@@ -64,6 +64,17 @@ check("a birthday's tile stays to the end of its day", P.shown.find(c => c.ref.k
 const far = (id: string, d: number) => ({ id, display_name: id, rank: '', unit: '', photo_url: null, birthday: '1990-' + addDays(today, d).slice(5) });
 const B = peopleTiles([], [far('b200', 200), far('b40', 40), far('b90', 90), far('b300', 300)], today, cfg);
 check(`the next ${BIRTHDAYS_SHOWN} birthdays are shown however far off`, B.shown.map(c => c.name).join() === 'b40,b90,b200', B.shown.map(c => c.name).join());
+const B1 = peopleTiles([], [far('b200', 200), far('b40', 40), far('b90', 90)], today, feedSettings(null, { panel: { birthdays: 1 } }));
+check('the remote can keep fewer far birthdays in the panel', B1.shown.map(c => c.name).join() === 'b40', B1.shown.map(c => c.name).join());
+check('a bad panel choice keeps the default', feedSettings(null, { panel: { birthdays: 40 } }).birthdaysShown === BIRTHDAYS_SHOWN);
+// ---- the full-screen board of upcoming birthdays
+const bRoster = [far('d0', 0), far('d3', 3), far('d10', 10), far('d29', 29), far('d31', 31), far('d50', 50), far('d200', 200), far('y', -1)];
+const board = birthdayBoard(bRoster, today);
+check('the board: nearest first, within 30 days', board.map(c => c.key).join() === 'd0,d3,d10,d29', board.map(c => c.key).join());
+check("the board never empties while someone has a birthday", birthdayBoard([far('d50', 50), far('d200', 200)], today).length === 2);
+check('the board: the chosen people only, at most ' + BOARD_MAX, birthdayBoard(bRoster, today, ['d200', 'd3']).map(c => c.key).join() === 'd3,d200'
+  && birthdayBoard(bRoster, today, bRoster.map(r => r.id)).length === BOARD_MAX);
+check("yesterday's birthday is next year's on the board", birthdayBoard(bRoster, today, ['y'])[0].on > today);
 const many = Array.from({ length: PEOPLE_TILES + 2 }, (_, i) => life('m' + i, person('q' + i, 'אדם ' + i), addDays(today, i), { show_from: addDays(today, -1) }));
 const M = peopleTiles(many, [], today, cfg);
 check(`the panel shows ${PEOPLE_TILES}, the rest wait for room`, M.shown.length === PEOPLE_TILES && M.waiting.length === 2 && M.waiting.every(c => c.sort > M.shown[PEOPLE_TILES - 1].sort));
