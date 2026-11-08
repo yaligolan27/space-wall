@@ -25,7 +25,7 @@
     feed: q.get('feed') || '/api/feed',
     key: displayKey(),
     refresh: Math.max(10, num('refresh', 60)),
-    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream | occasion | standby | ceremony
+    demo: q.get('demo') || 'off',                 // off | launch | greeting | noon | welcome | memorial | news | stream | occasion | standby | ceremony | birthdays
     memorial: bool('memorial', false),             // the small Yizkor on the home wall without a memorial day (demos)
     occ: q.get('occ') || '',                       // an occasion's key (lib/occasions.ts): its card, full screen or Yizkor (demos)
     sample: bool('sample', false),                 // show the bundled sample feed instead of /api/feed (design demos)
@@ -179,7 +179,7 @@
   // The schedules from the remote (lib/remote-ops.ts MOMENTS0, the same defaults): what comes up by itself, how often
   // (every, lead: minutes) and for how long (secs: seconds), and the shared entry and exit transition (fx).
   const MOMENTS0 = { fx: true, news: { on: true, every: 30, secs: 30 }, celebrate: { on: true, every: 30, secs: 14, manual: 60 },
-    event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 },
+    bdays: { on: true, every: 60, secs: 30, manual: 60 }, event: { on: true, every: 0, secs: 60 }, noon: { at: '12:00' }, launch: { on: true, lead: 10 }, welcome: { auto: 0 },
     stream: { on: true, which: 'all', before: 5, full: 15, small: true } };
   function M() {
     const raw = CFG.moments || {}, out = { fx: typeof raw.fx === 'boolean' ? raw.fx : MOMENTS0.fx };
@@ -236,6 +236,7 @@
         else if (k === 'escape') { if (isWelcome(ov) || isMemorial(ov)) { this.clearLeave(); this.setState({ ov: null, wl: null }); } else if (isCeremony(ov)) this.endCeremony(); else this.closeOv(); }
         else if (k === 'k') { if (isCeremony(ov) && ov.demo && ov.phase === 'standby') this.demo('ceremony'); else if (!cerGo(ov)) this.demo('standby'); }
         else if (k === 'h') this.demo('news');
+        else if (k === 'b') this.demo('birthdays');
         else if (k === 'v') this.demo('stream'); };
       addEventListener('keydown', this.onKey);
       this.load();
@@ -321,6 +322,7 @@
       if (until <= now) return;
       if (tk.kind === 'noon') this.setState({ ov: { kind: 'noon', id: tk.id, live: true, until } });
       else if (tk.kind === 'celebrate' && tk.person) this.setState({ ov: { kind: 'celebrate', id: tk.id, live: true, person: tk.person, until } });
+      else if (tk.kind === 'bdays' && Array.isArray(tk.people) && tk.people.length) this.setState({ ov: { kind: 'bdays', id: tk.id, live: true, people: tk.people, until } });
       else if (tk.kind === 'event') this.setState({ ov: { kind: 'event', id: tk.id, live: true, event: tk, until } });
       // (a minute past its server end, so the server's "none" leads into the entrance rather than schedule() cutting it)
       else if (tk.kind === 'welcome') this.welcomeUp({ id: tk.id, live: true, guest: tk.guest || '', until: until + 60e3 });
@@ -606,6 +608,12 @@
         if (o) this.setState({ ov: { kind: 'occasion', id: t, demo: true, occ: Object.assign({ title: o.title || '' }, o), until: t + (num('leaveAfter', 0) > 0 ? num('leaveAfter', 0) * 1000 : 30e3) } });
         return;
       }
+      // ?demo=birthdays: the board of upcoming birthdays (the sample's people when the feed has none)
+      if (kind === 'birthdays') {
+        let list = (this.D && this.D.birthdays) || [];
+        if (!list.length) { try { const S = await this.sample(), t0 = this.ilParts(serverNow()).iso; list = (S.people || []).slice(0, num('n', 5)).map((p, i) => ({ name: p.name, photo: p.photo, on: addDays(t0, i * 4), date: '', color: '#e9b872' })); } catch (e) { return; } }
+        const t = serverNow(); return this.setState({ ov: { kind: 'bdays', id: t, demo: true, people: list, until: t + 60e3 } });
+      }
       if (kind !== 'launch' && kind !== 'greeting') return;
       const pick = (S) => (kind === 'launch' ? S.launches : S.people.filter((p) => p.celebrate !== false)) || [];
       let list = this.D ? pick(this.D) : [];
@@ -652,7 +660,10 @@
       const cs = !mem && S.celebrate.on && slot(S.celebrate.every, 0), ns = !mem && S.news.on && slot(S.news.every, Math.floor(S.news.every / 2));
       if (cs && due.cSlot !== cs) { due.cSlot = cs; due.c = { at: now, k: Math.floor(mins / S.celebrate.every) }; }
       if (ns && due.nSlot !== ns) { due.nSlot = ns; due.n = now; }
-      for (const k of ['c', 'n']) if (due[k] && now - (due[k].at || due[k]) > 120e3) due[k] = null;
+      // the board of upcoming birthdays: every `every` minutes from ten past (so not on the greetings' or the news' minute)
+      const bs = !mem && S.bdays.on && (D.birthdays || []).length && slot(S.bdays.every, 10);
+      if (bs && due.bSlot !== bs) { due.bSlot = bs; due.b = now; }
+      for (const k of ['c', 'n', 'b']) if (due[k] && now - (due[k].at || due[k]) > 120e3) due[k] = null;
       if (ov) return;
       // Today's holiday, national day or day of space takes a turn in the celebrations, first (lib/occasions.ts), unless the
       // remote's agent built a screen scheduled for today: then that one is the day's screen, never two.
@@ -663,6 +674,7 @@
         if (pick === o && o) return this.setState({ ov: { kind: 'occasion', id: now, occ: o, until: now + Math.max(20, S.celebrate.secs) * 1000 } });
         if (pick) return this.setState({ ov: { kind: 'celebrate', id: now, person: pick, until: now + S.celebrate.secs * 1000 } });
       }
+      if (due.b) { due.b = null; if ((D.birthdays || []).length) return this.setState({ ov: { kind: 'bdays', id: now, people: D.birthdays, until: now + S.bdays.secs * 1000 } }); }
       if (due.n) { due.n = null; const item = this.nextNews(); if (item) this.setState({ ov: { kind: 'news', id: now, item, secs: S.news.secs, until: now + S.news.secs * 1000 } }); }
     }
     /** After a deploy (/api/live's `build` changed) or nightly around 04:00, reload: never over a full-screen moment or
@@ -693,6 +705,7 @@
       let el = null;
       if (ov && ov.kind === 'launch') el = h(O.LaunchMode, { key: mk, launch: ov.launch });
       if (ov && ov.kind === 'celebrate') el = h(O.Celebration, { key: mk, person: ov.person });
+      if (ov && ov.kind === 'bdays' && O.BirthdayBoard) el = h(O.BirthdayBoard, { key: mk, people: ov.people, today: this.ilParts(serverNow()).iso });
       // The remote covers its preview with its own card during the server's 12:00 show, so the preview skips the video.
       if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: mk, src: CFG.preview && ov.live ? '' : (this.D && this.D.promoVideo) || '/assets/ceremony/promo-v9-1080.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.closeOv() });
       if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: mk, event: ov.event, until: ov.until });

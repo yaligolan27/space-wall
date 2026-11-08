@@ -6,6 +6,7 @@
 //   directorate      ← directorate_events in the next 7 days, and today's that ended (until midnight; the panel's first four); the year's
 //                      occasions are among them (lib/occasions.ts), dressed by their kind (`occ`)
 //   occasions        ← the occasions the wall greets today: a card under the emblem and a full screen (app/src/wall.js)
+//   birthdays        ← the next birthdays (lib/feed.ts birthdayBoard), for the full-screen board of upcoming birthdays
 //   people           ← life_events in their window + birthdays computed from people, next 10 days; each one
 //                      stays to the end of its day and goes at midnight;
 //                      only people on the wall (on_wall) and birthdays they agreed to (show_birthday); a life event
@@ -21,18 +22,27 @@ import { endDate } from './newsletter.js';
 import { occasionGreets, occasionLook } from './occasions.js';
 import sample from '../app/data/feed.json' with { type: 'json' };
 
-export type Settings = { peopleHorizonDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number };
-const DEFAULTS: Settings = { peopleHorizonDays: 10, directorateDays: 7, eventsHorizonDays: 120, launchCount: 4 };
+export type Settings = { peopleHorizonDays: number; directorateDays: number; eventsHorizonDays: number; launchCount: number; birthdaysShown: number };
+const DEFAULTS: Settings = { peopleHorizonDays: 10, directorateDays: 7, eventsHorizonDays: 120, launchCount: 4, birthdaysShown: 3 };
 /** Tiles in the wall's people panel and rows in its events panel. */
 export const PEOPLE_TILES = 6, EVENT_ROWS = 5;
-/** The people panel always has the next BIRTHDAYS_SHOWN birthdays, however far off (and any others in its horizon). */
+/** By default the people panel always has the next BIRTHDAYS_SHOWN birthdays, however far off (and any others in its
+ *  horizon); the remote can change how many (Settings.birthdaysShown, 0 = only those in the horizon). */
 export const BIRTHDAYS_SHOWN = 3;
-/** settings.feed over the defaults. Production's row calls the people horizon lifeEventsHorizonDays. */
-export function feedSettings(raw: any): Settings {
+/** The most birthdays the remote can ask the people panel to keep (design.panel.birthdays). */
+export const BIRTHDAYS_MAX = 6;
+/** settings.feed over the defaults, then the remote's choices for the people panel (wall_state.design.panel).
+ *  Production's row calls the people horizon lifeEventsHorizonDays. */
+export function feedSettings(raw: any, design?: any): Settings {
   const given = { peopleHorizonDays: raw?.lifeEventsHorizonDays, ...raw }, cfg = { ...DEFAULTS };
   for (const k of Object.keys(cfg) as (keyof Settings)[]) { const v = Number(given[k] ?? NaN); if (Number.isFinite(v)) cfg[k] = v; }
+  const b = Number(design?.panel?.birthdays ?? NaN);
+  if (Number.isInteger(b) && b >= 0 && b <= BIRTHDAYS_MAX) cfg.birthdaysShown = b;
   return cfg;
 }
+/** The full-screen board of upcoming birthdays (overlays.js BirthdayBoard): at most BOARD_MAX, from today to BOARD_DAYS
+ *  ahead; with none so near, the next BOARD_MIN however far, so the board is never empty while anyone has a birthday. */
+export const BOARD_MAX = 6, BOARD_DAYS = 30, BOARD_MIN = 3;
 
 export const DOW = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
 export const MON = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
@@ -105,6 +115,8 @@ export const lifeQuery = (s: Db, today: string) => s.from('life_events').select(
 /** The people whose birthdays the wall celebrates. */
 export const rosterQuery = (s: Db) => s.from('people').select('id,display_name,rank,unit,photo_url,birthday')
   .eq('active', true).eq('on_wall', true).eq('show_birthday', true).not('birthday', 'is', null);
+/** The remote's design (its choices for the people panel among them). */
+export const designQuery = (s: Db) => s.from('wall_state').select('design').eq('id', 1).maybeSingle();
 /** Directorate events that end today or later (one without an end time lasts an hour) and start in the next two months:
  *  one that ended today stays on the wall until midnight (eventGone). */
 export const eventsQuery = (s: Db, now: Date, today: string) => s.from('directorate_events').select('*').eq('approved', true)
@@ -131,16 +143,25 @@ export function peopleTiles(life: any[], roster: any[], today: string, cfg: Sett
     all.push({ ...lifeCard(e, p, today), sort: e.event_date, until: windowed ? lifeWindow(e).until : e.event_date,
       ref: { kind: 'life', id: e.id, personId: e.person_id || null } });
   }
-  // Birthdays: the next BIRTHDAYS_SHOWN of the year, however far off, and any others inside the horizon.
+  // Birthdays: the next few of the year (cfg.birthdaysShown), however far off, and any others inside the horizon.
   const bdays = roster.map(p => ({ p, next: nextYearly(p.birthday.slice(5), from, 366) }))
     .filter((b): b is { p: any; next: string } => !!b.next && !seen.has(`birthday|${b.p.display_name}|${b.next}`))
     .sort((a, b) => a.next.localeCompare(b.next));
   bdays.forEach(({ p, next }, i) => {
-    if (i >= BIRTHDAYS_SHOWN && next > until) return;
+    if (i >= cfg.birthdaysShown && next > until) return;
     all.push({ ...birthdayCard(p, next, today), sort: next, until: next, ref: { kind: 'bday', personId: p.id } });
   });
   all.sort((a, b) => Math.abs(dayDiff(today, a.sort)) - Math.abs(dayDiff(today, b.sort)) || a.sort.localeCompare(b.sort));
   return { shown: all.slice(0, PEOPLE_TILES), waiting: all.slice(PEOPLE_TILES), doubles };
+}
+
+/** The birthdays on the full-screen board: the people's next birthdays from today (nearest first), `ids` = only these
+ *  people (the remote's choice), else as BOARD_MAX/BOARD_DAYS/BOARD_MIN say. The wall words the day itself. */
+export function birthdayBoard(roster: any[], today: string, ids?: string[] | null) {
+  const all = roster.filter(p => !ids || ids.includes(p.id)).map(p => ({ p, next: nextYearly(p.birthday.slice(5), today, 366) }))
+    .filter((b): b is { p: any; next: string } => !!b.next).sort((a, b) => a.next.localeCompare(b.next) || String(a.p.display_name).localeCompare(String(b.p.display_name)));
+  const near = ids ? all : all.filter((b, i) => i < BOARD_MIN || dayDiff(today, b.next) <= BOARD_DAYS);
+  return near.slice(0, BOARD_MAX).map(({ p, next }) => ({ key: p.id as string, name: displayName(p), photo: p.photo_url || null, on: next, date: shortDate(next), color: LIFE.birthday.color }));
 }
 
 /** When a directorate event ends: its end time, else an hour after it starts. */
@@ -159,9 +180,9 @@ export function eventTiles(rows: any[], t: number, today: string, cfg: Settings)
 /** The people and events panels as the wall shows them now, with what each tile is: for the remote. */
 export async function wallPanels(now = new Date()) {
   const s = db(), today = isoDateIL(now);
-  const [setR, lifeR, rosterR, dirR] = await Promise.all([
-    s.from('settings').select('value').eq('key', 'feed').maybeSingle(), lifeQuery(s, today), rosterQuery(s), eventsQuery(s, now, today)]);
-  const cfg = feedSettings((must(setR, 'settings') as { value?: unknown } | null)?.value);
+  const [setR, lifeR, rosterR, dirR, stR] = await Promise.all([
+    s.from('settings').select('value').eq('key', 'feed').maybeSingle(), lifeQuery(s, today), rosterQuery(s), eventsQuery(s, now, today), designQuery(s)]);
+  const cfg = feedSettings((must(setR, 'settings') as { value?: unknown } | null)?.value, (must(stR, 'wall_state') as { design?: unknown } | null)?.design);
   return {
     today,
     people: peopleTiles(must(lifeR, 'life_events') as any[], must(rosterR, 'people') as any[], today, cfg),
@@ -224,7 +245,7 @@ export async function buildFeed() {
   const launchQuery = () => s.from('launches').select('*').gte('net', new Date(t - 3 * 3600e3).toISOString()).order('net').limit(MAX_LAUNCHES);
 
   // All at once. The settings only narrow what comes back, so they are applied afterwards.
-  const [settingsR, issueR, dirR, lifeR, rosterR, indR, launchR, newestR, runR] = await Promise.all([
+  const [settingsR, issueR, dirR, lifeR, rosterR, indR, launchR, newestR, runR, stR] = await Promise.all([
     s.from('settings').select('key,value,updated_at'),
     s.from('newsletter_issues').select('content,imported_at').order('issue_date', { ascending: false }).limit(1),
     eventsQuery(s, now, today), lifeQuery(s, today), rosterQuery(s),
@@ -233,9 +254,11 @@ export async function buildFeed() {
     s.from('launches').select('updated_at').order('updated_at', { ascending: false }).limit(1),
     // freshness: the newest successful update of any kind
     s.from('agent_runs').select('finished_at').eq('status', 'ok').order('finished_at', { ascending: false }).limit(1),
+    designQuery(s),
   ]);
   const settingsRows = must(settingsR, 'settings') as { key: string; value: any; updated_at?: string }[];
-  const cfg = feedSettings(settingsRows.find(r => r.key === 'feed')?.value);
+  // (the design is only the panel's choices here: a failed read keeps the defaults rather than failing the feed)
+  const cfg = feedSettings(settingsRows.find(r => r.key === 'feed')?.value, (stR.data as { design?: unknown } | null)?.design);
 
   // ---- newsletter part
   const issueRows = must(issueR, 'newsletter') as any[];
@@ -267,8 +290,11 @@ export async function buildFeed() {
   });
 
   // ---- people: explicit life events + computed birthdays, the panel's six tiles
-  const peopleOut = peopleTiles(must(lifeR, 'life_events') as any[], must(rosterR, 'people') as any[], today, cfg).shown
+  const roster = must(rosterR, 'people') as any[];
+  const peopleOut = peopleTiles(must(lifeR, 'life_events') as any[], roster, today, cfg).shown
     .map(({ sort, until, ref, ...p }) => p);
+  // the upcoming birthdays' full-screen board, which the wall brings up on the schedules' clock (no ids: public)
+  const birthdays = birthdayBoard(roster, today).map(({ key, ...b }) => b);
 
   // ---- ticker: industry events from the database, then the newsletter's items that are not the same event
   const evUntil = addDays(today, cfg.eventsHorizonDays);
@@ -310,6 +336,7 @@ export async function buildFeed() {
     directorate,
     occasions,
     people: peopleOut,
+    birthdays,
     promoVideo: '/assets/ceremony/promo-v9-1080.mp4',   // the promo video (since 2026-11-04 the final V9 cut, 4:15)
   };
 }

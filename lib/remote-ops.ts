@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { db, must } from './db.js';
 import { addDays, dayDiff, isoDateIL, nextYearly, shortDate, timeIL } from './dates.js';
-import { LIFE_LEAD_MAX, birthdayCard, buildFeed, displayName, eventEnd, greetsToday, lifeCard, lifeWindow, wallPanels, type PeopleTile } from './feed.js';
+import { BIRTHDAYS_MAX, LIFE_LEAD_MAX, birthdayBoard, birthdayCard, buildFeed, displayName, eventEnd, greetsToday, lifeCard, lifeWindow, rosterQuery, wallPanels, type PeopleTile } from './feed.js';
 import { DATE, TIME, PERSON_KINDS, NewsletterContent, assertRealDate, ilToIso, importNewsletter } from './wall-ops.js';
 import { NEWSLETTER_SITE, latestFromArchive, parseIssue } from './newsletter.js';
 import { storeNewsletterImages } from './newsletter-images.js';
@@ -134,6 +134,8 @@ export const MOMENTS0 = {
   fx: true,                                         // the shared entry and exit transition
   news: { on: true, every: 30, secs: 30 },          // a space news item, every `every` minutes (at a quarter past and to)
   celebrate: { on: true, every: 30, secs: 14, manual: 60 },   // personal ads (birthdays, joys); manual: shown from the remote
+  // the board of upcoming birthdays (overlays.js BirthdayBoard), every `every` minutes at ten past (and on from there)
+  bdays: { on: true, every: 60, secs: 30, manual: 60 },
   event: { on: true, every: 0, secs: 60 },          // directorate ads while their event runs: every 0 = the whole time
   noon: { at: '12:00' },                            // the promo video's time
   launch: { on: true, lead: 10 },                   // launch mode, `lead` minutes before a Go launch
@@ -148,6 +150,7 @@ export const MomentsPatch = z.object({
   fx: on,
   news: z.object({ on, every: int(5, 240), secs: int(10, 300) }).partial().strict(),
   celebrate: z.object({ on, every: int(5, 240), secs: int(8, 300), manual: int(10, 600) }).partial().strict(),
+  bdays: z.object({ on, every: int(15, 480), secs: int(10, 300), manual: int(10, 600) }).partial().strict(),
   event: z.object({ on, every: int(0, 240).refine(v => v === 0 || v >= 5, 'כל 5 דקות לפחות'), secs: int(15, 1800) }).partial().strict(),
   noon: z.object({ at: TIME }).partial().strict(),
   launch: z.object({ on, lead: int(2, 30) }).partial().strict(),
@@ -592,6 +595,24 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     }
     await record(who, 'מודעה אישית על כל המסך: ' + displayName(p), [await patchState({ takeover: celebrateTakeover(card, p.id || null, type, note, await momentsNow(), lifeId || null) }, who)]);
   },
+  /** The board of upcoming birthdays on the whole wall: the chosen people (personIds), else the next ones (lib/feed.ts
+   *  birthdayBoard). Only people on the wall whose birthday may be celebrated there. */
+  async showBirthdays(a, who) {
+    const { personIds } = z.object({ personIds: z.array(UUID).min(1).max(6, 'עד 6 אנשים').optional() }).parse(a || {});
+    const today = isoDateIL(), roster = must(await rosterQuery(db()), 'people') as Row[];
+    const cards = birthdayBoard(roster, today, personIds || null);
+    if (!cards.length) throw new Error(personIds ? 'לאנשים שנבחרו אין יום הולדת שאפשר להציג בצג' : 'אין ברשימת האנשים ימי הולדת להצגה');
+    const now = Date.now(), M = await momentsNow();
+    await record(who, 'ימי הולדת קרובים על כל המסך: ' + cards.map(c => c.name).join(', ').slice(0, 120),
+      [await patchState({ takeover: { id: 'rt:' + now, kind: 'bdays', people: cards, at: new Date(now).toISOString(), until: new Date(now + M.bdays.manual * 1e3).toISOString() } }, who)]);
+  },
+  /** How many of the next birthdays the people panel always keeps, however far off (lib/feed.ts peopleTiles). */
+  async panelBirthdays(a, who) {
+    const { count } = z.object({ count: z.number().int().min(0).max(BIRTHDAYS_MAX) }).parse(a);
+    const design = (await wallState()).design || {};
+    await record(who, count ? 'בפאנל האנשים: ' + count + ' ימי ההולדת הקרובים' : 'בפאנל האנשים: ימי הולדת רק ב-10 הימים הקרובים',
+      [await patchState({ design: { ...design, panel: { ...(design.panel || {}), birthdays: count } } }, who)]);
+  },
   async showEvent(a, who) {
     const { eventId } = z.object({ eventId: UUID }).parse(a);
     const e = await rowOf('directorate_events', eventId);
@@ -715,6 +736,10 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
     const undo: (UndoOp | null)[] = [];
     const st = await wallState();
     if (st.takeover?.kind === 'celebrate' && st.takeover.personId === personId && !st.takeover.lifeId) undo.push(await patchState({ takeover: null }, who));
+    if (st.takeover?.kind === 'bdays' && (st.takeover.people || []).some((c: Row) => c.key === personId)) {
+      const rest = st.takeover.people.filter((c: Row) => c.key !== personId);
+      undo.push(await patchState({ takeover: rest.length ? { ...st.takeover, people: rest } : null }, who));
+    }
     must(await db().from('people').update({ show_birthday: false }).eq('id', personId).select('id'), 'hide birthday');
     undo.push({ op: 'put', table: 'people', row: prev });
     await record(who, 'יום ההולדת של ' + prev.display_name + ' לא יוצג בצג', undo);
@@ -926,8 +951,8 @@ export const ACTIONS: Record<string, (a: any, who: string) => Promise<unknown>> 
   },
   async resetDesign(_a, who) {
     // The news items added from the remote and the schedules live in design too (design.news, design.moments), but they aren't the design.
-    const { news, moments, scenes, decor, shortcuts, ceremony } = (await wallState()).design || {};
-    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: { ...(news?.length ? { news } : {}), ...(moments ? { moments } : {}), ...(ceremony ? { ceremony } : {}),
+    const { news, moments, scenes, decor, shortcuts, ceremony, panel } = (await wallState()).design || {};
+    await record(who, 'העיצוב אופס לברירת המחדל', [await patchState({ design: { ...(news?.length ? { news } : {}), ...(moments ? { moments } : {}), ...(ceremony ? { ceremony } : {}), ...(panel ? { panel } : {}),
       ...(scenes?.length ? { scenes } : {}), ...(decor ? { decor } : {}), ...(shortcuts?.length ? { shortcuts } : {}) } }, who)]);
   },
   /** A news item from the remote (the agent's suggestion, after the operator approved it): first in the newsletter
