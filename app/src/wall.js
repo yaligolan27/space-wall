@@ -510,7 +510,7 @@
       const sep = url.includes('?') ? '&' : '?';
       const res = await fetch(url + sep + 't=' + Date.now() + (CFG.key ? '&key=' + encodeURIComponent(CFG.key) : '') + (EN() ? '&lang=en' : ''), { cache: 'no-store', signal: timeout(ms) });
       if (!res.ok) throw Object.assign(new Error('HTTP ' + res.status), { status: res.status });
-      // The server names the site's own files from the root ("/assets/ceremony/promo-v9-1080.mp4"); on a site served under a path
+      // The server names the site's own files from the root ("/assets/ceremony/promo-v9b-1080.mp4"); on a site served under a path
       // (GitHub Pages: /space-wall/) scripts/build-pages.mjs gives ASSETS that prefix.
       const text = await res.text(), ASSETS = '/assets/';
       return ASSETS === '/' + 'assets/' ? text : text.replace(/"\/assets\//g, '"' + ASSETS);
@@ -694,7 +694,7 @@
       if (ov && ov.kind === 'launch') el = h(O.LaunchMode, { key: mk, launch: ov.launch });
       if (ov && ov.kind === 'celebrate') el = h(O.Celebration, { key: mk, person: ov.person });
       // The remote covers its preview with its own card during the server's 12:00 show, so the preview skips the video.
-      if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: mk, src: CFG.preview && ov.live ? '' : (this.D && this.D.promoVideo) || '/assets/ceremony/promo-v9-1080.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.closeOv() });
+      if (ov && ov.kind === 'noon') el = h(O.NoonShow, { key: mk, src: CFG.preview && ov.live ? '' : (this.D && this.D.promoVideo) || '/assets/ceremony/promo-v9b-1080.mp4', logo: '/assets/logo-mark.png', muted: CFG.preview, onDone: () => this.closeOv() });
       if (ov && ov.kind === 'event') el = h(O.EventTakeover, { key: mk, event: ov.event, until: ov.until });
       // Keyed per welcome scene, not per remote press: new words for a welcome already up keep its emblem.
       if (wlUp) el = h(O.Welcome, { key: 'welcome' + this._wlKey, guest: ov.guest, fx: CFG.ambientFx, preview: CFG.preview, leaving: ov.leaving || 0, woke: !!(wl && wl.woke), embShown: !!(wl && wl.embShown),
