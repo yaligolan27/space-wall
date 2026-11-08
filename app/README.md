@@ -30,7 +30,7 @@ three seconds still. A double-click or the F key does the same. Browser full scr
 
 **Moments** take over the whole screen: launch mode for the last ten minutes before any listed launch, a
 personal celebration with fireworks every half hour at :00 and :30 (cycling through the people panel), the 12:00 show
-(a 10-second countdown around the logo, then the promo video, `assets/ceremony/promo-v9-1080.mp4`, with sound), and an important directorate event
+(a 10-second countdown around the logo, then the promo video, `assets/ceremony/promo-v9b-1080.mp4`, with sound), and an important directorate event
 ("עכשיו במנהלת") while it runs. Moments from the remote take precedence over launch mode.
 
 ## URL options
@@ -75,7 +75,7 @@ Example for the lobby: `https://yaligolan27.github.io/space-wall/?fx=1&noon=1`.
   "directorate": [{ "day": "27", "dow": "א׳", "mon": "ספט׳", "time": "09:00", "name": "…", "place": "…", "img": null }],
   "people": [{ "type": "יום הולדת", "color": "#e9b872", "name": "…", "line": "…", "date": "27.9", "photo": null, "celebrate": true }],
   "tracked":  [ … ],                           // SSA objects, reserved for a future panel
-  "promoVideo": "/assets/ceremony/promo-v9-1080.mp4"
+  "promoVideo": "/assets/ceremony/promo-v9b-1080.mp4"
 }
 ```
 

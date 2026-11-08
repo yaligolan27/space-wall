@@ -337,6 +337,6 @@ export async function buildFeed() {
     occasions,
     people: peopleOut,
     birthdays,
-    promoVideo: '/assets/ceremony/promo-v9-1080.mp4',   // the promo video (since 2026-11-04 the final V9 cut, 4:15)
+    promoVideo: '/assets/ceremony/promo-v9b-1080.mp4',   // the promo video: the final V9 cut (4:10; 2026-11-08 without the opening siren or the stray second end card)
   };
 }
