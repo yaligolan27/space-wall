@@ -38,7 +38,7 @@
   const CER_TX = [['eyebrow', 'שורה עליונה', 'טקס חנוכת המשרדים החדשים', 1], ['title', 'כותרת', 'מנהלת החלל', 0], ['line', 'שורה מתחת לכותרת', 'הבית החדש במידטאון', 1],
     ['honor', 'אורח הכבוד (מתחת לסרט)', 'במעמד ראש מפא״ת', 1], ['tag', 'כותרת אחרי שהדלתות נפתחות', 'עידן חדש', 0], ['tagLine', 'שורה מתחתיה', 'לחלל הישראלי', 1],
     ['welcome', 'כותרת הסיום', 'ברוכים הבאים', 0], ['welcomeLine', 'שורה מתחת לכותרת הסיום', 'לבית החדש של מנהלת החלל', 1], ['soon', 'מסך ההמתנה', 'הטקס יתחיל בקרוב', 0]];
-  const CER_PROMO_SECS = 255.4;
+  const CER_PROMO_SECS = 250;
   /** A video's length in seconds (read from its metadata), or 0. */
   const videoSecs = (src) => new Promise((res) => {
     const v = document.createElement('video'); let done = false;
@@ -1432,7 +1432,7 @@
         // the ribbon-cutting sheet
         cerPh, cerStandby: () => this.cer('standby'), cerGo: () => this.cer('go'),
         cerVideoLine: (() => { const c = design.ceremony || {}; return c.video ? 'סרטון שהועלה לטקס' + (c.secs ? ' · ' + mmss(c.secs) : '') : 'סרטון התדמית של הצג · ' + mmss(CER_PROMO_SECS); })(),
-        cerCustom: !!(design.ceremony && design.ceremony.video), cerVideoHref: (design.ceremony && design.ceremony.video) || '/assets/ceremony/promo-v9-1080.mp4',
+        cerCustom: !!(design.ceremony && design.ceremony.video), cerVideoHref: (design.ceremony && design.ceremony.video) || '/assets/ceremony/promo-v9b-1080.mp4',
         cerPromo: () => this.run('ceremonySet', { patch: { video: null }, label: 'חזרה לסרטון התדמית' }, 'הטקס יציג את סרטון התדמית של הצג').catch(() => {}),
         cerPick: () => { if (this.cerFileRef.current) this.cerFileRef.current.click(); }, cerFile: (e) => { const fl = e.target.files && e.target.files[0]; e.target.value = ''; this.uploadCerVideo(fl); },
         cerUp: f.cerUp == null ? '' : f.cerUp > 0 ? 'מעלה… ' + Math.round(f.cerUp * 100) + '%' : 'בודק את הסרטון…',
